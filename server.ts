@@ -1867,40 +1867,141 @@ app.get('/api/system/emails', (req, res) => {
   return res.json({ emails });
 });
 
-// Audio transcription endpoint for microphone recordings or audio uploads
+// Audio transcription endpoint for microphone recordings or audio uploads with robust stability guardrails
+const SUPPORTED_AUDIO_FORMATS = new Set([
+  'audio/webm',
+  'audio/webm;codecs=opus',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+  'audio/mp3',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/m4a',
+  'audio/x-m4a',
+  'audio/aac',
+  'audio/flac',
+  'audio/mp4',
+  'video/webm',
+]);
+
 app.post('/api/transcribe', async (req, res) => {
+  const startTime = Date.now();
   try {
     const { audioBase64, mimeType = 'audio/webm' } = req.body;
 
-    if (!audioBase64) {
-      return res.status(400).json({ error: 'No audio data provided' });
+    // 1. Guardrail: Validate payload existence
+    if (!audioBase64 || typeof audioBase64 !== 'string') {
+      console.warn('[STT_WARNING] Validation error: Missing or empty audio payload');
+      return res.status(400).json({ 
+        error: 'No audio data provided in transcription request', 
+        errorCode: 'MISSING_AUDIO_PAYLOAD' 
+      });
     }
+
+    // 2. Guardrail: Validate minimum audio payload size (> 100 bytes)
+    if (audioBase64.trim().length < 100) {
+      console.warn('[STT_WARNING] Validation error: Audio payload too small (<100 bytes)');
+      return res.status(400).json({ 
+        error: 'Audio payload is empty or contains no detectable sound buffer', 
+        errorCode: 'AUDIO_PAYLOAD_TOO_SMALL' 
+      });
+    }
+
+    // 3. Guardrail: Validate maximum audio payload size (max 25MB ~ 35MB base64)
+    const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
+    if (audioBase64.length > MAX_BASE64_LENGTH) {
+      console.warn(`[STT_WARNING] Validation error: Audio payload exceeds 25MB (${audioBase64.length} chars)`);
+      return res.status(413).json({ 
+        error: 'Audio file size exceeds the 25MB limit. Please provide a shorter voice clip.', 
+        errorCode: 'PAYLOAD_TOO_LARGE' 
+      });
+    }
+
+    // 4. Guardrail: Validate audio format/MIME type
+    const rawMime = (mimeType || 'audio/webm').trim().toLowerCase();
+    if (!SUPPORTED_AUDIO_FORMATS.has(rawMime) && !rawMime.startsWith('audio/')) {
+      console.warn(`[STT_WARNING] Validation error: Unsupported audio format "${rawMime}"`);
+      return res.status(415).json({
+        error: `Unsupported audio format "${rawMime}". Supported formats: WebM, WAV, MP3, M4A, OGG, AAC, FLAC.`,
+        errorCode: 'UNSUPPORTED_AUDIO_FORMAT',
+      });
+    }
+
+    // Clean MIME type for Google GenAI inlineData (strip codec parameters if present)
+    let cleanMime = rawMime.split(';')[0].trim();
+    if (cleanMime === 'audio/x-m4a' || cleanMime === 'audio/m4a') cleanMime = 'audio/mp4';
+    if (cleanMime === 'audio/x-wav' || cleanMime === 'audio/wave') cleanMime = 'audio/wav';
 
     const audioPart = {
       inlineData: {
-        mimeType: mimeType || 'audio/webm',
+        mimeType: cleanMime,
         data: audioBase64,
       },
     };
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-transcribe',
-      contents: {
-        parts: [
-          audioPart,
-          {
-            text: 'Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates. Do not add conversational commentary.',
+    // 5. Model Execution with multi-model fallback (Gemini 2.5 Flash -> Gemini 3.5 Flash Lite -> Gemini 2.5 Pro)
+    const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'];
+    let lastModelError: any = null;
+    let transcriptText = '';
+
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              audioPart,
+              {
+                text: 'Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates. Do not add conversational commentary.',
+              },
+            ],
           },
-        ],
-      },
+        });
+
+        if (response && response.text) {
+          transcriptText = response.text.trim();
+          break; // Successfully transcribed
+        }
+      } catch (modelErr: any) {
+        lastModelError = modelErr;
+        const errCode = modelErr?.status || modelErr?.code || modelErr?.name || 'MODEL_INVOCATION_ERROR';
+        console.warn(`[STT_FAILOVER] Model "${modelName}" failed with code: ${errCode}. Attempting candidate fallback...`);
+      }
+    }
+
+    if (!transcriptText && lastModelError) {
+      throw lastModelError;
+    }
+
+    const durationMs = Date.now() - startTime;
+    console.log(`[STT_SUCCESS] Audio successfully transcribed (${transcriptText.length} chars, ${durationMs}ms)`);
+
+    return res.json({ 
+      transcript: transcriptText,
+      durationMs,
+      status: 'success'
+    });
+  } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
+    const errorCode = (err as any)?.status || (err as any)?.code || (err as any)?.name || 'TRANSCRIPTION_API_FAILED';
+    const errorMessage = err instanceof Error ? err.message : 'Unknown transcription exception';
+
+    // Server-side logging capturing exact speech-to-text failure code for administrative troubleshooting
+    console.error('[STT_FAILURE_CODE]', {
+      timestamp: new Date().toISOString(),
+      errorCode,
+      errorMessage,
+      durationMs,
+      headers: req.headers['user-agent'],
     });
 
-    const transcript = response.text || '';
-    return res.json({ transcript: transcript.trim() });
-  } catch (err: unknown) {
-    console.error('Error transcribing audio:', err);
-    const message = err instanceof Error ? err.message : 'Failed to transcribe audio';
-    return res.status(500).json({ error: message });
+    return res.status(500).json({ 
+      error: 'Transcription API connection dropped. Your spoken text has been preserved below for manual review or retry.',
+      errorCode: String(errorCode),
+      details: errorMessage,
+      preserved: true
+    });
   }
 });
 

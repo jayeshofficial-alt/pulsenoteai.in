@@ -536,6 +536,7 @@ export default function App() {
               onChangeResponseMode={setResponseMode}
               isProcessing={isProcessing}
               onTransform={handleTransform}
+              onShowToast={addToast}
             />
           </section>
 
