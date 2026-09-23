@@ -10,6 +10,27 @@ export interface PresetSample {
 
 export const PRESET_SAMPLES: PresetSample[] = [
   {
+    id: 'univ-1',
+    industry: 'general',
+    title: 'Deep Search: Solid-State Battery Supply Chains',
+    preview: 'Open-domain inquiry into lithium-sulfur battery bottlenecks and scaling roadmap...',
+    rawText: `We need an authoritative strategic evaluation of current commercial bottlenecks in scaling solid-state lithium-sulfur battery manufacturing. Analyze lithium sourcing constraints, electrolyte membrane degradation issues, and cost parity targets vs LFP cells. Provide immediate solution steps and online industry benchmark standards.`,
+  },
+  {
+    id: 'img-1',
+    industry: 'general',
+    title: 'Multi-Modal: Cyberpunk Neon Metropolis (Image Prompt)',
+    preview: 'Generate an ultra-detailed cinematic photograph of a rain-soaked futuristic metropolis...',
+    rawText: `Create a cinematic photograph of a futuristic cyberpunk metropolis in heavy rain at night. Neon signs reflecting off wet asphalt streets, flying vehicles weaving between holographic skyscrapers, atmospheric fog and volumetric steam vents, shot on 35mm lens with shallow depth of field.`,
+  },
+  {
+    id: 'vid-1',
+    industry: 'general',
+    title: 'Multi-Modal: Autonomous Drone Delivery (Video Storyboard)',
+    preview: 'Generate a video scene of a sleek delivery drone navigating city canyons at sunset...',
+    rawText: `Generate a video scene of an aerodynamic high-tech delivery drone flying through a sunset city canyon. Establish shot with drone taking off, medium tracking shot following its flight path past glass high-rises, and final hero close-up as it delivers package onto a rooftop landing pad with warm golden hour lighting and lens flares.`,
+  },
+  {
     id: 'med-1',
     industry: 'medical',
     title: 'Dr. Exam Memo: Adult Asthma Exacerbation',
@@ -89,6 +110,19 @@ Action register: CFO Carlos to present revised 2027 burn-rate model to the Board
 ];
 
 export const INDUSTRY_CONFIGS = [
+  {
+    id: 'general',
+    name: 'Universal Search & Multimodal',
+    shortName: 'Universal Intelligence',
+    tagline: 'Open-domain reasoning, multimodal image & video generation, deep search',
+    icon: 'Sparkles',
+    color: '#8b5cf6',
+    bgGlow: 'rgba(139, 92, 246, 0.15)',
+    badgeBg: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    badgeText: 'text-purple-400',
+    templateFormat: 'Executive Summary • Structured Breakdown • Strategic Roadmap • Web Insights',
+    keyFields: ['Executive Summary', 'Core Insights', 'Execution Roadmap', 'Web Grounding', 'Action Register'],
+  },
   {
     id: 'medical',
     name: 'Medical / Clinical',

@@ -1,6 +1,8 @@
-export type TargetIndustry = 'medical' | 'real_estate' | 'software' | 'executive';
+export type TargetIndustry = 'general' | 'medical' | 'real_estate' | 'software' | 'executive';
 
 export type ToneSetting = 'concise' | 'standard' | 'detailed';
+
+export type DynamicResponseMode = 'auto' | 'research' | 'productivity' | 'problem_solving';
 
 export interface ActionItem {
   task: string;
@@ -28,6 +30,37 @@ export interface SearchSource {
   snippet?: string;
 }
 
+export interface ImageGenerationParams {
+  prompt: string;
+  style: string;
+  lighting: string;
+  composition: string;
+  aspectRatio: string;
+  colorPalette?: string[];
+  seed?: number;
+  previewUrl?: string;
+}
+
+export interface VideoStoryboardScene {
+  shotNumber: number;
+  duration: string;
+  camera: string;
+  visualAction: string;
+  audioSFX: string;
+}
+
+export interface VideoGenerationParams {
+  title: string;
+  targetDuration: string;
+  aspectRatio: string;
+  cameraMotion: string;
+  visualStyle: string;
+  lighting: string;
+  audioPrompt: string;
+  scenes: VideoStoryboardScene[];
+  modelPromptVeoSora: string;
+}
+
 export interface TransformedReport {
   id: string;
   timestamp: number;
@@ -35,6 +68,11 @@ export interface TransformedReport {
   title: string;
   rawInput: string;
   markdownReport: string;
+  mediaType?: 'text' | 'image' | 'video';
+  imageParams?: ImageGenerationParams;
+  videoParams?: VideoGenerationParams;
+  executiveSummary?: string; // 1-2 sentence direct answer or synthesis right at the top
+  responseMode?: 'research' | 'productivity' | 'problem_solving';
   immediateSolution?: string;
   bestOnlinePractices?: string;
   actionableStrategicPlan?: string;
@@ -46,6 +84,8 @@ export interface TransformedReport {
   complianceDisclaimer?: string;
   isVague?: boolean;
   clarificationRequest?: string;
+  clarifyingQuestions?: string[];
+  defaultWorkingDraft?: string;
 }
 
 export interface IndustryConfig {

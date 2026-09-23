@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { TargetIndustry, ToneSetting } from '../types';
+import { TargetIndustry, ToneSetting, DynamicResponseMode } from '../types';
 import { INDUSTRY_CONFIGS, PRESET_SAMPLES, PresetSample } from '../data/presets';
 import { AudioRecorder } from './AudioRecorder';
 import { 
@@ -12,7 +12,8 @@ import {
   Sliders, 
   CheckCircle2, 
   Zap,
-  Tag
+  Tag,
+  Compass
 } from 'lucide-react';
 
 interface InputPanelProps {
@@ -23,6 +24,8 @@ interface InputPanelProps {
   onChangeTone: (tone: ToneSetting) => void;
   customContext: string;
   onChangeCustomContext: (val: string) => void;
+  responseMode?: DynamicResponseMode;
+  onChangeResponseMode?: (mode: DynamicResponseMode) => void;
   isProcessing: boolean;
   onTransform: () => void;
 }
@@ -35,6 +38,8 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   onChangeTone,
   customContext,
   onChangeCustomContext,
+  responseMode = 'auto',
+  onChangeResponseMode,
   isProcessing,
   onTransform,
 }) => {
@@ -194,9 +199,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({
         </div>
       </div>
 
-      {/* Expandable Settings: Tone & Custom Organization Context */}
+      {/* Expandable Settings: Tone, Response Mode & Custom Organization Context */}
       {showSettings && (
         <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col gap-3 animate-in fade-in slide-in-from-top-1">
+          {/* Top Row: Tone & Context */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             {/* Tone Selector */}
             <div className="flex items-center gap-2">
@@ -230,6 +236,36 @@ export const InputPanel: React.FC<InputPanelProps> = ({
               />
             </div>
           </div>
+
+          {/* Bottom Row: Dynamic Gemini Response Mode */}
+          {onChangeResponseMode && (
+            <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Response Mode:</span>
+              </div>
+              <div className="flex items-center p-0.5 rounded-lg bg-slate-950 border border-slate-800 flex-wrap gap-1">
+                {[
+                  { id: 'auto', label: 'Adaptive Auto' },
+                  { id: 'productivity', label: 'Productivity' },
+                  { id: 'research', label: 'Research' },
+                  { id: 'problem_solving', label: 'Problem-Solving' },
+                ].map((modeItem) => (
+                  <button
+                    key={modeItem.id}
+                    onClick={() => onChangeResponseMode(modeItem.id as DynamicResponseMode)}
+                    className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+                      responseMode === modeItem.id
+                        ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {modeItem.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

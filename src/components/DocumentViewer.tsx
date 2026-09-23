@@ -24,7 +24,13 @@ import {
   Globe,
   Compass,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Image as ImageIcon,
+  Film,
+  Palette,
+  Layers,
+  Video,
+  Play
 } from 'lucide-react';
 
 interface DocumentViewerProps {
@@ -47,10 +53,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedMarkdown, setEditedMarkdown] = useState(report.markdownReport);
+  const [copiedMediaPrompt, setCopiedMediaPrompt] = useState<string | null>(null);
 
   const activeConfig = INDUSTRY_CONFIGS.find((c) => c.id === report.industry) || INDUSTRY_CONFIGS[0];
 
-  // Daily Free Limit Reached Upgrade View
+  // Daily Free Limit Reached Upgrade View (Verbatim Enforcement)
   if ((report as any).isLimitReached || report.title === 'Daily Free Limit Reached') {
     return (
       <div className="w-full bg-slate-900/90 border-2 border-amber-500/50 rounded-3xl p-6 sm:p-8 flex flex-col items-center text-center gap-5 shadow-2xl animate-in fade-in">
@@ -63,10 +70,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             Monetization Guardrail Triggered
           </span>
           <h3 className="text-xl font-black text-white">
-            Daily Free Limit Reached (3/3 Prompts Used)
+            🛑 Daily Free Limit Reached (3/3 Prompts Used)
           </h3>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            You've reached your free limit for today. To unlock <strong>unlimited daily prompts</strong>, priority processing, and advanced industry templates, upgrade to Pro!
+            Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
           </p>
         </div>
 
@@ -74,8 +81,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md text-left">
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
             <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pro Monthly</div>
-            <div className="text-lg font-black text-white">₹299 <span className="text-xs text-slate-400 font-normal">/ mo (~$3.99)</span></div>
-            <div className="text-[11px] text-slate-400 mt-1">Cheaper than $20 market standard!</div>
+            <div className="text-lg font-black text-white">₹299 <span className="text-xs text-slate-400 font-normal">/ month (~$3.99)</span></div>
+            <div className="text-[11px] text-slate-400 mt-1">Unlimited prompts & media</div>
           </div>
 
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-amber-500/40 relative">
@@ -83,8 +90,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               Save 45%
             </span>
             <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pro Annual</div>
-            <div className="text-lg font-black text-white">₹1,999 <span className="text-xs text-slate-400 font-normal">/ yr (~₹166/mo)</span></div>
-            <div className="text-[11px] text-slate-400 mt-1">Best value for everyday professionals</div>
+            <div className="text-lg font-black text-white">₹1,999 <span className="text-xs text-slate-400 font-normal">/ year (~₹166/mo)</span></div>
+            <div className="text-[11px] text-slate-400 mt-1">Save 45% on annual billing</div>
           </div>
         </div>
 
@@ -93,11 +100,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           onClick={onOpenPricing}
           className="w-full max-w-md py-4 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
         >
-          <span>👉 Tap Here to Upgrade via Secure Checkout</span>
+          <span>👉 Pay via Secure UPI (wagh.jayesh@oksbi), Credit/Debit Card, or Net Banking</span>
         </button>
 
         <div className="text-[11px] text-slate-400 font-mono">
-          Accepted: Direct UPI settlement to <strong className="text-emerald-400">wagh.jayesh@oksbi</strong>, Credit/Debit Cards, Net Banking
+          👉 Pay via Secure UPI (<strong className="text-emerald-400">wagh.jayesh@oksbi</strong>), Credit/Debit Card, or Net Banking.
         </div>
       </div>
     );
@@ -175,30 +182,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   };
 
-  // Guardrail state: input was too vague
-  if (report.isVague) {
-    return (
-      <div className="w-full bg-amber-950/30 border border-amber-500/40 rounded-2xl p-6 sm:p-8 flex flex-col items-center text-center gap-4 animate-in fade-in">
-        <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-          <AlertTriangle className="w-6 h-6" />
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-amber-300">
-            More Details Required for Professional Documentation
-          </h3>
-          <p className="text-sm text-slate-300 mt-2 max-w-lg leading-relaxed">
-            {report.clarificationRequest ||
-              'The input text is too vague or lacks sufficient operational context to generate an industry-standard professional report. Please provide specific details such as symptoms, property locations, technical issues, or action owners rather than ambiguous notes.'}
-          </p>
-        </div>
-        <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-400 max-w-md w-full text-left font-mono">
-          <span className="text-amber-400 font-semibold block mb-1">Your Input:</span>
-          "{report.rawInput}"
-        </div>
-      </div>
-    );
-  }
-
+  // Ambiguity is handled gracefully with an inline banner and default working draft below!
   return (
     <div className="w-full flex flex-col gap-3">
       {/* Document Action Toolbar */}
@@ -271,7 +255,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <button
             onClick={handleCopy}
             title="Copy Report to Clipboard"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
           >
             {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span className="hidden sm:inline">{isCopied ? 'Copied' : 'Copy'}</span>
@@ -280,7 +264,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <button
             onClick={handleToggleSpeak}
             title={isSpeaking ? 'Stop Reading' : 'Listen to Report (TTS)'}
-            className={`p-1.5 rounded-lg text-xs font-medium transition-colors ${
+            className={`p-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
               isSpeaking
                 ? 'bg-emerald-500 text-slate-950 animate-pulse'
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
@@ -292,7 +276,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <button
             onClick={handlePrint}
             title="Print / Export as PDF"
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" />
           </button>
@@ -300,7 +284,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <button
             onClick={handleDownload}
             title="Download Markdown (.md)"
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
           </button>
@@ -308,7 +292,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <button
             onClick={handleShare}
             title="Share via Android Native Intent"
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
           >
             <Share2 className="w-3.5 h-3.5" />
           </button>
@@ -320,10 +304,22 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         {/* Document Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
           <div>
-            <div className="flex items-center gap-2 mb-1.5">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider border ${activeConfig.badgeBg}`}>
                 {activeConfig.name}
               </span>
+              {report.mediaType && report.mediaType !== 'text' && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/15 border border-purple-500/40 text-purple-300 font-mono flex items-center gap-1">
+                  {report.mediaType === 'image' ? <ImageIcon className="w-2.5 h-2.5" /> : <Film className="w-2.5 h-2.5" />}
+                  {report.mediaType === 'image' ? 'Image Generation' : 'Video Storyboard'}
+                </span>
+              )}
+              {report.responseMode && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 font-mono flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5 text-indigo-400" />
+                  {report.responseMode === 'problem_solving' ? 'Problem-Solving Mode' : report.responseMode === 'research' ? 'Research Mode' : 'Productivity Mode'}
+                </span>
+              )}
               <span className="text-xs text-slate-400 font-mono flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {new Date(report.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -341,6 +337,41 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         </div>
 
+        {/* Ambiguity & Clarification Guardrail Notice */}
+        {report.isVague && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 flex flex-col gap-3 animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 font-mono">
+                  Ambiguity Guardrail • Clarification & Working Draft
+                </span>
+                <h3 className="text-sm sm:text-base font-bold text-amber-200">
+                  {report.clarificationRequest || 'Ambiguous or brief query detected. Working draft generated below.'}
+                </h3>
+              </div>
+            </div>
+            {report.clarifyingQuestions && report.clarifyingQuestions.length > 0 && (
+              <div className="flex flex-col gap-1.5 pl-3 border-l-2 border-amber-500/40 mt-1">
+                <span className="text-[11px] font-semibold text-amber-300 uppercase tracking-wider">
+                  Clarification Checkpoints for Precision:
+                </span>
+                {report.clarifyingQuestions.map((q, qIdx) => (
+                  <div key={qIdx} className="text-xs text-amber-100 flex items-start gap-1.5 font-medium">
+                    <span className="text-amber-400 font-mono">Q{qIdx + 1}:</span>
+                    <span>{q}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-[11px] text-amber-400 font-medium">
+              👉 A complete default working draft and execution roadmap have been compiled below so work continues without interruption.
+            </div>
+          </div>
+        )}
+
         {/* Medical / Legal Mandatory Compliance Notice Banner */}
         {report.complianceDisclaimer && (
           <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-200/90 leading-relaxed">
@@ -355,6 +386,185 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         {/* View Tab: Live Intelligent Solution & Strategic Plan (Requirement 3) */}
         {activeTab === 'solution' && (
           <div className="flex flex-col gap-6 animate-in fade-in">
+            {/* Direct Executive Summary (Gemini Style 1-2 sentence direct answer/synthesis) */}
+            {report.executiveSummary && (
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-indigo-950/40 via-slate-950 to-slate-900 border border-indigo-500/40 shadow-lg flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2 border-b border-indigo-500/20 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-300 font-mono">
+                      Direct Executive Summary (Gemini Synthesis)
+                    </span>
+                  </div>
+                  {report.responseMode && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                      {report.responseMode.replace('_', ' ')}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm sm:text-base text-slate-100 font-medium leading-relaxed">
+                  {report.executiveSummary}
+                </p>
+              </div>
+            )}
+
+            {/* Multi-Modal: Image Generation Studio Card */}
+            {(report.mediaType === 'image' || report.imageParams) && (
+              <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-purple-950/40 via-slate-950 to-slate-900 border-2 border-purple-500/50 shadow-xl shadow-purple-950/30 flex flex-col gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-500/30 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
+                      <ImageIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 font-mono">
+                        Multi-Modal Studio • Image Generation Engine
+                      </span>
+                      <h3 className="text-base sm:text-lg font-bold text-white">
+                        Calibrated Generative Image Prompt & Parameters
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-300 border border-purple-500/30">
+                      Aspect Ratio: {report.imageParams?.aspectRatio || '16:9'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        const promptToCopy = report.imageParams?.prompt || report.sections?.[0]?.content || '';
+                        onCopy(promptToCopy);
+                        setCopiedMediaPrompt('image');
+                        setTimeout(() => setCopiedMediaPrompt(null), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500 hover:bg-purple-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer"
+                    >
+                      {copiedMediaPrompt === 'image' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedMediaPrompt === 'image' ? 'Copied Prompt' : 'Copy Image Prompt'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Generative Visual Art Canvas Preview */}
+                <div className="relative w-full rounded-2xl overflow-hidden border border-purple-500/30 bg-gradient-to-br from-slate-950 via-purple-950/60 to-indigo-950 p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[170px]">
+                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_50%_50%,rgba(168,85,247,0.4),transparent_70%)]" />
+                  <div className="relative z-10 w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-purple-300 shadow-lg">
+                    <Sparkles className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div className="relative z-10 max-w-lg">
+                    <div className="text-xs font-bold text-purple-300 uppercase tracking-widest mb-1">Generative Model Blueprint</div>
+                    <p className="text-xs text-slate-300 font-mono line-clamp-2 px-4">
+                      "{report.imageParams?.prompt || report.title}"
+                    </p>
+                  </div>
+                  {/* Color Palette Swatches */}
+                  {report.imageParams?.colorPalette && (
+                    <div className="relative z-10 flex items-center gap-2 mt-1">
+                      <span className="text-[10px] text-slate-400 uppercase font-mono mr-1">Palette:</span>
+                      {report.imageParams.colorPalette.map((color, cIdx) => (
+                        <div
+                          key={cIdx}
+                          title={color}
+                          style={{ backgroundColor: color }}
+                          className="w-5 h-5 rounded-full border border-white/20 shadow-sm transition-transform hover:scale-110"
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Prompt & Technical Optics Details */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-purple-500/20 flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 font-mono">Render Style</span>
+                    <span className="text-xs text-white font-medium">{report.imageParams?.style || 'Photorealistic Hyper-Detailed 8K'}</span>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-purple-500/20 flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 font-mono">Lighting Atmosphere</span>
+                    <span className="text-xs text-white font-medium">{report.imageParams?.lighting || 'Volumetric cinematic fill'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Multi-Modal: Video Generation Storyboard Card */}
+            {(report.mediaType === 'video' || report.videoParams) && (
+              <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-blue-950/40 via-slate-950 to-slate-900 border-2 border-blue-500/50 shadow-xl shadow-blue-950/30 flex flex-col gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-500/30 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                      <Film className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 font-mono">
+                        Multi-Modal Studio • Video Storyboard Engine
+                      </span>
+                      <h3 className="text-base sm:text-lg font-bold text-white">
+                        {report.videoParams?.title || 'Cinematic Video Sequence Blueprint'}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-300 border border-blue-500/30">
+                      Duration: {report.videoParams?.targetDuration || '8s'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        const promptToCopy = report.videoParams?.modelPromptVeoSora || report.sections?.[1]?.content || '';
+                        onCopy(promptToCopy);
+                        setCopiedMediaPrompt('video');
+                        setTimeout(() => setCopiedMediaPrompt(null), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-slate-950 text-xs font-bold transition-all shadow-md cursor-pointer"
+                    >
+                      {copiedMediaPrompt === 'video' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedMediaPrompt === 'video' ? 'Copied Prompt' : 'Copy Veo/Sora Prompt'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Camera Motion & Sound Cue */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-blue-500/20 flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 font-mono">Camera Choreography</span>
+                    <span className="text-xs text-white font-medium">{report.videoParams?.cameraMotion || 'Smooth forward tracking dolly with aerial tilt'}</span>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-blue-500/20 flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400 font-mono">Audio & Spatial Sound</span>
+                    <span className="text-xs text-white font-medium">{report.videoParams?.audioPrompt || 'Low-frequency ambient cinematic soundscape'}</span>
+                  </div>
+                </div>
+
+                {/* 3-Shot Storyboard Cards */}
+                {report.videoParams?.scenes && report.videoParams.scenes.length > 0 && (
+                  <div className="flex flex-col gap-2.5 mt-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-400" />
+                      Scene-by-Scene Shot Breakdown:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {report.videoParams.scenes.map((scene, scIdx) => (
+                        <div key={scIdx} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col gap-2">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                            <span className="text-xs font-bold text-blue-300">Shot {scene.shotNumber || scIdx + 1}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              {scene.duration}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-300 font-semibold">{scene.camera}</div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">{scene.visualAction}</p>
+                          {scene.audioSFX && (
+                            <div className="text-[10px] text-slate-500 font-mono border-t border-slate-800/80 pt-1">
+                              SFX: {scene.audioSFX}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* 1. Immediate Solution / Direct Answer */}
             <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-900 border-2 border-emerald-500/50 shadow-xl shadow-emerald-950/30 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2 border-b border-emerald-500/30 pb-3">

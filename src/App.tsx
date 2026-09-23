@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   TargetIndustry, 
   ToneSetting, 
+  DynamicResponseMode,
   TransformedReport, 
   ActionItem, 
   UserUsageState, 
@@ -30,6 +31,7 @@ export default function App() {
   const [currentIndustry, setCurrentIndustry] = useState<TargetIndustry>('medical');
   const [rawText, setRawText] = useState<string>(PRESET_SAMPLES[0].rawText);
   const [tone, setTone] = useState<ToneSetting>('standard');
+  const [responseMode, setResponseMode] = useState<DynamicResponseMode>('auto');
   const [customContext, setCustomContext] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [currentReport, setCurrentReport] = useState<TransformedReport | null>(null);
@@ -65,7 +67,7 @@ export default function App() {
     heroSubhead: 'PulseNote filters filler words, extracts action owners & deadlines, and structures records to strict industry standards.',
     customComplianceNote: 'Mandatory verification required by a licensed professional prior to clinical or legal submission.',
     updatedAt: Date.now(),
-    lastUpdatedBy: 'jayeshofficial@gmail.com',
+    lastUpdatedBy: 'System Administrator',
   });
 
   // User Usage State & Daily Monetization Tracking (3 Free Prompts / Day)
@@ -327,6 +329,7 @@ export default function App() {
           rawText,
           targetIndustry: currentIndustry,
           tone,
+          responseMode,
           customContext,
           dailyPromptCount: usageState.dailyPromptCount,
           isPro: usageState.isPro,
@@ -351,6 +354,8 @@ export default function App() {
           industry: currentIndustry,
           title: 'Daily Free Limit Reached',
           rawInput: rawText,
+          executiveSummary: 'Daily free prompt limit reached. Upgrade to Pro for unlimited prompts.',
+          responseMode: 'productivity',
           markdownReport: data.markdownReport,
           sections: data.sections || [],
           actionItems: data.actionItems || [],
@@ -369,6 +374,12 @@ export default function App() {
         industry: currentIndustry,
         title: data.title || `${currentIndustry.toUpperCase()} Documentation`,
         rawInput: rawText,
+        executiveSummary: data.executiveSummary || '',
+        responseMode: data.responseMode || (responseMode !== 'auto' ? responseMode : 'productivity'),
+        immediateSolution: data.immediateSolution || '',
+        bestOnlinePractices: data.bestOnlinePractices || '',
+        actionableStrategicPlan: data.actionableStrategicPlan || '',
+        searchSources: data.searchSources || [],
         markdownReport: data.markdownReport || '',
         sections: data.sections || [],
         actionItems: (data.actionItems || []).map((item: ActionItem) => ({
@@ -521,6 +532,8 @@ export default function App() {
               onChangeTone={setTone}
               customContext={customContext}
               onChangeCustomContext={setCustomContext}
+              responseMode={responseMode}
+              onChangeResponseMode={setResponseMode}
               isProcessing={isProcessing}
               onTransform={handleTransform}
             />
