@@ -94,12 +94,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleAdminQuickFill = () => {
-    setLoginEmail('jayeshofficial@gmail.com');
-    setLoginPassword('Jayesh@123');
-    setError(null);
-  };
-
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -347,21 +341,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
-              </div>
-
-              {/* Super Admin Quick Autofill Button for testing */}
-              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
-                <div className="text-[11px] text-slate-400">
-                  <span className="font-semibold text-amber-400">Super Admin Demo:</span>
-                  <div className="font-mono text-[10px] text-slate-500">jayeshofficial@gmail.com</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAdminQuickFill}
-                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all"
-                >
-                  Fill Admin
-                </button>
               </div>
 
               <button

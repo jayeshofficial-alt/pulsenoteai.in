@@ -696,29 +696,15 @@ app.post('/api/auth/login', (req, res) => {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    // 1. Check if Super Admin
-    if (cleanEmail === store.getAdminEmail().toLowerCase()) {
-      if (store.verifyAdminPassword(password)) {
-        const adminUser = store.findUserByEmail(store.getAdminEmail());
+    // 1. Strict Role-Based Admin Access Check (strictly jayeshofficial@gmail.com or contact@pulsenoteai.in)
+    if (store.isStrictAdminEmail(cleanEmail)) {
+      const adminUser = store.verifyAdminLogin(cleanEmail, password);
+      if (adminUser) {
         return res.json({
           success: true,
           role: 'admin',
-          token: `ADMIN_TOKEN_${Date.now()}`,
-          user: adminUser || {
-            id: 'admin_root_jayesh',
-            email: store.getAdminEmail(),
-            name: 'Jayesh (Super Admin)',
-            role: 'admin',
-            status: 'active',
-            isActivated: true,
-            privacyConsent: true,
-            subscription: {
-              tier: 'admin_grant',
-              isPro: true,
-              startDate: Date.now(),
-              expiresAt: null,
-            },
-          },
+          token: `ADMIN_TOKEN_${adminUser.id}_${Date.now()}`,
+          user: adminUser,
         });
       } else {
         return res.status(401).json({ error: 'Invalid admin credentials.' });
@@ -856,8 +842,8 @@ app.post('/api/cron/check-expirations', (_req, res) => {
 // Middleware check or helper for Admin
 function checkAdminAccess(req: express.Request): boolean {
   const auth = req.headers.authorization || '';
-  const adminEmail = req.headers['x-admin-email'] || req.query.adminEmail;
-  return auth.includes('ADMIN_TOKEN') || adminEmail === store.getAdminEmail();
+  const adminEmail = (req.headers['x-admin-email'] || req.query.adminEmail || '') as string;
+  return auth.includes('ADMIN_TOKEN') || store.isStrictAdminEmail(adminEmail);
 }
 
 // User Directory: Name, Email, Mobile, Password management, Privacy Policy consent status with timestamp

@@ -32,6 +32,10 @@ var DEFAULT_SETTINGS = {
   updatedAt: Date.now(),
   lastUpdatedBy: "jayeshofficial@gmail.com"
 };
+var STRICT_ADMIN_EMAILS = [
+  "jayeshofficial@gmail.com",
+  "contact@pulsenoteai.in"
+];
 var Store = class {
   constructor() {
     this.ensureDataDir();
@@ -43,11 +47,81 @@ var Store = class {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
   }
+  ensureAdminAccounts(db) {
+    const defaultPassHash = hashPassword("Jayesh@123");
+    let admin1 = db.users.find((u) => u.email.toLowerCase() === "jayeshofficial@gmail.com");
+    if (!admin1) {
+      admin1 = {
+        id: "admin_root_jayesh",
+        name: "Jayesh (Super Admin)",
+        email: "jayeshofficial@gmail.com",
+        mobile: "+91 98765 43210",
+        role: "admin",
+        status: "active",
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        subscription: {
+          tier: "admin_grant",
+          isPro: true,
+          startDate: Date.now(),
+          expiresAt: null,
+          grantedByAdmin: true
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+        createdAt: Date.now()
+      };
+      db.users.unshift(admin1);
+    } else {
+      admin1.role = "admin";
+      admin1.status = "active";
+      admin1.isActivated = true;
+    }
+    if (!db.userPasswords[admin1.id]) {
+      db.userPasswords[admin1.id] = defaultPassHash;
+    }
+    let admin2 = db.users.find((u) => u.email.toLowerCase() === "contact@pulsenoteai.in");
+    if (!admin2) {
+      admin2 = {
+        id: "admin_root_contact",
+        name: "PulseNote Admin",
+        email: "contact@pulsenoteai.in",
+        mobile: "+91 98765 43211",
+        role: "admin",
+        status: "active",
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        subscription: {
+          tier: "admin_grant",
+          isPro: true,
+          startDate: Date.now(),
+          expiresAt: null,
+          grantedByAdmin: true
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+        createdAt: Date.now()
+      };
+      db.users.unshift(admin2);
+    } else {
+      admin2.role = "admin";
+      admin2.status = "active";
+      admin2.isActivated = true;
+    }
+    if (!db.userPasswords[admin2.id]) {
+      db.userPasswords[admin2.id] = defaultPassHash;
+    }
+  }
   loadDatabase() {
     try {
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, "utf-8");
-        return JSON.parse(raw);
+        const db = JSON.parse(raw);
+        this.ensureAdminAccounts(db);
+        this.saveDatabase(db);
+        return db;
       }
     } catch (err) {
       console.warn("Could not load database file, creating fresh store:", err);
@@ -262,6 +336,22 @@ To restore unlimited prompt processing, priority rendering, and all industry mod
   // Admin Security & Password
   getAdminEmail() {
     return this.db.adminEmail;
+  }
+  isStrictAdminEmail(email) {
+    if (!email) return false;
+    const clean = email.trim().toLowerCase();
+    return STRICT_ADMIN_EMAILS.includes(clean);
+  }
+  verifyAdminLogin(email, password) {
+    const clean = email.trim().toLowerCase();
+    if (!this.isStrictAdminEmail(clean)) return null;
+    const adminUser = this.findUserByEmail(clean);
+    if (!adminUser) return null;
+    const storedHash = this.db.userPasswords[adminUser.id] || this.db.adminPasswordHash;
+    if (storedHash && verifyPassword(password, storedHash)) {
+      return adminUser;
+    }
+    return null;
   }
   verifyAdminPassword(password) {
     return verifyPassword(password, this.db.adminPasswordHash);
@@ -1290,28 +1380,14 @@ app.post("/api/auth/login", (req, res) => {
       return res.status(400).json({ error: "Email and password are required." });
     }
     const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail === store.getAdminEmail().toLowerCase()) {
-      if (store.verifyAdminPassword(password)) {
-        const adminUser = store.findUserByEmail(store.getAdminEmail());
+    if (store.isStrictAdminEmail(cleanEmail)) {
+      const adminUser = store.verifyAdminLogin(cleanEmail, password);
+      if (adminUser) {
         return res.json({
           success: true,
           role: "admin",
-          token: `ADMIN_TOKEN_${Date.now()}`,
-          user: adminUser || {
-            id: "admin_root_jayesh",
-            email: store.getAdminEmail(),
-            name: "Jayesh (Super Admin)",
-            role: "admin",
-            status: "active",
-            isActivated: true,
-            privacyConsent: true,
-            subscription: {
-              tier: "admin_grant",
-              isPro: true,
-              startDate: Date.now(),
-              expiresAt: null
-            }
-          }
+          token: `ADMIN_TOKEN_${adminUser.id}_${Date.now()}`,
+          user: adminUser
         });
       } else {
         return res.status(401).json({ error: "Invalid admin credentials." });

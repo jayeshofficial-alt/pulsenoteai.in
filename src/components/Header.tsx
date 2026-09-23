@@ -70,7 +70,14 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const activeConfig = INDUSTRY_CONFIGS.find((c) => c.id === currentIndustry) || INDUSTRY_CONFIGS[0];
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.email === 'jayeshofficial@gmail.com';
+  const userEmail = currentUser?.email?.trim().toLowerCase();
+  const isAdmin = Boolean(
+    currentUser && (
+      currentUser.role === 'admin' ||
+      userEmail === 'jayeshofficial@gmail.com' ||
+      userEmail === 'contact@pulsenoteai.in'
+    )
+  );
 
   return (
     <header className="w-full shrink-0 border-b border-slate-800/80 bg-slate-900/80 backdrop-blur-xl px-3 py-2.5 sm:px-6 sm:py-3 sticky top-0 z-20 no-print">
@@ -113,19 +120,16 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Daily Limit / Pro Badge */}
           <DailyLimitBadge usageState={usageState} onOpenPricing={onOpenPricing} />
 
-          {/* Super Admin Panel Shortcut Button (Visible to Admin or for Direct Verification) */}
-          <button
-            onClick={onOpenAdmin}
-            title={isAdmin ? "Super Admin Control Panel" : "Admin Panel (jayeshofficial@gmail.com)"}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all ${
-              isAdmin
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 shadow-sm shadow-amber-500/20'
-                : 'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-amber-400'
-            }`}
-          >
-            <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden md:inline">Admin Panel</span>
-          </button>
+          {/* Admin Dashboard Control (STRICTLY rendered ONLY if logged in as verified Admin) */}
+          {isAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 shadow-sm shadow-amber-500/20"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden md:inline">Admin Dashboard</span>
+            </button>
+          )}
 
           {/* User Auth or Client Billing Button */}
           {currentUser ? (

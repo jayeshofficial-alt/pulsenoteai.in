@@ -50,6 +50,12 @@ const DEFAULT_SETTINGS: AppInterfaceSettings = {
   lastUpdatedBy: 'jayeshofficial@gmail.com',
 };
 
+// STRICT ALLOWED ADMIN EMAILS
+export const STRICT_ADMIN_EMAILS = [
+  'jayeshofficial@gmail.com',
+  'contact@pulsenoteai.in',
+];
+
 class Store {
   private db: DatabaseSchema;
 
@@ -65,11 +71,86 @@ class Store {
     }
   }
 
+  private ensureAdminAccounts(db: DatabaseSchema) {
+    const defaultPassHash = hashPassword('Jayesh@123');
+
+    // 1. jayeshofficial@gmail.com
+    let admin1 = db.users.find((u) => u.email.toLowerCase() === 'jayeshofficial@gmail.com');
+    if (!admin1) {
+      admin1 = {
+        id: 'admin_root_jayesh',
+        name: 'Jayesh (Super Admin)',
+        email: 'jayeshofficial@gmail.com',
+        mobile: '+91 98765 43210',
+        role: 'admin',
+        status: 'active',
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: new Date().toISOString(),
+        subscription: {
+          tier: 'admin_grant',
+          isPro: true,
+          startDate: Date.now(),
+          expiresAt: null,
+          grantedByAdmin: true,
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: new Date().toISOString().slice(0, 10),
+        createdAt: Date.now(),
+      };
+      db.users.unshift(admin1);
+    } else {
+      admin1.role = 'admin';
+      admin1.status = 'active';
+      admin1.isActivated = true;
+    }
+    if (!db.userPasswords[admin1.id]) {
+      db.userPasswords[admin1.id] = defaultPassHash;
+    }
+
+    // 2. contact@pulsenoteai.in
+    let admin2 = db.users.find((u) => u.email.toLowerCase() === 'contact@pulsenoteai.in');
+    if (!admin2) {
+      admin2 = {
+        id: 'admin_root_contact',
+        name: 'PulseNote Admin',
+        email: 'contact@pulsenoteai.in',
+        mobile: '+91 98765 43211',
+        role: 'admin',
+        status: 'active',
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: new Date().toISOString(),
+        subscription: {
+          tier: 'admin_grant',
+          isPro: true,
+          startDate: Date.now(),
+          expiresAt: null,
+          grantedByAdmin: true,
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: new Date().toISOString().slice(0, 10),
+        createdAt: Date.now(),
+      };
+      db.users.unshift(admin2);
+    } else {
+      admin2.role = 'admin';
+      admin2.status = 'active';
+      admin2.isActivated = true;
+    }
+    if (!db.userPasswords[admin2.id]) {
+      db.userPasswords[admin2.id] = defaultPassHash;
+    }
+  }
+
   private loadDatabase(): DatabaseSchema {
     try {
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const db: DatabaseSchema = JSON.parse(raw);
+        this.ensureAdminAccounts(db);
+        this.saveDatabase(db);
+        return db;
       }
     } catch (err) {
       console.warn('Could not load database file, creating fresh store:', err);
@@ -304,6 +385,26 @@ class Store {
   // Admin Security & Password
   public getAdminEmail(): string {
     return this.db.adminEmail;
+  }
+
+  public isStrictAdminEmail(email: string): boolean {
+    if (!email) return false;
+    const clean = email.trim().toLowerCase();
+    return STRICT_ADMIN_EMAILS.includes(clean);
+  }
+
+  public verifyAdminLogin(email: string, password: string): UserProfile | null {
+    const clean = email.trim().toLowerCase();
+    if (!this.isStrictAdminEmail(clean)) return null;
+
+    const adminUser = this.findUserByEmail(clean);
+    if (!adminUser) return null;
+
+    const storedHash = this.db.userPasswords[adminUser.id] || this.db.adminPasswordHash;
+    if (storedHash && verifyPassword(password, storedHash)) {
+      return adminUser;
+    }
+    return null;
   }
 
   public verifyAdminPassword(password: string): boolean {

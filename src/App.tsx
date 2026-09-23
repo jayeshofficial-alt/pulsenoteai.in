@@ -172,19 +172,31 @@ export default function App() {
       console.warn('Failed to save auth token:', e);
     }
 
-    // Synchronize subscription status
-    const isPro = user.subscription?.isPro || false;
+    // Strict Role-Based Access Control Check
+    const cleanEmail = (user.email || '').trim().toLowerCase();
+    const isAdmin = cleanEmail === 'jayeshofficial@gmail.com' || cleanEmail === 'contact@pulsenoteai.in' || user.role === 'admin';
+
+    // Synchronize subscription status: admins get perpetual Pro access; clients get their tier or Free 3/day
+    const isPro = isAdmin ? true : Boolean(user.subscription?.isPro);
     setUsageState((prev) => ({
       ...prev,
       isPro,
-      activePlan: isPro ? user.subscription?.tier : 'free',
-      expiresAt: user.subscription?.expiresAt,
+      activePlan: isPro ? (isAdmin ? 'admin_grant' : (user.subscription?.tier || 'free')) : 'free',
+      expiresAt: isAdmin ? null : user.subscription?.expiresAt,
     }));
 
-    if (user.role === 'admin') {
-      addToast('success', `Welcome Super Admin (${user.name})! Admin panel unlocked.`);
+    // Close the login modal
+    setIsAuthModalOpen(false);
+
+    // Dynamic RBAC Redirection:
+    if (isAdmin) {
+      addToast('success', `Admin authentication verified (${user.name}). Redirecting to Super Admin Dashboard...`);
+      setIsAdminPanelModalOpen(true);
+      setIsBillingModalOpen(false);
     } else {
-      addToast('success', `Welcome back, ${user.name}!`);
+      addToast('success', `Welcome back, ${user.name}! Redirecting to Customer Profile...`);
+      setIsBillingModalOpen(true);
+      setIsAdminPanelModalOpen(false);
     }
   };
 
@@ -625,6 +637,7 @@ export default function App() {
         isOpen={isAdminPanelModalOpen}
         onClose={() => setIsAdminPanelModalOpen(false)}
         onSettingsUpdated={(newSettings) => setAppSettings(newSettings)}
+        currentUser={currentUser}
       />
 
       {/* Simulated System Mailbox & SMS Center */}

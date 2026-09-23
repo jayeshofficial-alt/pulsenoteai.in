@@ -38,12 +38,14 @@ interface AdminPanelModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSettingsUpdated?: (settings: AppInterfaceSettings) => void;
+  currentUser?: UserProfile | null;
 }
 
 export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   isOpen,
   onClose,
   onSettingsUpdated,
+  currentUser,
 }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'activity' | 'financials' | 'wording' | 'security' | 'emails'>('users');
   const [loading, setLoading] = useState(false);
@@ -235,7 +237,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   Super Admin Control Panel
                 </h3>
                 <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/30 text-[10px] font-mono text-amber-300 font-bold uppercase">
-                  jayeshofficial@gmail.com
+                  {currentUser?.email || 'Authorized Administrator'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
