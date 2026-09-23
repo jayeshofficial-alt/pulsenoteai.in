@@ -1,0 +1,6 @@
+{
+  "name": "PulseNote AI",
+  "description": "Transform messy raw transcripts and voice notes into industry-standard clinical, inspection, agile, and executive documentation.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
