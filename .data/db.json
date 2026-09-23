@@ -1,0 +1,214 @@
+{
+  "adminEmail": "jayeshofficial@gmail.com",
+  "adminPasswordHash": "01de853923f474a2a8701c3779959d9c:c514bfdd654776c16381b4ccc69a19d005ca423a8e1091797ff99d30af9fd9cfcc3a80ca091b6aba9ed2359c7e4fa5b751e5eeeef774bc7eeb1e5c92e609390b",
+  "users": [
+    {
+      "id": "admin_root_contact",
+      "name": "PulseNote Admin",
+      "email": "contact@pulsenoteai.in",
+      "mobile": "+91 98765 43211",
+      "role": "admin",
+      "status": "active",
+      "isActivated": true,
+      "privacyConsent": true,
+      "consentTimestamp": "2026-09-23T15:15:14.236Z",
+      "subscription": {
+        "tier": "admin_grant",
+        "isPro": true,
+        "startDate": 1790176514236,
+        "expiresAt": null,
+        "grantedByAdmin": true
+      },
+      "dailyPromptCount": 0,
+      "lastPromptDate": "2026-09-23",
+      "createdAt": 1790176514236
+    },
+    {
+      "id": "admin_root_jayesh",
+      "name": "Jayesh (Super Admin)",
+      "email": "jayeshofficial@gmail.com",
+      "mobile": "+91 98765 43210",
+      "role": "admin",
+      "status": "active",
+      "isActivated": true,
+      "privacyConsent": true,
+      "consentTimestamp": "2026-08-24T14:06:57.287Z",
+      "subscription": {
+        "tier": "admin_grant",
+        "isPro": true,
+        "startDate": 1787580417287,
+        "expiresAt": null,
+        "grantedByAdmin": true
+      },
+      "dailyPromptCount": 0,
+      "lastPromptDate": "2026-09-23",
+      "createdAt": 1787580417287
+    },
+    {
+      "id": "user_sample_doctor",
+      "name": "Dr. Ananya Sharma",
+      "email": "ananya.sharma@healthclinic.org",
+      "mobile": "+91 98234 56789",
+      "role": "user",
+      "status": "active",
+      "isActivated": true,
+      "privacyConsent": true,
+      "consentTimestamp": "2026-09-09T14:06:57.287Z",
+      "subscription": {
+        "tier": "pro_annual",
+        "isPro": true,
+        "startDate": 1788962817287,
+        "expiresAt": 1820498817287,
+        "grantedByAdmin": false
+      },
+      "dailyPromptCount": 2,
+      "lastPromptDate": "2026-09-23",
+      "createdAt": 1788962817287
+    },
+    {
+      "id": "user_sample_realtor",
+      "name": "Vikram Mehta",
+      "email": "vikram@apexrealty.in",
+      "mobile": "+91 91234 56780",
+      "role": "user",
+      "status": "active",
+      "isActivated": true,
+      "privacyConsent": true,
+      "consentTimestamp": "2026-09-18T14:06:57.287Z",
+      "subscription": {
+        "tier": "free",
+        "isPro": false,
+        "startDate": 1789740417287,
+        "expiresAt": null,
+        "grantedByAdmin": false
+      },
+      "dailyPromptCount": 3,
+      "lastPromptDate": "2026-09-23",
+      "createdAt": 1789740417287
+    }
+  ],
+  "userPasswords": {
+    "admin_root_jayesh": "01de853923f474a2a8701c3779959d9c:c514bfdd654776c16381b4ccc69a19d005ca423a8e1091797ff99d30af9fd9cfcc3a80ca091b6aba9ed2359c7e4fa5b751e5eeeef774bc7eeb1e5c92e609390b",
+    "user_sample_doctor": "f0f2316e38f22d03bba3f3ddcf6dbc05:9b850cf5d57db04e06672dfb196861452e993cebda4c1e118a0825ecc9ea6dd297ae9abc5e99b2e03f1490e01d2dd7891dd5771c98e68716f7228424b62ee389",
+    "user_sample_realtor": "ef8ca207b947c730c5adad64f4765eb1:80184b1c6c2f28e405fc835dda56c5ec85f952bfefe104b67f29ea5403e57170ce6580f90ea02096961a42693f5dbb471f0e64caaa2fd1795cc571e21e10428f",
+    "admin_root_contact": "a918c54dc6d145bc59ef5bb781f4c9d2:5ae1df666b38a3cfdb2ed57ccebf9fb52af5fd226b9166d91a1a8a87a09e3cbd4dbfcada1534d5b66ee5930df501bf920b4bd408dc712a2ccc8172f06af6d889"
+  },
+  "passwordResetOtps": {},
+  "payments": [
+    {
+      "id": "PAY_1001",
+      "userId": "user_sample_doctor",
+      "userEmail": "ananya.sharma@healthclinic.org",
+      "userName": "Dr. Ananya Sharma",
+      "orderId": "PULSE_INIT_9021",
+      "planId": "pro_annual",
+      "planName": "Pro Power Pack (Annual)",
+      "amount": 1999,
+      "currency": "INR",
+      "paymentMethod": "UPI",
+      "transactionRef": "UPI_UTR_4819203948",
+      "settlementVpa": "wagh.jayesh@oksbi",
+      "timestamp": 1788962817287,
+      "status": "completed"
+    },
+    {
+      "id": "PAY_1002",
+      "userId": "user_sample_realtor",
+      "userEmail": "vikram@apexrealty.in",
+      "userName": "Vikram Mehta",
+      "orderId": "PULSE_INIT_7812",
+      "planId": "pro_monthly",
+      "planName": "Pro Monthly",
+      "amount": 299,
+      "currency": "INR",
+      "paymentMethod": "CREDIT_CARD",
+      "transactionRef": "TXN_CARD_772183",
+      "settlementVpa": "wagh.jayesh@oksbi",
+      "timestamp": 1787148417287,
+      "status": "completed"
+    }
+  ],
+  "activityLogs": [
+    {
+      "id": "LOG_1790181932446_6s3i",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Client User",
+      "industry": "medical",
+      "rawInput": "Create an image of an ultra-modern hospital telemetry command center in 8K",
+      "solutionTitle": "Generative Image Prompt: an ultra-modern hospital telemetry ",
+      "timestamp": 1790181932446
+    },
+    {
+      "id": "LOG_1790179883685_s5cm",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Guest Client",
+      "industry": "general",
+      "rawInput": "Search for best job websites\n",
+      "solutionTitle": "Working Draft & Clarification Plan",
+      "timestamp": 1790179883685
+    },
+    {
+      "id": "LOG_1790179862382_udoh",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Guest Client",
+      "industry": "general",
+      "rawInput": "Search for best job websites\n",
+      "solutionTitle": "Working Draft & Clarification Plan",
+      "timestamp": 1790179862382
+    },
+    {
+      "id": "LOG_1790179780541_9kkn",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Guest Client",
+      "industry": "medical",
+      "rawInput": "We need an authoritative strategic evaluation of current commercial bottlenecks in scaling solid-state lithium-sulfur battery manufacturing. Analyze lithium sourcing constraints, electrolyte membrane degradation issues, and cost parity targets vs LFP cells. Provide immediate solution steps and onlin",
+      "solutionTitle": "Clinical Encounter Documentation (SOAP)",
+      "timestamp": 1790179780541
+    },
+    {
+      "id": "LOG_1",
+      "userId": "user_sample_doctor",
+      "userEmail": "ananya.sharma@healthclinic.org",
+      "userName": "Dr. Ananya Sharma",
+      "industry": "medical",
+      "rawInput": "Patient 45yo female presenting with severe throbbing headache, photo-sensitivity, nausea since yesterday.",
+      "solutionTitle": "Clinical Encounter Documentation (SOAP)",
+      "timestamp": 1790165217287
+    },
+    {
+      "id": "LOG_2",
+      "userId": "user_sample_realtor",
+      "userEmail": "vikram@apexrealty.in",
+      "userName": "Vikram Mehta",
+      "industry": "real_estate",
+      "rawInput": "Basement inspection at 42 Oakridge. Found heavy efflorescence and standing water near sump pump.",
+      "solutionTitle": "Property Condition Inspection Report",
+      "timestamp": 1790154417287
+    }
+  ],
+  "emails": [
+    {
+      "id": "EML_1",
+      "toEmail": "ananya.sharma@healthclinic.org",
+      "toName": "Dr. Ananya Sharma",
+      "subject": "Welcome to PulseNote AI - Account Activated",
+      "type": "welcome_activation",
+      "bodyText": "Thank you for joining PulseNote AI. Your professional documentation engine is active.",
+      "sentAt": 1788962817287
+    }
+  ],
+  "settings": {
+    "appTagline": "Professional Android-grade documentation engine for clinical, inspection, agile, and corporate notes",
+    "announcementBanner": "🚀 PulseNote Pro Power Pack is live! 45% discount for annual subscriptions.",
+    "isBannerActive": true,
+    "heroHeadline": "Turn messy voice transcripts into elite documentation",
+    "heroSubhead": "PulseNote filters filler words, extracts action owners & deadlines, and structures records to strict industry standards.",
+    "customComplianceNote": "Mandatory verification required by a licensed professional prior to clinical or legal submission.",
+    "updatedAt": 1790172417285,
+    "lastUpdatedBy": "jayeshofficial@gmail.com"
+  }
+}

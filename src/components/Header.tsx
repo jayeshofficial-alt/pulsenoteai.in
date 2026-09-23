@@ -17,7 +17,11 @@ import {
   LogOut,
   Mail,
   Receipt,
-  Sparkles
+  Sparkles,
+  Menu,
+  Plus,
+  FileText,
+  MessageSquare
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -38,6 +42,10 @@ interface HeaderProps {
   onLogout: () => void;
   announcementBanner?: string;
   isBannerActive?: boolean;
+  onToggleSidebar?: () => void;
+  onNewChat?: () => void;
+  viewMode?: 'gemini' | 'document';
+  onToggleViewMode?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -58,6 +66,10 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   announcementBanner,
   isBannerActive,
+  onToggleSidebar,
+  onNewChat,
+  viewMode,
+  onToggleViewMode,
 }) => {
   const getIndustryIcon = (iconName: string) => {
     switch (iconName) {
@@ -90,8 +102,31 @@ export const Header: React.FC<HeaderProps> = ({
       )}
 
       <div className="flex items-center justify-between gap-2 sm:gap-3">
-        {/* Brand & Badge */}
+        {/* Brand & Left Actions */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Sidebar Toggle Button */}
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              title="Toggle Chat Sidebar"
+              className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
+
+          {/* New Chat Quick Button */}
+          {onNewChat && (
+            <button
+              onClick={onNewChat}
+              title="Start New Chat"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/70 text-slate-300 hover:text-white text-xs font-semibold transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5 text-teal-400" />
+              <span>New</span>
+            </button>
+          )}
+
           <div className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 shadow-lg shadow-teal-900/30 shrink-0">
             <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5 sm:h-3 sm:w-3">
@@ -105,8 +140,8 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="text-sm sm:text-base font-bold tracking-tight text-white flex items-center gap-1">
                 PulseNote <span className="text-emerald-400">AI</span>
               </h1>
-              <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700/60 hidden sm:inline-block">
-                Android Core
+              <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-800 text-teal-300 border border-teal-500/30 hidden sm:inline-block">
+                Gemini Core
               </span>
             </div>
             <p className="text-[11px] text-slate-400 truncate hidden xs:block">
@@ -196,6 +231,27 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
+
+          {/* View Mode Toggle: Gemini Chat vs Document Hub */}
+          {onToggleViewMode && (
+            <button
+              onClick={onToggleViewMode}
+              title={viewMode === 'gemini' ? 'Switch to Document Hub' : 'Switch to Gemini Chat Workspace'}
+              className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-300 hover:text-white text-xs font-medium transition-all active:scale-95"
+            >
+              {viewMode === 'gemini' ? (
+                <>
+                  <FileText className="w-3.5 h-3.5 text-teal-400" />
+                  <span className="hidden md:inline">Docs Hub</span>
+                </>
+              ) : (
+                <>
+                  <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="hidden md:inline">Gemini Chat</span>
+                </>
+              )}
+            </button>
+          )}
 
           {/* Toggle Device Frame / Full Responsive */}
           <button

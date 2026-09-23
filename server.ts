@@ -1867,6 +1867,18 @@ app.get('/api/system/emails', (req, res) => {
   return res.json({ emails });
 });
 
+// Audio transcription ping / keep-alive health check
+app.get('/api/transcribe/ping', (_req, res) => {
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=120');
+  res.setHeader('Cache-Control', 'no-cache, no-store');
+  return res.json({ 
+    status: 'healthy', 
+    timestamp: Date.now(),
+    keepAliveTimeoutMs: 120000 
+  });
+});
+
 // Audio transcription endpoint for microphone recordings or audio uploads with robust stability guardrails
 const SUPPORTED_AUDIO_FORMATS = new Set([
   'audio/webm',
@@ -1885,8 +1897,136 @@ const SUPPORTED_AUDIO_FORMATS = new Set([
   'video/webm',
 ]);
 
+// Helper to transcribe audio part with model fallback
+async function transcribeAudioPayload(audioBase64: string, cleanMime: string, customInstruction?: string) {
+  const audioPart = {
+    inlineData: {
+      mimeType: cleanMime,
+      data: audioBase64,
+    },
+  };
+
+  const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'];
+  let lastModelError: any = null;
+  let transcriptText = '';
+
+  const promptText = customInstruction || 
+    'Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates. Do not add conversational commentary.';
+
+  for (const modelName of CANDIDATE_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: {
+          parts: [
+            audioPart,
+            { text: promptText },
+          ],
+        },
+      });
+
+      if (response && response.text) {
+        transcriptText = response.text.trim();
+        break; // Successfully transcribed
+      }
+    } catch (modelErr: any) {
+      lastModelError = modelErr;
+      const errCode = modelErr?.status || modelErr?.code || modelErr?.name || 'MODEL_INVOCATION_ERROR';
+      console.warn(`[STT_FAILOVER] Model "${modelName}" failed with code: ${errCode}. Attempting candidate fallback...`);
+    }
+  }
+
+  if (!transcriptText && lastModelError) {
+    throw lastModelError;
+  }
+
+  return transcriptText;
+}
+
+// Chunked Audio Streaming Endpoint: accepts incremental audio blobs to prevent buffer overflows or gateway timeouts
+app.post('/api/transcribe/chunk', async (req, res) => {
+  const startTime = Date.now();
+  req.setTimeout(120000);
+  res.setTimeout(120000);
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=120');
+
+  try {
+    const { 
+      audioBase64, 
+      mimeType = 'audio/webm', 
+      chunkIndex = 0, 
+      sessionId, 
+      isFinal = false,
+      priorContext = '' 
+    } = req.body;
+
+    if (!audioBase64 || typeof audioBase64 !== 'string') {
+      return res.status(400).json({ error: 'Missing audio chunk data', errorCode: 'MISSING_CHUNK_PAYLOAD' });
+    }
+
+    if (audioBase64.trim().length < 80) {
+      // Very small chunk or silence: return empty transcript without error
+      return res.json({
+        transcript: '',
+        chunkIndex,
+        sessionId,
+        isFinal,
+        status: 'success',
+        durationMs: Date.now() - startTime
+      });
+    }
+
+    const rawMime = (mimeType || 'audio/webm').trim().toLowerCase();
+    let cleanMime = rawMime.split(';')[0].trim();
+    if (cleanMime === 'audio/x-m4a' || cleanMime === 'audio/m4a') cleanMime = 'audio/mp4';
+    if (cleanMime === 'audio/x-wav' || cleanMime === 'audio/wave') cleanMime = 'audio/wav';
+
+    const instruction = priorContext
+      ? `Transcribe this incremental spoken audio chunk word-for-word into English text. The previous spoken context was: "${priorContext.slice(-150)}". Transcribe only the new words spoken in this segment without repeating prior context. Do not add conversational comments.`
+      : 'Transcribe this spoken audio chunk word-for-word into English text. Retain names, numbers, medical, and technical terminology accurately.';
+
+    const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime, instruction);
+    const durationMs = Date.now() - startTime;
+
+    console.log(`[STT_CHUNK_SUCCESS] Processed chunk #${chunkIndex} (${transcriptText.length} chars, ${durationMs}ms, final: ${isFinal})`);
+
+    return res.json({
+      transcript: transcriptText,
+      chunkIndex,
+      sessionId,
+      isFinal,
+      status: 'success',
+      durationMs
+    });
+  } catch (err: unknown) {
+    const durationMs = Date.now() - startTime;
+    const errorCode = (err as any)?.status || (err as any)?.code || (err as any)?.name || 'CHUNK_TRANSCRIPTION_FAILED';
+    const errorMessage = err instanceof Error ? err.message : 'Unknown chunk transcription exception';
+
+    console.error('[STT_CHUNK_FAILURE]', {
+      timestamp: new Date().toISOString(),
+      errorCode,
+      errorMessage,
+      durationMs
+    });
+
+    return res.status(500).json({
+      error: 'Audio chunk connection dropped. Buffered stream preserved for automatic reconnection.',
+      errorCode: String(errorCode),
+      details: errorMessage,
+      preserved: true
+    });
+  }
+});
+
 app.post('/api/transcribe', async (req, res) => {
   const startTime = Date.now();
+  req.setTimeout(120000);
+  res.setTimeout(120000);
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Keep-Alive', 'timeout=120');
+
   try {
     const { audioBase64, mimeType = 'audio/webm' } = req.body;
 
@@ -1933,46 +2073,8 @@ app.post('/api/transcribe', async (req, res) => {
     if (cleanMime === 'audio/x-m4a' || cleanMime === 'audio/m4a') cleanMime = 'audio/mp4';
     if (cleanMime === 'audio/x-wav' || cleanMime === 'audio/wave') cleanMime = 'audio/wav';
 
-    const audioPart = {
-      inlineData: {
-        mimeType: cleanMime,
-        data: audioBase64,
-      },
-    };
-
-    // 5. Model Execution with multi-model fallback (Gemini 2.5 Flash -> Gemini 3.5 Flash Lite -> Gemini 2.5 Pro)
-    const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'];
-    let lastModelError: any = null;
-    let transcriptText = '';
-
-    for (const modelName of CANDIDATE_MODELS) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: {
-            parts: [
-              audioPart,
-              {
-                text: 'Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates. Do not add conversational commentary.',
-              },
-            ],
-          },
-        });
-
-        if (response && response.text) {
-          transcriptText = response.text.trim();
-          break; // Successfully transcribed
-        }
-      } catch (modelErr: any) {
-        lastModelError = modelErr;
-        const errCode = modelErr?.status || modelErr?.code || modelErr?.name || 'MODEL_INVOCATION_ERROR';
-        console.warn(`[STT_FAILOVER] Model "${modelName}" failed with code: ${errCode}. Attempting candidate fallback...`);
-      }
-    }
-
-    if (!transcriptText && lastModelError) {
-      throw lastModelError;
-    }
+    // 5. Model Execution with multi-model fallback
+    const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime);
 
     const durationMs = Date.now() - startTime;
     console.log(`[STT_SUCCESS] Audio successfully transcribed (${transcriptText.length} chars, ${durationMs}ms)`);
@@ -2023,9 +2125,14 @@ async function startServer() {
     });
   }
 
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`PulseNote AI server listening on port ${port} [mode: ${isProd ? 'production' : 'development'}]`);
   });
+
+  // Keep-Alive and extended timeout threshold to prevent premature connection drops for long audio streams
+  server.keepAliveTimeout = 120000; // 120 seconds
+  server.headersTimeout = 125000;   // 125 seconds
+  server.requestTimeout = 120000;   // 120 seconds
 }
 
 startServer();

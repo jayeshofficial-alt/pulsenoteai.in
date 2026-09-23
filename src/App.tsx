@@ -8,11 +8,16 @@ import {
   UserUsageState, 
   SubscriptionPlan,
   UserProfile,
-  AppInterfaceSettings 
+  AppInterfaceSettings,
+  ChatThread,
+  ChatMessage,
+  ChatMessageAttachment
 } from './types';
 import { PRESET_SAMPLES, INDUSTRY_CONFIGS } from './data/presets';
 import { AndroidFrame } from './components/AndroidFrame';
 import { Header } from './components/Header';
+import { GeminiSidebar } from './components/GeminiSidebar';
+import { GeminiWorkspace } from './components/GeminiWorkspace';
 import { InputPanel } from './components/InputPanel';
 import { DocumentViewer } from './components/DocumentViewer';
 import { HistoryModal } from './components/HistoryModal';
@@ -42,6 +47,51 @@ export default function App() {
   const [isLegalModalOpen, setIsLegalModalOpen] = useState<boolean>(false);
   const [hasAcceptedLegalOnboarding, setHasAcceptedLegalOnboarding] = useState<boolean>(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Gemini Universal Chat & Search Workspace State
+  const [threads, setThreads] = useState<ChatThread[]>(() => {
+    try {
+      const saved = localStorage.getItem('pulsenote_chat_threads');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse chat threads:', e);
+    }
+    const defaultThread: ChatThread = {
+      id: 'thread-' + Date.now(),
+      title: 'New Chat',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+      industry: 'medical',
+    };
+    return [defaultThread];
+  });
+
+  const [activeThreadId, setActiveThreadId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('pulsenote_chat_threads');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
+      }
+    } catch {}
+    return 'thread-init';
+  });
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [viewMode, setViewMode] = useState<'gemini' | 'document'>('gemini');
+
+  const saveThreads = (newThreads: ChatThread[]) => {
+    setThreads(newThreads);
+    try {
+      localStorage.setItem('pulsenote_chat_threads', JSON.stringify(newThreads));
+    } catch (e) {
+      console.warn('Failed to save chat threads:', e);
+    }
+  };
 
   // User Authentication & Profile
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
@@ -457,6 +507,279 @@ export default function App() {
     addToast('info', 'Archive cleared.');
   };
 
+  // Find current active thread safely
+  const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || {
+    id: 'thread-init',
+    title: 'New Chat',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    messages: [],
+    industry: currentIndustry,
+  };
+
+  const handleNewChat = () => {
+    const newThread: ChatThread = {
+      id: 'thread-' + Date.now(),
+      title: 'New Chat',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],
+      industry: currentIndustry,
+    };
+    const updated = [newThread, ...threads];
+    saveThreads(updated);
+    setActiveThreadId(newThread.id);
+    setViewMode('gemini');
+    setCurrentReport(null);
+  };
+
+  const handleSelectThread = (threadId: string) => {
+    setActiveThreadId(threadId);
+    const target = threads.find((t) => t.id === threadId);
+    if (target?.currentReport) {
+      setCurrentReport(target.currentReport);
+    } else {
+      setCurrentReport(null);
+    }
+    setViewMode('gemini');
+  };
+
+  const handleRenameThread = (threadId: string, newTitle: string) => {
+    const updated = threads.map((t) => (t.id === threadId ? { ...t, title: newTitle } : t));
+    saveThreads(updated);
+  };
+
+  const handleDeleteThread = (threadId: string) => {
+    const remaining = threads.filter((t) => t.id !== threadId);
+    if (remaining.length === 0) {
+      const fresh: ChatThread = {
+        id: 'thread-' + Date.now(),
+        title: 'New Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [],
+        industry: currentIndustry,
+      };
+      saveThreads([fresh]);
+      setActiveThreadId(fresh.id);
+      setCurrentReport(null);
+    } else {
+      saveThreads(remaining);
+      if (activeThreadId === threadId) {
+        setActiveThreadId(remaining[0].id);
+        setCurrentReport(remaining[0].currentReport || null);
+      }
+    }
+    addToast('info', 'Chat deleted.');
+  };
+
+  const handleSendMessage = async (
+    content: string,
+    attachments?: ChatMessageAttachment[],
+    creativeMode?: 'text' | 'image' | 'video'
+  ) => {
+    const targetThread = threads.find((t) => t.id === activeThreadId) || threads[0];
+    if (!targetThread) return;
+
+    // Check client-side daily limit for free tier
+    if (!usageState.isPro && usageState.dailyPromptCount >= 3) {
+      setIsPricingModalOpen(true);
+      const limitUserMsg: ChatMessage = {
+        id: 'msg-u-' + Date.now(),
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+        attachments,
+        creativeMode,
+      };
+
+      const limitReport: TransformedReport = {
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        industry: currentIndustry,
+        title: 'Daily Free Limit Reached',
+        rawInput: content,
+        executiveSummary: 'Daily free prompt limit reached (3/3). Upgrade to Pro for unlimited prompts.',
+        responseMode: 'productivity',
+        markdownReport: `🛑 **Daily Free Limit Reached (3/3 Prompts Used)**\nUpgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.\n\n* **Pro Monthly:** ₹299/month (~$3.99)\n* **Pro Annual:** ₹1,999/year (~₹166/mo) — Save 45%\n\n👉 Pay via Secure UPI (\`wagh.jayesh@oksbi\`), Credit/Debit Card, or Net Banking.`,
+        sections: [],
+        actionItems: [],
+        detectedEntities: [],
+        keyTakeaways: [],
+        complianceDisclaimer: '[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, and media must be verified before professional or commercial use. The platform bears zero liability.',
+      };
+
+      const limitAssistantMsg: ChatMessage = {
+        id: 'msg-a-' + Date.now(),
+        role: 'assistant',
+        content: limitReport.markdownReport,
+        timestamp: Date.now(),
+        report: limitReport,
+      };
+
+      const updatedThreads = threads.map((t) =>
+        t.id === targetThread.id
+          ? {
+              ...t,
+              messages: [...t.messages, limitUserMsg, limitAssistantMsg],
+              updatedAt: Date.now(),
+              currentReport: limitReport,
+            }
+          : t
+      );
+      saveThreads(updatedThreads);
+      addToast('info', 'Daily free limit reached (3/3). Please upgrade to Pro.');
+      return;
+    }
+
+    const userMsg: ChatMessage = {
+      id: 'msg-u-' + Date.now(),
+      role: 'user',
+      content,
+      timestamp: Date.now(),
+      attachments,
+      creativeMode,
+    };
+
+    let updatedTitle = targetThread.title;
+    if (targetThread.title === 'New Chat' || !targetThread.title) {
+      updatedTitle = content.slice(0, 36) + (content.length > 36 ? '...' : '');
+    }
+
+    const intermediateThreads = threads.map((t) =>
+      t.id === targetThread.id
+        ? {
+            ...t,
+            title: updatedTitle,
+            messages: [...t.messages, userMsg],
+            updatedAt: Date.now(),
+          }
+        : t
+    );
+    saveThreads(intermediateThreads);
+
+    try {
+      setIsProcessing(true);
+      const response = await fetch('/api/transform', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rawText: content,
+          targetIndustry: currentIndustry,
+          tone,
+          responseMode,
+          customContext: attachments && attachments.length > 0 
+            ? `Attachments:\n${attachments.map(a => `${a.name}: ${a.base64 ? a.base64.slice(0, 1000) : ''}`).join('\n')}\n\n${customContext}`
+            : customContext,
+          dailyPromptCount: usageState.dailyPromptCount,
+          isPro: usageState.isPro,
+          userId: currentUser?.id || 'usr_guest',
+          userEmail: currentUser?.email || 'client@pulsenote.ai',
+          userName: currentUser?.name || 'Guest Client',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server responded with status ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.isLimitReached) {
+        setIsPricingModalOpen(true);
+      }
+
+      const newReport: TransformedReport = {
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        industry: currentIndustry,
+        title: data.title || `${currentIndustry.toUpperCase()} Documentation`,
+        rawInput: content,
+        executiveSummary: data.executiveSummary || '',
+        responseMode: data.responseMode || (responseMode !== 'auto' ? responseMode : 'productivity'),
+        immediateSolution: data.immediateSolution || '',
+        bestOnlinePractices: data.bestOnlinePractices || '',
+        actionableStrategicPlan: data.actionableStrategicPlan || '',
+        imageParams: data.imageParams,
+        videoParams: data.videoParams,
+        searchSources: data.searchSources || [],
+        markdownReport: data.markdownReport || '',
+        sections: data.sections || [],
+        actionItems: (data.actionItems || []).map((item: ActionItem) => ({
+          ...item,
+          completed: false,
+        })),
+        detectedEntities: data.detectedEntities || [],
+        keyTakeaways: data.keyTakeaways || [],
+        complianceDisclaimer: data.complianceDisclaimer || '[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, and media must be verified before professional or commercial use. The platform bears zero liability.',
+        isVague: data.isVague || false,
+        clarificationRequest: data.clarificationRequest || '',
+      };
+
+      const assistantMsg: ChatMessage = {
+        id: 'msg-a-' + Date.now(),
+        role: 'assistant',
+        content: newReport.markdownReport,
+        timestamp: Date.now(),
+        report: newReport,
+        creativeMode,
+      };
+
+      const finalThreads = threads.map((t) =>
+        t.id === targetThread.id
+          ? {
+              ...t,
+              title: updatedTitle,
+              messages: [...t.messages, userMsg, assistantMsg],
+              updatedAt: Date.now(),
+              currentReport: newReport,
+            }
+          : t
+      );
+      saveThreads(finalThreads);
+      setCurrentReport(newReport);
+
+      if (!data.isLimitReached) {
+        saveHistory([newReport, ...history]);
+        if (!usageState.isPro) {
+          const newCount = usageState.dailyPromptCount + 1;
+          const updatedUsage = {
+            ...usageState,
+            dailyPromptCount: newCount,
+            lastResetDate: TODAY_DATE_STR(),
+          };
+          saveUsageState(updatedUsage);
+        }
+      }
+    } catch (err: unknown) {
+      console.error('Transform error:', err);
+      const msg = err instanceof Error ? err.message : 'Transformation failed';
+      addToast('error', msg);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRegenerate = () => {
+    const targetThread = threads.find((t) => t.id === activeThreadId) || threads[0];
+    if (!targetThread || targetThread.messages.length === 0) return;
+
+    const userMsgs = targetThread.messages.filter((m) => m.role === 'user');
+    const lastUserMsg = userMsgs[userMsgs.length - 1];
+    if (lastUserMsg) {
+      handleSendMessage(lastUserMsg.content, lastUserMsg.attachments, lastUserMsg.creativeMode);
+    }
+  };
+
+  const handleFeedback = (messageId: string, feedback: 'like' | 'dislike') => {
+    const updatedThreads = threads.map((t) => ({
+      ...t,
+      messages: t.messages.map((m) => (m.id === messageId ? { ...m, feedback } : m)),
+    }));
+    saveThreads(updatedThreads);
+  };
+
   const activeConfig = INDUSTRY_CONFIGS.find((c) => c.id === currentIndustry) || INDUSTRY_CONFIGS[0];
 
   return (
@@ -464,8 +787,8 @@ export default function App() {
       isDeviceMode={isDeviceMode}
       onToggleDeviceMode={() => setIsDeviceMode(!isDeviceMode)}
     >
-      <div className="flex flex-col min-h-full pb-10">
-        {/* Top Header with Usage Badge, User Account & Admin Trigger */}
+      <div className="flex flex-col h-screen min-h-screen bg-[#090d16] text-slate-100 overflow-hidden">
+        {/* Top Header with Gemini Branding, Usage Badge & Account Trigger */}
         <Header
           currentIndustry={currentIndustry}
           onSelectIndustry={handleSelectIndustry}
@@ -487,120 +810,147 @@ export default function App() {
           onLogout={handleLogout}
           announcementBanner={appSettings.announcementBanner}
           isBannerActive={appSettings.isBannerActive}
+          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          onNewChat={handleNewChat}
+          viewMode={viewMode}
+          onToggleViewMode={() => setViewMode(viewMode === 'gemini' ? 'document' : 'gemini')}
         />
 
-        {/* Main Content Area */}
-        <main className="flex-1 px-3 sm:px-6 py-4 flex flex-col gap-6 max-w-5xl mx-auto w-full">
-          {/* Dynamic Hero Pitch Banner (Visible when no report is generated yet) */}
-          {!currentReport && (
-            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900/90 via-slate-900/70 to-emerald-950/30 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                    High-Precision Intelligence Engine
+        {/* Gemini Workspace Layout Container */}
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Gemini Chat Sidebar */}
+          <GeminiSidebar
+            isOpen={isSidebarOpen}
+            onToggleOpen={() => setIsSidebarOpen(!isSidebarOpen)}
+            threads={threads}
+            activeThreadId={activeThreadId}
+            onSelectThread={handleSelectThread}
+            onNewChat={handleNewChat}
+            onRenameThread={handleRenameThread}
+            onDeleteThread={handleDeleteThread}
+            usageState={usageState}
+            onOpenPricing={() => setIsPricingModalOpen(true)}
+            onOpenAdmin={() => setIsAdminPanelModalOpen(true)}
+            onOpenBilling={() => setIsBillingModalOpen(true)}
+            onOpenMailbox={() => setIsMailboxModalOpen(true)}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+          />
+
+          {/* Main Conversational Workspace or Document Viewer */}
+          <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+            {viewMode === 'gemini' ? (
+              <GeminiWorkspace
+                thread={activeThread}
+                threads={threads}
+                onSendMessage={handleSendMessage}
+                onRegenerate={handleRegenerate}
+                onFeedback={handleFeedback}
+                isGenerating={isProcessing}
+                currentIndustry={currentIndustry}
+                onSelectIndustry={handleSelectIndustry}
+                tone={tone}
+                onChangeTone={setTone}
+                responseMode={responseMode}
+                onChangeResponseMode={setResponseMode}
+                usageState={usageState}
+                onOpenPricing={() => setIsPricingModalOpen(true)}
+                currentUser={currentUser}
+                onViewReportDetails={(rep) => {
+                  setCurrentReport(rep);
+                  setViewMode('document');
+                }}
+                onUpdateActionItem={handleUpdateActionItem}
+                onShowToast={addToast}
+                onNewChat={handleNewChat}
+              />
+            ) : (
+              <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 max-w-5xl mx-auto w-full space-y-6">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setViewMode('gemini')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-semibold transition-all cursor-pointer shadow-sm"
+                  >
+                    ← Back to Gemini Chat
+                  </button>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
+                    Structured Document Architecture Hub
                   </span>
                 </div>
-                <h2 className="text-base sm:text-lg font-bold text-white">
-                  {appSettings.heroHeadline || 'Turn messy voice transcripts into elite documentation'}
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-400 max-w-xl">
-                  {appSettings.heroSubhead || 'PulseNote filters filler words, extracts action owners & deadlines, and structures records to strict industry standards.'}
-                </p>
+
+                {currentReport ? (
+                  <DocumentViewer
+                    report={currentReport}
+                    onCopy={handleCopy}
+                    onUpdateActionItem={handleUpdateActionItem}
+                    onEditMarkdown={handleEditMarkdown}
+                    onOpenPricing={() => setIsPricingModalOpen(true)}
+                  />
+                ) : (
+                  <div className="text-center py-16 text-slate-400 space-y-3 bg-slate-900/60 rounded-3xl border border-slate-800 p-8">
+                    <p className="text-base font-semibold text-white">No active document report selected.</p>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      Submit any rough notes, search queries, or creative prompts in the Gemini Workspace to generate full documentation.
+                    </p>
+                    <button
+                      onClick={() => setViewMode('gemini')}
+                      className="mt-2 px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md transition-all"
+                    >
+                      Open Gemini Workspace
+                    </button>
+                  </div>
+                )}
+                {/* Industry Guidelines & Quality Safeguards Card */}
+                <section className="mt-4 p-4 sm:p-5 rounded-2xl bg-slate-900/40 border border-slate-800/60 flex flex-col gap-3 text-xs text-slate-400 no-print">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-300 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      Industry Compliance & Template Rules ({activeConfig.name})
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500">Android Flagship Engine</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+                    {activeConfig.keyFields.map((field, idx) => (
+                      <div
+                        key={idx}
+                        className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                        <span className="font-medium text-slate-300 truncate">{field}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Legal Notice & Payment Direct Settlement Footer */}
+                <footer className="pt-4 border-t border-slate-800/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 no-print">
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    <span>
+                      Direct Settlement UPI: <strong className="text-slate-300 font-mono">wagh.jayesh@oksbi</strong>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => setIsLegalModalOpen(true)}
+                      className="hover:text-amber-400 underline underline-offset-2 transition-colors cursor-pointer"
+                    >
+                      Legal Agreement & Disclaimer
+                    </button>
+                    <button
+                      onClick={() => setIsPricingModalOpen(true)}
+                      className="hover:text-emerald-400 underline underline-offset-2 transition-colors cursor-pointer"
+                    >
+                      Pro Pricing (₹299/mo)
+                    </button>
+                  </div>
+                </footer>
               </div>
-
-              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                <div className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
-                  <div className="text-xs font-mono font-bold text-emerald-400">100%</div>
-                  <div className="text-[10px] text-slate-400">No Filler Words</div>
-                </div>
-                <div className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
-                  <div className="text-xs font-mono font-bold text-cyan-400">Audit-Ready</div>
-                  <div className="text-[10px] text-slate-400">Strict Templates</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Input Module */}
-          <section className="w-full">
-            <InputPanel
-              rawText={rawText}
-              onChangeText={setRawText}
-              targetIndustry={currentIndustry}
-              tone={tone}
-              onChangeTone={setTone}
-              customContext={customContext}
-              onChangeCustomContext={setCustomContext}
-              responseMode={responseMode}
-              onChangeResponseMode={setResponseMode}
-              isProcessing={isProcessing}
-              onTransform={handleTransform}
-              onShowToast={addToast}
-            />
-          </section>
-
-          {/* Generated Document Hub */}
-          {currentReport && (
-            <section className="w-full pt-2 animate-in fade-in slide-in-from-bottom-3 duration-300">
-              <DocumentViewer
-                report={currentReport}
-                onCopy={handleCopy}
-                onUpdateActionItem={handleUpdateActionItem}
-                onEditMarkdown={handleEditMarkdown}
-                onOpenPricing={() => setIsPricingModalOpen(true)}
-              />
-            </section>
-          )}
-
-          {/* Industry Guidelines & Quality Safeguards Card */}
-          <section className="mt-4 p-4 sm:p-5 rounded-2xl bg-slate-900/40 border border-slate-800/60 flex flex-col gap-3 text-xs text-slate-400 no-print">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-300 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                Industry Compliance & Template Rules ({activeConfig.name})
-              </span>
-              <span className="text-[11px] font-mono text-slate-500">Android Flagship Engine</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
-              {activeConfig.keyFields.map((field, idx) => (
-                <div
-                  key={idx}
-                  className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                  <span className="font-medium text-slate-300 truncate">{field}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Legal Notice & Payment Direct Settlement Footer */}
-          <footer className="pt-4 border-t border-slate-800/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 no-print">
-            <div className="flex items-center gap-2">
-              <Lock className="w-3.5 h-3.5 text-slate-400" />
-              <span>
-                Direct Settlement UPI: <strong className="text-slate-300 font-mono">wagh.jayesh@oksbi</strong>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setIsLegalModalOpen(true)}
-                className="hover:text-amber-400 underline underline-offset-2 transition-colors cursor-pointer"
-              >
-                Legal Agreement & Disclaimer
-              </button>
-              <button
-                onClick={() => setIsPricingModalOpen(true)}
-                className="hover:text-emerald-400 underline underline-offset-2 transition-colors cursor-pointer"
-              >
-                Pro Pricing (₹299/mo)
-              </button>
-            </div>
-          </footer>
-        </main>
+            )}
+          </main>
+        </div>
       </div>
 
       {/* Pricing & Checkout Modal */}

@@ -210,3 +210,31 @@ export interface AppInterfaceSettings {
   lastUpdatedBy: string;
 }
 
+export interface ChatMessageAttachment {
+  name: string;
+  size: number;
+  type: string;
+  base64?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+  report?: TransformedReport;
+  attachments?: ChatMessageAttachment[];
+  feedback?: 'like' | 'dislike' | null;
+  creativeMode?: 'text' | 'image' | 'video';
+}
+
+export interface ChatThread {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+  currentReport?: TransformedReport;
+  industry?: TargetIndustry;
+}
+

@@ -1,5 +1,20 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Mic, MicOff, Square, Upload, Loader2, Sparkles, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { 
+  Mic, 
+  MicOff, 
+  Square, 
+  Upload, 
+  Loader2, 
+  Sparkles, 
+  AlertCircle, 
+  RefreshCw, 
+  CheckCircle2,
+  Wifi,
+  WifiOff,
+  Radio,
+  Activity,
+  Layers
+} from 'lucide-react';
 
 interface AudioRecorderProps {
   onTranscriptReady: (transcriptText: string) => void;
@@ -12,6 +27,9 @@ interface AudioRecorderProps {
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB max
 const MIN_AUDIO_BYTES = 100; // 100 bytes minimum to reject empty clicks
+const CHUNK_INTERVAL_MS = 12000; // 12-second incremental chunks to eliminate buffer overflows & gateway timeouts
+const HTTP_TIMEOUT_MS = 90000; // 90-second extended HTTP timeout threshold
+
 const SUPPORTED_AUDIO_TYPES = [
   'audio/webm',
   'audio/webm;codecs=opus',
@@ -29,6 +47,8 @@ const SUPPORTED_AUDIO_TYPES = [
   'video/webm',
 ];
 
+type ConnectionState = 'ready' | 'connecting' | 'listening' | 'streaming' | 'reconnecting' | 'offline';
+
 export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   onTranscriptReady,
   onAppendText,
@@ -43,17 +63,29 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
-  const [retryAttempt, setRetryAttempt] = useState<number>(0);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('ready');
+  const [networkLatencyMs, setNetworkLatencyMs] = useState<number | null>(null);
+  const [chunkCount, setChunkCount] = useState<number>(0);
   const [localPreservedAudio, setLocalPreservedAudio] = useState<{
     blob: Blob;
     mimeType: string;
     fileName?: string;
   } | null>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  // References to preserve state across asynchronous event loops
+  const streamRef = useRef<MediaStream | null>(null);
+  const activeMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const sessionAllBlobsRef = useRef<Blob[]>([]);
+  const currentChunkBlobsRef = useRef<Blob[]>([]);
+  const chunkIndexRef = useRef<number>(0);
+  const chunkTimerRef = useRef<number | null>(null);
+  const isRecordingRef = useRef<boolean>(false);
+  const sessionIdRef = useRef<string>('');
+  const priorContextRef = useRef<string>('');
   const timerRef = useRef<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
   const recognitionRef = useRef<any>(null);
+  const recognitionRestartTimeoutRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -67,7 +99,65 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     }
   }, [preservedAudio]);
 
-  // Setup Web Speech Recognition if available in the browser
+  // Periodic Keep-Alive Ping & Latency Health Check
+  const checkConnectionHealth = useCallback(async () => {
+    try {
+      const startTime = performance.now();
+      const res = await fetch('/api/transcribe/ping', {
+        method: 'GET',
+        headers: { 'Connection': 'keep-alive', 'Cache-Control': 'no-cache' },
+        keepalive: true,
+      });
+
+      if (res.ok) {
+        const latency = Math.round(performance.now() - startTime);
+        setNetworkLatencyMs(latency);
+
+        if (connectionStatus === 'reconnecting' || connectionStatus === 'offline') {
+          setConnectionStatus(isRecordingRef.current ? 'listening' : 'ready');
+          setStatusMessage('Connection restored to server.');
+        }
+      } else {
+        if (isRecordingRef.current) {
+          setConnectionStatus('reconnecting');
+        }
+      }
+    } catch {
+      if (isRecordingRef.current) {
+        setConnectionStatus('reconnecting');
+      } else {
+        setConnectionStatus('offline');
+      }
+    }
+  }, [connectionStatus]);
+
+  // Setup Network Listeners & Heartbeat Ping
+  useEffect(() => {
+    checkConnectionHealth();
+    pingIntervalRef.current = window.setInterval(checkConnectionHealth, 10000);
+
+    const handleOnline = () => {
+      setConnectionStatus(isRecordingRef.current ? 'listening' : 'ready');
+      setStatusMessage('Internet reconnected. Stream resumed.');
+      checkConnectionHealth();
+    };
+
+    const handleOffline = () => {
+      setConnectionStatus('offline');
+      setStatusMessage('Network offline. Dictation audio is safely buffering locally in memory...');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [checkConnectionHealth]);
+
+  // Setup Web Speech Recognition with Seamless Auto-Reconnect
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -90,8 +180,27 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           }
         };
 
+        // Seamless Auto-Reconnect for Web Speech drops mid-recording
+        recognition.onend = () => {
+          if (isRecordingRef.current) {
+            console.log('[STT_RECONNECT] SpeechRecognition ended mid-session. Auto-reconnecting in background...');
+            recognitionRestartTimeoutRef.current = window.setTimeout(() => {
+              if (isRecordingRef.current && recognitionRef.current) {
+                try {
+                  recognitionRef.current.start();
+                } catch {
+                  // Ignore if already active
+                }
+              }
+            }, 250);
+          }
+        };
+
         recognition.onerror = (event: any) => {
-          console.warn('Speech recognition interim notice:', event.error);
+          console.warn('Speech recognition notice:', event.error);
+          if (event.error === 'network' && isRecordingRef.current) {
+            setConnectionStatus('reconnecting');
+          }
         };
 
         recognitionRef.current = recognition;
@@ -102,7 +211,9 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (chunkTimerRef.current) clearInterval(chunkTimerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (recognitionRestartTimeoutRef.current) clearTimeout(recognitionRestartTimeoutRef.current);
     };
   }, [onAppendText]);
 
@@ -173,80 +284,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setAudioLevel(0);
   };
 
-  const startRecording = async () => {
-    try {
-      setErrorMessage(null);
-      interimSpeechBufferRef.current = '';
-      setStatusMessage('Requesting microphone access...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        stream.getTracks().forEach((track) => track.stop());
-        stopVisualizer();
-
-        // Process audio with Gemini Transcribe & auto-retry
-        await processAudioWithGemini(audioBlob, mimeType);
-      };
-
-      mediaRecorder.start(250);
-      setIsRecording(true);
-      setRecordingDuration(0);
-      setStatusMessage('Listening & recording audio...');
-
-      // Start duration counter
-      timerRef.current = window.setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
-      }, 1000);
-
-      // Start audio visualizer
-      startVisualizer(stream);
-
-      // Start web speech recognition if available
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch {
-          // Ignore if already active
-        }
-      }
-    } catch (err: unknown) {
-      console.error('Microphone access failed:', err);
-      const msg = 'Microphone access denied. Please grant permission or paste notes manually.';
-      setStatusMessage(msg);
-      setErrorMessage(msg);
-      setIsRecording(false);
-    }
-  };
-
-  const stopRecording = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    setIsRecording(false);
-    setStatusMessage('Finalizing audio buffer...');
-  };
-
   // Convert Blob to Base64 helper
   const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -261,117 +298,321 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     });
   };
 
-  // Execute transcription with silent automatic retry (up to 2 attempts with exponential backoff)
-  const executeTranscriptionWithRetry = async (
-    base64Data: string,
+  // Process a single incremental audio chunk with keep-alive & auto-reconnection
+  const sendAudioChunk = async (
+    chunkBlob: Blob,
     mimeType: string,
-    maxRetries = 2
-  ): Promise<{ transcript: string }> => {
-    let attempt = 0;
-
-    while (attempt <= maxRetries) {
-      try {
-        if (attempt > 0) {
-          // Exponential backoff: 1000ms for attempt 1, 2000ms for attempt 2
-          const backoffDelay = Math.pow(2, attempt - 1) * 1000;
-          setRetryAttempt(attempt);
-          setStatusMessage(`Transient network blip detected. Silently retrying attempt ${attempt}/${maxRetries} (${backoffDelay}ms backoff)...`);
-          await new Promise((resolve) => setTimeout(resolve, backoffDelay));
-        }
-
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), 25000); // 25s timeout safeguard
-
-        const response = await fetch('/api/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            audioBase64: base64Data,
-            mimeType: mimeType || 'audio/webm',
-          }),
-          signal: controller.signal,
-        });
-
-        window.clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          const status = response.status;
-
-          // For transient network or server errors (429, 500, 502, 503, 504), retry if attempts remain
-          if ((status >= 500 || status === 429) && attempt < maxRetries) {
-            console.warn(`[STT_RETRY] Attempt ${attempt + 1} failed with status ${status}. Initiating backoff...`);
-            attempt++;
-            continue;
-          }
-
-          throw new Error(errData.error || `Server returned error status ${status}`);
-        }
-
-        const data = await response.json();
-        return data;
-      } catch (networkErr: any) {
-        // If abort or network disconnection, attempt retry if within allowance
-        if (attempt < maxRetries) {
-          console.warn(`[STT_RETRY] Network blip on attempt ${attempt + 1}:`, networkErr.message);
-          attempt++;
-          continue;
-        }
-        throw networkErr;
+    chunkIndex: number,
+    isFinal: boolean
+  ) => {
+    if (chunkBlob.size < MIN_AUDIO_BYTES) {
+      if (isFinal) {
+        setConnectionStatus('ready');
+        setStatusMessage('Voice memo complete.');
       }
+      return;
     }
 
-    throw new Error('Transcription API connection dropped. All retry attempts exhausted.');
+    try {
+      setConnectionStatus('streaming');
+      const base64Data = await blobToBase64(chunkBlob);
+
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+
+      const response = await fetch('/api/transcribe/chunk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Connection': 'keep-alive',
+        },
+        keepalive: true,
+        body: JSON.stringify({
+          audioBase64: base64Data,
+          mimeType,
+          chunkIndex,
+          sessionId: sessionIdRef.current,
+          isFinal,
+          priorContext: priorContextRef.current,
+        }),
+        signal: controller.signal,
+      });
+
+      window.clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Server returned chunk error status ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.transcript && data.transcript.trim()) {
+        const newText = data.transcript.trim();
+        priorContextRef.current += (priorContextRef.current ? ' ' : '') + newText;
+        onAppendText(newText + ' ');
+      }
+
+      setChunkCount((prev) => prev + 1);
+
+      if (isRecordingRef.current) {
+        setConnectionStatus('listening');
+        setStatusMessage(`Chunk #${chunkIndex + 1} transcribed • Stream healthy`);
+      } else if (isFinal) {
+        setConnectionStatus('ready');
+        setStatusMessage('Voice memo successfully transcribed!');
+      }
+    } catch (err: any) {
+      console.warn(`[STT_CHUNK_DROP] Chunk #${chunkIndex + 1} dropped: ${err.message}. Seamlessly auto-reconnecting...`);
+      
+      // Seamless auto-reconnect: if still recording, keep buffer and silently retry
+      if (isRecordingRef.current) {
+        setConnectionStatus('reconnecting');
+        setStatusMessage(`Reconnecting stream... Chunk #${chunkIndex + 1} buffered safely.`);
+
+        // Background auto-retry with backoff without interrupting recording
+        setTimeout(async () => {
+          if (!isRecordingRef.current) return;
+          try {
+            const retryBase64 = await blobToBase64(chunkBlob);
+            const retryRes = await fetch('/api/transcribe/chunk', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive' },
+              keepalive: true,
+              body: JSON.stringify({
+                audioBase64: retryBase64,
+                mimeType,
+                chunkIndex,
+                sessionId: sessionIdRef.current,
+                isFinal,
+                priorContext: priorContextRef.current,
+              }),
+            });
+
+            if (retryRes.ok) {
+              const retryData = await retryRes.json();
+              if (retryData.transcript && retryData.transcript.trim()) {
+                priorContextRef.current += (priorContextRef.current ? ' ' : '') + retryData.transcript.trim();
+                onAppendText(retryData.transcript.trim() + ' ');
+              }
+              if (isRecordingRef.current) {
+                setConnectionStatus('listening');
+                setStatusMessage('Stream reconnected successfully! Listening...');
+              }
+            }
+          } catch {
+            // Audio slice remains saved in sessionAllBlobsRef for complete master preservation
+          }
+        }, 1500);
+      }
+    }
   };
 
-  // Main Audio Processor
-  const processAudioWithGemini = async (audioBlob: Blob, mimeType: string, fileName?: string) => {
-    // 1. Frontend validation guardrails
-    const validation = validateAudioBlob(audioBlob, mimeType);
+  // Launch a new MediaRecorder segment on the active microphone stream
+  const startChunkMediaRecorder = () => {
+    if (!streamRef.current || !streamRef.current.active) return;
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+
+    currentChunkBlobsRef.current = [];
+    const recorder = new MediaRecorder(streamRef.current, { mimeType });
+    activeMediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        currentChunkBlobsRef.current.push(event.data);
+        sessionAllBlobsRef.current.push(event.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      if (currentChunkBlobsRef.current.length > 0) {
+        const chunkBlob = new Blob(currentChunkBlobsRef.current, { type: mimeType });
+        const currentIndex = chunkIndexRef.current;
+        chunkIndexRef.current += 1;
+        sendAudioChunk(chunkBlob, mimeType, currentIndex, !isRecordingRef.current);
+      }
+    };
+
+    recorder.start(250);
+  };
+
+  // Rollover to the next audio chunk segment seamlessly
+  const cycleAudioChunk = () => {
+    if (!isRecordingRef.current) return;
+    const oldRecorder = activeMediaRecorderRef.current;
+    if (oldRecorder && oldRecorder.state === 'recording') {
+      // Start the replacement recorder first so 0 audio frames are dropped
+      startChunkMediaRecorder();
+      oldRecorder.stop();
+    }
+  };
+
+  // Start recording voice dictation
+  const startRecording = async () => {
+    try {
+      setErrorMessage(null);
+      setChunkCount(0);
+      interimSpeechBufferRef.current = '';
+      priorContextRef.current = '';
+      sessionIdRef.current = 'session-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+      chunkIndexRef.current = 0;
+      sessionAllBlobsRef.current = [];
+      currentChunkBlobsRef.current = [];
+
+      setConnectionStatus('connecting');
+      setStatusMessage('Connecting audio stream & microphone...');
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      setRecordingDuration(0);
+      setConnectionStatus('listening');
+      setStatusMessage('Listening & streaming audio chunks...');
+
+      // Start initial chunk recorder
+      startChunkMediaRecorder();
+
+      // Duration counter
+      timerRef.current = window.setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+
+      // Incremental chunk interval timer: dispatches chunks every 12 seconds
+      chunkTimerRef.current = window.setInterval(cycleAudioChunk, CHUNK_INTERVAL_MS);
+
+      // Start audio visualizer
+      startVisualizer(stream);
+
+      // Start web speech recognition if available
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch {
+          // Ignore if already active
+        }
+      }
+    } catch (err: unknown) {
+      console.error('Microphone access failed:', err);
+      const msg = 'Microphone access denied. Please grant permission or upload audio notes.';
+      setStatusMessage(msg);
+      setErrorMessage(msg);
+      setConnectionStatus('ready');
+      setIsRecording(false);
+      isRecordingRef.current = false;
+    }
+  };
+
+  // Stop recording voice dictation
+  const stopRecording = async () => {
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    setStatusMessage('Finalizing final chunk & preserving audio buffer...');
+
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (chunkTimerRef.current) clearInterval(chunkTimerRef.current);
+    if (recognitionRestartTimeoutRef.current) clearTimeout(recognitionRestartTimeoutRef.current);
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+
+    // Stop active chunk recorder (triggers onstop with final chunk dispatch)
+    if (activeMediaRecorderRef.current && activeMediaRecorderRef.current.state !== 'inactive') {
+      activeMediaRecorderRef.current.stop();
+    }
+
+    // Stop microphone stream tracks
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+
+    stopVisualizer();
+
+    // Assemble complete master audio file for preservation & manual retry
+    setTimeout(() => {
+      if (sessionAllBlobsRef.current.length > 0) {
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm';
+        const fullAudioBlob = new Blob(sessionAllBlobsRef.current, { type: mimeType });
+        setLocalPreservedAudio({ blob: fullAudioBlob, mimeType });
+        onPreserveAudio?.(fullAudioBlob, mimeType);
+      }
+    }, 400);
+  };
+
+  // Full transcription fallback execution for uploaded files or manual retry
+  const processFullAudioFile = async (blob: Blob, mimeType: string, fileName?: string) => {
+    const validation = validateAudioBlob(blob, mimeType);
     if (!validation.valid) {
-      const err = validation.error || 'Invalid audio recording payload';
+      const err = validation.error || 'Audio validation failed';
       setErrorMessage(err);
       setStatusMessage(err);
       onError?.(err);
       return;
     }
 
-    // 2. Safely preserve raw audio buffer so user NEVER loses content
-    const audioPayload = { blob: audioBlob, mimeType, fileName };
-    setLocalPreservedAudio(audioPayload);
-    onPreserveAudio?.(audioBlob, mimeType, fileName);
-
     try {
       setIsProcessing(true);
       setErrorMessage(null);
-      setRetryAttempt(0);
-      setStatusMessage(fileName ? `Uploading & transcribing "${fileName}"...` : 'Transcribing audio via Gemini 2.5 Flash...');
+      setConnectionStatus('streaming');
+      setStatusMessage('Encoding audio buffer with extended 90s keep-alive timeout...');
 
-      const base64Data = await blobToBase64(audioBlob);
-      const data = await executeTranscriptionWithRetry(base64Data, mimeType, 2);
+      // Preserve audio buffer immediately
+      setLocalPreservedAudio({ blob, mimeType, fileName });
+      onPreserveAudio?.(blob, mimeType, fileName);
 
-      if (data && data.transcript) {
+      const base64Data = await blobToBase64(blob);
+
+      setStatusMessage('Transcribing with Gemini (multi-model failover active)...');
+
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Connection': 'keep-alive',
+        },
+        keepalive: true,
+        body: JSON.stringify({
+          audioBase64: base64Data,
+          mimeType: mimeType || 'audio/webm',
+        }),
+        signal: controller.signal,
+      });
+
+      window.clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server responded with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.transcript && data.transcript.trim()) {
         onTranscriptReady(data.transcript);
-        setStatusMessage('Audio transcribed successfully!');
+        setStatusMessage('Voice audio transcribed and preserved in editor!');
         setErrorMessage(null);
-        setLocalPreservedAudio(null);
-        onClearPreservedAudio?.();
+        setConnectionStatus('ready');
       } else {
-        // Fallback: If no clear speech extracted, preserve existing words
         setStatusMessage('No distinct speech detected in audio clip. Spoken draft preserved.');
       }
     } catch (e: any) {
-      console.error('Transcription error after retries:', e);
+      console.error('Transcription error:', e);
       const dropMessage = 'Transcription API connection dropped. Your spoken text has been preserved below for manual review or retry.';
       setErrorMessage(dropMessage);
       setStatusMessage(dropMessage);
-      
-      // Preserve speech in editor: pass whatever interim text was collected during recording
-      const captured = interimSpeechBufferRef.current.trim();
-      onError?.(dropMessage, captured);
+      setConnectionStatus('reconnecting');
+      onError?.(dropMessage, interimSpeechBufferRef.current.trim());
     } finally {
       setIsProcessing(false);
-      setRetryAttempt(0);
     }
   };
 
@@ -379,7 +620,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const handleManualRetry = () => {
     const audioToRetry = localPreservedAudio || preservedAudio;
     if (audioToRetry) {
-      processAudioWithGemini(audioToRetry.blob, audioToRetry.mimeType, audioToRetry.fileName);
+      processFullAudioFile(audioToRetry.blob, audioToRetry.mimeType, audioToRetry.fileName);
     }
   };
 
@@ -388,7 +629,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     if (!file) return;
 
     try {
-      await processAudioWithGemini(file, file.type || 'audio/mp3', file.name);
+      await processFullAudioFile(file, file.type || 'audio/mp3', file.name);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -402,6 +643,48 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
   const hasPreservedAudio = Boolean(localPreservedAudio || preservedAudio);
 
+  // Network visual indicator configuration
+  const networkConfig = {
+    ready: {
+      color: 'bg-emerald-500',
+      textColor: 'text-emerald-400',
+      label: 'Connected',
+      icon: Wifi,
+    },
+    connecting: {
+      color: 'bg-sky-400 animate-pulse',
+      textColor: 'text-sky-300',
+      label: 'Connecting...',
+      icon: Loader2,
+    },
+    listening: {
+      color: 'bg-emerald-400 animate-ping',
+      textColor: 'text-emerald-300',
+      label: 'Listening & Streaming',
+      icon: Radio,
+    },
+    streaming: {
+      color: 'bg-cyan-400 animate-pulse',
+      textColor: 'text-cyan-300',
+      label: `Streaming Chunk #${chunkIndexRef.current + 1}`,
+      icon: Loader2,
+    },
+    reconnecting: {
+      color: 'bg-amber-400 animate-bounce',
+      textColor: 'text-amber-300',
+      label: 'Reconnecting Stream...',
+      icon: RefreshCw,
+    },
+    offline: {
+      color: 'bg-rose-500',
+      textColor: 'text-rose-400',
+      label: 'Offline (Buffer Safe)',
+      icon: WifiOff,
+    },
+  }[connectionStatus];
+
+  const NetworkIcon = networkConfig.icon;
+
   return (
     <div className="w-full bg-slate-900/70 border border-slate-800/80 rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center relative overflow-hidden backdrop-blur-md">
       {/* Background radial glow when recording */}
@@ -412,14 +695,39 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         />
       )}
 
-      {/* Recording Control Button */}
+      {/* Recording Control Button & Network Indicator Header */}
       <div className="relative z-10 flex flex-col items-center gap-3 w-full">
+        {/* Visual Network Status Indicator */}
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950/80 border border-slate-800 text-xs shadow-sm mb-0.5 backdrop-blur-md">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${networkConfig.color}`} />
+            <NetworkIcon className={`w-3 h-3 ${networkConfig.textColor} ${connectionStatus === 'connecting' || connectionStatus === 'streaming' ? 'animate-spin' : ''}`} />
+            <span className={`font-semibold ${networkConfig.textColor}`}>
+              {networkConfig.label}
+            </span>
+          </div>
+
+          {networkLatencyMs !== null && (
+            <span className="text-[10px] text-slate-500 font-mono pl-1.5 border-l border-slate-800">
+              {networkLatencyMs}ms
+            </span>
+          )}
+
+          {isRecording && (
+            <span className="text-[10px] text-teal-400 font-mono pl-1.5 border-l border-slate-800 flex items-center gap-1">
+              <Layers className="w-2.5 h-2.5" />
+              <span>{chunkCount} chunks</span>
+            </span>
+          )}
+        </div>
+
+        {/* Microphone Button with Animated Rings */}
         <div className="relative">
           {/* Animated pulsing rings when recording */}
           {isRecording && (
             <>
-              <span className="animate-ping absolute -inset-3 rounded-full bg-rose-500/30 opacity-75"></span>
-              <span className="absolute -inset-6 rounded-full border border-rose-500/20 animate-pulse"></span>
+              <span className="animate-ping absolute -inset-3 rounded-full bg-rose-500/30 opacity-75" />
+              <span className="animate-inset-6 rounded-full border border-rose-500/20 animate-pulse" />
             </>
           )}
 
@@ -447,18 +755,20 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         <div className="flex flex-col items-center text-center gap-1 max-w-md w-full">
           {isRecording ? (
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
               <span className="font-mono text-base sm:text-lg font-bold text-rose-400">
                 {formatDuration(recordingDuration)}
               </span>
-              <span className="text-xs text-rose-300 font-medium">Recording voice memo...</span>
+              <span className="text-xs text-rose-300 font-medium">
+                {connectionStatus === 'reconnecting' 
+                  ? 'Reconnecting in background... Spoken words safe' 
+                  : 'Recording & streaming incremental chunks...'}
+              </span>
             </div>
           ) : (
             <p className="text-sm font-semibold text-slate-200">
               {isProcessing
-                ? retryAttempt > 0
-                  ? `Retrying transcription (${retryAttempt}/2)...`
-                  : 'Transcribing with Gemini...'
+                ? 'Transcribing audio buffer with Gemini...'
                 : 'Tap Mic to Dictate Memo or Inspection Log'}
             </p>
           )}
@@ -466,13 +776,13 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           {/* Audio Wave Bars when recording */}
           {isRecording && (
             <div className="flex items-center gap-1 h-8 mt-1">
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-1"></span>
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-2"></span>
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-3"></span>
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-4"></span>
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-5"></span>
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-2"></span>
-              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-4"></span>
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-1" />
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-2" />
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-3" />
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-4" />
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-5" />
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-2" />
+              <span className="w-1 bg-rose-400 rounded-full animate-audio-bar-4" />
             </div>
           )}
 

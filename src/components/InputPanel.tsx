@@ -132,14 +132,24 @@ export const InputPanel: React.FC<InputPanelProps> = ({
         reader.onloadend = async () => {
           try {
             const base64Data = (reader.result as string).split(',')[1];
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 90000); // 90s extended timeout
+
             const res = await fetch('/api/transcribe', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'Connection': 'keep-alive',
+              },
+              keepalive: true,
               body: JSON.stringify({
                 audioBase64: base64Data,
                 mimeType: preservedAudio.mimeType,
               }),
+              signal: controller.signal,
             });
+
+            window.clearTimeout(timeoutId);
 
             if (!res.ok) {
               const errData = await res.json().catch(() => ({}));
