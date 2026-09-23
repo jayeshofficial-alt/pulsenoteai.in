@@ -19,7 +19,12 @@ import {
   Edit3,
   Calendar,
   User,
-  Clock
+  Clock,
+  Zap,
+  Globe,
+  Compass,
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 
 interface DocumentViewerProps {
@@ -37,7 +42,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   onEditMarkdown,
   onOpenPricing,
 }) => {
-  const [activeTab, setActiveTab] = useState<'structured' | 'markdown' | 'actions' | 'entities'>('structured');
+  const [activeTab, setActiveTab] = useState<'solution' | 'structured' | 'markdown' | 'actions' | 'entities'>('solution');
   const [isCopied, setIsCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -201,6 +206,18 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         {/* Navigation View Tabs */}
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
           <button
+            onClick={() => setActiveTab('solution')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === 'solution'
+                ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Solution & Strategy</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('structured')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === 'structured'
@@ -331,6 +348,148 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <div>
               <span className="font-bold text-amber-300 uppercase tracking-wide mr-1.5">Mandatory Compliance Notice:</span>
               {report.complianceDisclaimer}
+            </div>
+          </div>
+        )}
+
+        {/* View Tab: Live Intelligent Solution & Strategic Plan (Requirement 3) */}
+        {activeTab === 'solution' && (
+          <div className="flex flex-col gap-6 animate-in fade-in">
+            {/* 1. Immediate Solution / Direct Answer */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-900 border-2 border-emerald-500/50 shadow-xl shadow-emerald-950/30 flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2 border-b border-emerald-500/30 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
+                      Category 1 • Direct Execution
+                    </span>
+                    <h3 className="text-base sm:text-lg font-bold text-white">
+                      Immediate Solution / Direct Answer
+                    </h3>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                  Priority 1
+                </span>
+              </div>
+              <p className="text-sm sm:text-base text-slate-100 leading-relaxed whitespace-pre-line font-medium">
+                {report.immediateSolution || 'Direct action formulated based on prompt parameters.'}
+              </p>
+            </div>
+
+            {/* 2. Best Online Practices & Current Industry Standards */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-cyan-950/30 via-slate-950 to-slate-900 border border-cyan-500/40 shadow-lg flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2 border-b border-cyan-500/20 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+                    <Globe className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 font-mono">
+                      Category 2 • Verified Intelligence
+                    </span>
+                    <h3 className="text-base sm:text-lg font-bold text-white">
+                      Best Online Practices & Current Industry Standards
+                    </h3>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
+                  Online Standards
+                </span>
+              </div>
+              <div className="text-sm text-slate-200 leading-relaxed whitespace-pre-line">
+                {report.bestOnlinePractices || 'Industry-standard compliance standards and verified online practices synthesized.'}
+              </div>
+
+              {/* Grounded Web Sources Citations */}
+              {report.searchSources && report.searchSources.length > 0 && (
+                <div className="mt-2 pt-3 border-t border-slate-800/80 flex flex-col gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    Verified Research & Grounded Sources:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {report.searchSources.map((source, sIdx) => (
+                      <div key={sIdx} className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col gap-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold text-cyan-300 truncate">{source.title}</span>
+                          {source.url && (
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-slate-500 hover:text-cyan-400 transition-colors shrink-0"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                        {source.snippet && (
+                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                            {source.snippet}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Actionable Strategic Plan / Next Steps */}
+            <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-teal-950/30 via-slate-950 to-slate-900 border border-teal-500/40 shadow-lg flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2 border-b border-teal-500/20 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400">
+                    <Compass className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 font-mono">
+                      Category 3 • Roadmap & Milestones
+                    </span>
+                    <h3 className="text-base sm:text-lg font-bold text-white">
+                      Actionable Strategic Plan & Next Moves
+                    </h3>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-teal-500/10 text-teal-300 border border-teal-500/30">
+                  Execution Ready
+                </span>
+              </div>
+              <div className="text-sm text-slate-200 leading-relaxed whitespace-pre-line">
+                {report.actionableStrategicPlan || 'Strategic step-by-step roadmap to plan and execute next moves.'}
+              </div>
+
+              {/* Action Item Cards Preview */}
+              {report.actionItems && report.actionItems.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-col gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Immediate Milestones & Task Register:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {report.actionItems.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex items-start justify-between gap-2"
+                      >
+                        <div className="flex items-start gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                          <div className="text-xs">
+                            <span className="font-semibold text-slate-200 block">{item.task}</span>
+                            <span className="text-[11px] text-slate-400">Owner: {item.owner} • Target: {item.deadline}</span>
+                          </div>
+                        </div>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0 ${getSeverityBadgeClass(item.priority)}`}>
+                          {item.priority}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

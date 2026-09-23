@@ -164,7 +164,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
             value={rawText}
             onChange={(e) => onChangeText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Paste raw audio transcript, unformatted bullet points, or stream-of-consciousness field notes here...\n\nExample (${activeConfig.name}):\n${relevantPresets[0]?.rawText.slice(0, 160)}...`}
+            placeholder={`Enter your prompt, query, audio transcript, or rough notes here...\n\nPulse Note AI searches current web intelligence and Google data sources to deliver:\n1. Immediate Solution / Direct Answer\n2. Best Online Practices & Current Industry Standards\n3. Actionable Strategic Plan / Next Steps\n\nExample (${activeConfig.name}):\n${relevantPresets[0]?.rawText.slice(0, 160)}...`}
             rows={7}
             className="w-full bg-transparent text-slate-100 placeholder:text-slate-500 text-sm sm:text-base p-4 rounded-2xl resize-y focus:outline-none leading-relaxed font-sans"
           />
@@ -253,12 +253,12 @@ export const InputPanel: React.FC<InputPanelProps> = ({
           {isProcessing ? (
             <>
               <Wand2 className="w-4 h-4 animate-spin text-slate-950" />
-              <span>Structuring Document...</span>
+              <span>Analyzing & Solving with Live Search...</span>
             </>
           ) : (
             <>
               <Sparkles className="w-4 h-4 text-slate-950" />
-              <span>Transform to Documentation</span>
+              <span>Solve & Plan With Live Search</span>
               <span className="hidden sm:inline-block text-[10px] font-mono opacity-70 bg-black/20 px-1.5 py-0.5 rounded">
                 ⌘↵
               </span>

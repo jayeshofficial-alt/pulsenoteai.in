@@ -22,6 +22,12 @@ export interface DocumentSection {
   category?: string;
 }
 
+export interface SearchSource {
+  title: string;
+  url?: string;
+  snippet?: string;
+}
+
 export interface TransformedReport {
   id: string;
   timestamp: number;
@@ -29,6 +35,10 @@ export interface TransformedReport {
   title: string;
   rawInput: string;
   markdownReport: string;
+  immediateSolution?: string;
+  bestOnlinePractices?: string;
+  actionableStrategicPlan?: string;
+  searchSources?: SearchSource[];
   sections: DocumentSection[];
   actionItems: ActionItem[];
   detectedEntities: DetectedEntity[];
