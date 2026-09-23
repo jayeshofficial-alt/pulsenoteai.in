@@ -1,5 +1,70 @@
 export type TargetIndustry = 'general' | 'medical' | 'real_estate' | 'software' | 'executive';
 
+export type SearchFormatLens =
+  | 'deep_research'
+  | 'creative_writing'
+  | 'code_generation'
+  | 'business_strategy'
+  | 'general_assistant';
+
+export interface FormatLensOption {
+  id: SearchFormatLens;
+  label: string;
+  shortLabel: string;
+  tagline: string;
+  iconName: 'Search' | 'Sparkles' | 'PenTool' | 'Code' | 'TrendingUp';
+  badgeColor: string;
+  bgGlow: string;
+}
+
+export const FORMAT_LENSES: FormatLensOption[] = [
+  {
+    id: 'deep_research',
+    label: 'Deep Research',
+    shortLabel: 'Research',
+    tagline: 'Comprehensive synthesis, source citations & evidence analysis',
+    iconName: 'Search',
+    badgeColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
+    bgGlow: 'from-cyan-500/20 to-blue-500/20',
+  },
+  {
+    id: 'creative_writing',
+    label: 'Creative Writing',
+    shortLabel: 'Creative',
+    tagline: 'Narrative storytelling, scripts, marketing copy & worldbuilding',
+    iconName: 'PenTool',
+    badgeColor: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
+    bgGlow: 'from-purple-500/20 to-pink-500/20',
+  },
+  {
+    id: 'code_generation',
+    label: 'Code Generation',
+    shortLabel: 'Coding',
+    tagline: 'Clean system architecture, algorithms, unit tests & debugging',
+    iconName: 'Code',
+    badgeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+    bgGlow: 'from-emerald-500/20 to-teal-500/20',
+  },
+  {
+    id: 'business_strategy',
+    label: 'Business Strategy',
+    shortLabel: 'Strategy',
+    tagline: 'Executive briefs, KPI frameworks, risk modeling & roadmaps',
+    iconName: 'TrendingUp',
+    badgeColor: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+    bgGlow: 'from-amber-500/20 to-orange-500/20',
+  },
+  {
+    id: 'general_assistant',
+    label: 'General Assistant',
+    shortLabel: 'Assistant',
+    tagline: 'Instant balanced answers, multi-modal synthesis & task execution',
+    iconName: 'Sparkles',
+    badgeColor: 'text-teal-400 bg-teal-500/10 border-teal-500/30',
+    bgGlow: 'from-teal-500/20 to-cyan-500/20',
+  },
+];
+
 export type ToneSetting = 'concise' | 'standard' | 'detailed';
 
 export type DynamicResponseMode = 'auto' | 'research' | 'productivity' | 'problem_solving';
@@ -59,6 +124,7 @@ export interface VideoGenerationParams {
   audioPrompt: string;
   scenes: VideoStoryboardScene[];
   modelPromptVeoSora: string;
+  previewPosterUrl?: string;
 }
 
 export interface TransformedReport {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   ChatMessage, 
   ChatThread, 
@@ -8,10 +8,13 @@ import {
   TransformedReport, 
   UserUsageState, 
   UserProfile,
-  ChatMessageAttachment 
+  ChatMessageAttachment,
+  SearchFormatLens 
 } from '../types';
 import { GeminiMessageItem } from './GeminiMessageItem';
 import { AudioRecorder } from './AudioRecorder';
+import { FormatLensDropdown } from './FormatLensDropdown';
+import { MediaCountdownTimer } from './MediaCountdownTimer';
 import { 
   Sparkles, 
   ArrowUp, 
@@ -35,7 +38,8 @@ import {
   Stethoscope,
   Building,
   Terminal,
-  Briefcase
+  Briefcase,
+  Code
 } from 'lucide-react';
 
 interface GeminiWorkspaceProps {
@@ -47,6 +51,8 @@ interface GeminiWorkspaceProps {
   isGenerating: boolean;
   currentIndustry: TargetIndustry;
   onSelectIndustry: (ind: TargetIndustry) => void;
+  currentLens: SearchFormatLens;
+  onSelectLens: (lens: SearchFormatLens) => void;
   tone: ToneSetting;
   onChangeTone: (tone: ToneSetting) => void;
   responseMode: DynamicResponseMode;
@@ -69,6 +75,8 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
   isGenerating,
   currentIndustry,
   onSelectIndustry,
+  currentLens,
+  onSelectLens,
   tone,
   onChangeTone,
   responseMode,
@@ -87,16 +95,34 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
 
+  // Active calibrated media countdown timer state
+  const [activeMediaTimer, setActiveMediaTimer] = useState<{
+    mediaType: 'image' | 'video';
+    promptSnippet: string;
+    totalDurationSeconds: number;
+  } | null>(null);
+
+  const [isBackendReady, setIsBackendReady] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isThreadEmpty = thread.messages.length === 0;
 
+  // Synchronized message view: while media countdown is running, hold back the assistant message until 00:00
+  const displayedMessages = useMemo(() => {
+    if (!activeMediaTimer) return thread.messages;
+    if (thread.messages.length > 0 && thread.messages[thread.messages.length - 1].role === 'assistant') {
+      return thread.messages.slice(0, -1);
+    }
+    return thread.messages;
+  }, [thread.messages, activeMediaTimer]);
+
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [thread.messages, isGenerating]);
+  }, [thread.messages, isGenerating, activeMediaTimer]);
 
   // Auto expand textarea height
   useEffect(() => {
@@ -113,9 +139,9 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
     }
   };
 
-  const handleSubmit = async () => {
-    const trimmed = inputText.trim();
-    if ((!trimmed && attachments.length === 0) || isGenerating) return;
+  const handleSubmit = async (overrideText?: string, modeOverride?: 'text' | 'image' | 'video') => {
+    const textToSend = (overrideText || inputText).trim();
+    if ((!textToSend && attachments.length === 0) || isGenerating) return;
 
     // Check freemium limit
     if (!usageState.isPro && usageState.dailyPromptCount >= 3) {
@@ -124,9 +150,25 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
       return;
     }
 
-    const textToSend = trimmed;
+    const mode = modeOverride || creativeMode;
     const currentAttachments = [...attachments];
-    const mode = creativeMode;
+
+    // Detect image vs video generation prompt
+    const isImageRequest = mode === 'image' || /(create|generate|make|draw|render)\b.+(image|photo|picture|artwork|illustration)/i.test(textToSend);
+    const isVideoRequest = mode === 'video' || /(create|generate|make|direct)\b.+(video|scene|storyboard|cinematic|film)/i.test(textToSend);
+
+    if (isVideoRequest || isImageRequest) {
+      const mType: 'image' | 'video' = isVideoRequest ? 'video' : 'image';
+      const duration = isVideoRequest ? 30 : 12;
+      setActiveMediaTimer({
+        mediaType: mType,
+        promptSnippet: textToSend.slice(0, 70),
+        totalDurationSeconds: duration,
+      });
+      setIsBackendReady(false);
+    } else {
+      setActiveMediaTimer(null);
+    }
 
     setInputText('');
     setAttachments([]);
@@ -137,7 +179,19 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
       textareaRef.current.style.height = 'auto';
     }
 
-    await onSendMessage(textToSend, currentAttachments, mode);
+    try {
+      await onSendMessage(textToSend, currentAttachments, mode);
+      setIsBackendReady(true);
+    } catch (err) {
+      setActiveMediaTimer(null);
+      setIsBackendReady(false);
+    }
+  };
+
+  const handleCountdownComplete = () => {
+    // Exact timer reached 00:00: reveal synthesized media asset on screen
+    setActiveMediaTimer(null);
+    setIsBackendReady(false);
   };
 
   // Handle file attachment
@@ -199,48 +253,48 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Quick prompt cards
+  // Quick prompt cards aligned with universal lenses and creative capabilities
   const promptSuggestions = [
     {
-      title: 'Executive Strategic Synthesis',
-      description: 'Convert messy multi-speaker meeting notes into an audit-ready executive brief.',
-      icon: Briefcase,
-      color: 'text-amber-400',
-      prompt: 'Draft an audit-ready executive summary from rough meeting notes: Q3 product roadmap delayed by 2 weeks, API latency reduced by 40%, 3 new enterprise contracts closing by Friday. Action owners: David (DevOps), Sarah (Product).',
-      industry: 'executive' as TargetIndustry,
-      mode: 'text' as const,
-    },
-    {
-      title: 'Clinical SOAP Consultation',
-      description: 'Transform rough patient vitals and symptoms into strict medical documentation.',
-      icon: Stethoscope,
-      color: 'text-emerald-400',
-      prompt: 'Patient is a 54yo male presenting with sudden onset acute chest discomfort radiating to left jaw, BP 148/92, HR 102. Administered sublingual nitroglycerin, ordered 12-lead ECG, troponin panel, and chest radiograph.',
-      industry: 'medical' as TargetIndustry,
-      mode: 'text' as const,
-    },
-    {
-      title: 'Create 8K Concept Image',
-      description: 'Synthesize photorealistic concept art with optical lighting and composition tags.',
-      icon: ImageIcon,
+      title: 'Deep Market & Technical Research',
+      description: 'Comprehensive multi-source analysis with source citations, risk matrices, and trend data.',
+      icon: Search,
       color: 'text-indigo-400',
-      prompt: 'Create an image of an ultra-modern hospital telemetry command center at night with holographic vital monitoring screens and atmospheric volumetric blue lighting.',
-      industry: 'medical' as TargetIndustry,
+      prompt: 'Conduct deep technical research into commercial solid-state battery manufacturing timelines, major OEM roadmaps, and supply chain bottlenecks for 2026-2030.',
+      lens: 'deep_research' as SearchFormatLens,
+      mode: 'text' as const,
+    },
+    {
+      title: 'Full-Stack Architecture & Code',
+      description: 'Production-ready system architecture, resilient algorithms, circuit breakers, and unit tests.',
+      icon: Terminal,
+      color: 'text-emerald-400',
+      prompt: 'Architect a resilient TypeScript async queue worker with redis-backed distributed locking, automatic exponential backoff retry, and prometheus telemetry metrics.',
+      lens: 'code_generation' as SearchFormatLens,
+      mode: 'text' as const,
+    },
+    {
+      title: 'Synthesize 8K Concept Image',
+      description: 'Photorealistic concept art with optical lighting, 35mm composition, and volumetric depth.',
+      icon: ImageIcon,
+      color: 'text-purple-400',
+      prompt: 'Create an image of an ultra-modern sustainable cliffside architectural residence at sunset, overlooking an ocean with volumetric warm golden-hour lighting, minimalist glass framing, and photorealistic 8K textures.',
+      lens: 'creative_writing' as SearchFormatLens,
       mode: 'image' as const,
     },
     {
       title: 'Direct 8K Video Storyboard',
-      description: 'Architect a 3-scene cinematic video sequence with camera motion and Veo/Sora prompts.',
+      description: 'Architect a 3-scene cinematic sequence with camera motion and Veo/Sora prompts.',
       icon: Film,
       color: 'text-cyan-400',
-      prompt: 'Generate an 8-second cinematic video scene of a robotic surgical arm performing high-precision microsurgery under focused medical theater lights.',
-      industry: 'medical' as TargetIndustry,
+      prompt: 'Generate an 8-second cinematic video scene of a sleek autonomous hyperloop train gliding across a neon cyberpunk cityscape at dawn, with dynamic low-angle tracking camera motion.',
+      lens: 'creative_writing' as SearchFormatLens,
       mode: 'video' as const,
     },
   ];
 
   const handleSelectSuggestion = (suggestion: typeof promptSuggestions[0]) => {
-    onSelectIndustry(suggestion.industry);
+    onSelectLens(suggestion.lens);
     setCreativeMode(suggestion.mode);
     setInputText(suggestion.prompt);
     if (textareaRef.current) {
@@ -257,6 +311,36 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#090d16]">
+      {/* Universal Header & Expandable Lens Dropdown */}
+      <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md shrink-0 z-10">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-sm shadow-cyan-500/20">
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+            <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight flex items-center gap-1.5">
+              <span>Universal Search & Multi-Modal</span>
+              <span className="hidden sm:inline-block text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/30">
+                Pulse Engine
+              </span>
+            </h2>
+          </div>
+
+          {/* Expandable Dropdown Menu for Format / Lens */}
+          <FormatLensDropdown
+            currentLens={currentLens}
+            onSelectLens={onSelectLens}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 bg-slate-950/70 px-2.5 py-1 rounded-xl border border-slate-800">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+            <span>Gemini 2.5 Active</span>
+          </span>
+        </div>
+      </div>
+
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 flex flex-col justify-start">
         {/* Empty / Welcome State: Center-Aligned Minimalist Greeting */}
@@ -384,7 +468,7 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
 
                 {/* Send Prompt Button */}
                 <button
-                  onClick={handleSubmit}
+                  onClick={() => handleSubmit()}
                   disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
                   className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md ${
                     inputText.trim() || attachments.length > 0
@@ -462,7 +546,7 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
         ) : (
           /* Multi-Turn Conversational Stream */
           <div className="max-w-3xl mx-auto w-full space-y-4 pb-28 pt-2">
-            {thread.messages.map((message) => (
+            {displayedMessages.map((message) => (
               <GeminiMessageItem
                 key={message.id}
                 message={message}
@@ -475,8 +559,19 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
               />
             ))}
 
-            {/* Shimmering Gemini Generation Indicator */}
-            {isGenerating && (
+            {/* Synchronized Exact Media Countdown Timer Component */}
+            {activeMediaTimer && (
+              <MediaCountdownTimer
+                mediaType={activeMediaTimer.mediaType}
+                promptSnippet={activeMediaTimer.promptSnippet}
+                totalDurationSeconds={activeMediaTimer.totalDurationSeconds}
+                isBackendReady={isBackendReady}
+                onCountdownComplete={handleCountdownComplete}
+              />
+            )}
+
+            {/* Shimmering Gemini Generation Indicator for text/code/research queries */}
+            {isGenerating && !activeMediaTimer && (
               <div className="flex items-start gap-3 max-w-3xl w-full my-4 animate-in fade-in">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-600 via-teal-500 to-emerald-400 flex items-center justify-center text-white shrink-0 mt-1 shadow-md shadow-teal-900/30">
                   <Sparkles className="w-4 h-4 fill-white text-white animate-spin" />
@@ -541,7 +636,7 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
 
                 {/* Send Prompt Button */}
                 <button
-                  onClick={handleSubmit}
+                  onClick={() => handleSubmit()}
                   disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
                   className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 ${
                     inputText.trim() || attachments.length > 0
@@ -621,19 +716,12 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
                   </button>
                 </div>
 
-                {/* Industry Selector Badge */}
+                {/* Expandable Lens Dropdown inside prompt bar */}
                 <div className="flex items-center gap-2">
-                  <select
-                    value={currentIndustry}
-                    onChange={(e) => onSelectIndustry(e.target.value as TargetIndustry)}
-                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px] text-slate-300 outline-none cursor-pointer"
-                  >
-                    <option value="medical">Medical SOAP</option>
-                    <option value="general">General Executive</option>
-                    <option value="real_estate">Real Estate Inspection</option>
-                    <option value="software">Software Architecture</option>
-                    <option value="executive">Corporate Strategic</option>
-                  </select>
+                  <FormatLensDropdown
+                    currentLens={currentLens}
+                    onSelectLens={onSelectLens}
+                  />
                 </div>
               </div>
 

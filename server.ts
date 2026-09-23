@@ -82,12 +82,61 @@ function scrubAdminDetails(obj: any): any {
   return obj;
 }
 
+// Generative SVG synthesizer for instant synchronized rendering of 8K concept visuals
+function generateGenerativeImageSvg(prompt: string, style: string = 'Cinematic 8K', colors: string[] = ['#6366f1', '#0ea5e9', '#f59e0b', '#0f172a']): string {
+  const c1 = colors[0] || '#6366f1';
+  const c2 = colors[1] || '#0ea5e9';
+  const c3 = colors[2] || '#f59e0b';
+  const c4 = colors[3] || '#0f172a';
+  const safePrompt = prompt.slice(0, 80).replace(/[<>&"']/g, '');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="100%" height="100%">
+    <defs>
+      <linearGradient id="skyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${c4}" />
+        <stop offset="50%" stop-color="#1e1b4b" />
+        <stop offset="100%" stop-color="${c1}" stop-opacity="0.8" />
+      </linearGradient>
+      <linearGradient id="accentGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="${c2}" stop-opacity="0.9" />
+        <stop offset="100%" stop-color="${c3}" stop-opacity="0.9" />
+      </linearGradient>
+      <radialGradient id="sunGlow" cx="50%" cy="35%" r="45%">
+        <stop offset="0%" stop-color="${c3}" stop-opacity="0.6" />
+        <stop offset="100%" stop-color="${c4}" stop-opacity="0" />
+      </radialGradient>
+      <filter id="bloom">
+        <feGaussianBlur stdDeviation="25" result="coloredBlur"/>
+        <feMerge>
+          <feMergeNode in="coloredBlur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#skyGrad)"/>
+    <circle cx="640" cy="260" r="280" fill="url(#sunGlow)"/>
+    <path d="M0,520 Q640,460 1280,520 L1280,720 L0,720 Z" fill="#090d16" opacity="0.95"/>
+    <path d="M120,530 L640,360 L1160,530" stroke="${c2}" stroke-width="1.5" opacity="0.3"/>
+    <path d="M280,540 L640,360 L1000,540" stroke="${c3}" stroke-width="1.5" opacity="0.4"/>
+    <circle cx="640" cy="360" r="8" fill="${c3}" filter="url(#bloom)"/>
+    <polygon points="500,480 640,300 780,480" fill="url(#accentGrad)" opacity="0.4" filter="url(#bloom)"/>
+    <polygon points="560,490 640,340 720,490" fill="url(#skyGrad)" opacity="0.7"/>
+    <rect x="40" y="40" width="400" height="42" rx="12" fill="#0f172a" fill-opacity="0.8" stroke="${c2}" stroke-width="1" stroke-opacity="0.5"/>
+    <text x="56" y="66" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="13" font-weight="700">8K SYNTHESIS • ${style.toUpperCase()}</text>
+    <rect x="40" y="630" width="1200" height="50" rx="12" fill="#0f172a" fill-opacity="0.85" stroke="#334155" stroke-width="1"/>
+    <text x="60" y="662" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="13">${safePrompt}...</text>
+  </svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 // API endpoint to transform rough notes/transcripts
 app.post('/api/transform', async (req, res) => {
   try {
     const { 
       rawText, 
       targetIndustry, 
+      formatLens = 'general_assistant',
       tone = 'standard', 
       customContext = '',
       responseMode = 'auto',
@@ -143,7 +192,18 @@ app.post('/api/transform', async (req, res) => {
 
     const targetIndustryName = industryMap[targetIndustry] || 'Universal Search & Multimodal Intelligence';
 
+    const formatLensMap: Record<string, string> = {
+      deep_research: 'Deep Research Mode: Conduct rigorous, exhaustive research with web citations, factual evidence, comparative tables, and deep structural analysis.',
+      creative_writing: 'Creative Writing Mode: Formulate evocative, cinematic narrative prose, rich sensory imagery, and compelling character or script storytelling.',
+      code_generation: 'Code Generation Mode: Architect clean, production-grade, typed code, optimal algorithms, system design diagrams, and comprehensive unit tests.',
+      business_strategy: 'Business Strategy Mode: Structure executive decision frameworks, financial KPI metrics, market penetration models, and risk mitigation registers.',
+      general_assistant: 'General Assistant Mode: Deliver rapid, balanced, highly practical, and actionable intelligence for immediate real-world execution.',
+    };
+
+    const formatLensDescription = formatLensMap[formatLens] || formatLensMap.general_assistant;
+
     const userPrompt = `Target Scope / Context: ${targetIndustryName}
+Selected Output Format & Lens: ${formatLensDescription}
 Tone/Detail Specification: ${tone}
 Requested Dynamic Response Mode: ${responseMode}
 ${customContext ? `Additional Context/Organization: ${customContext}\n` : ''}
@@ -327,6 +387,72 @@ Return a valid JSON object matching this schema:
       } else {
         parsedData.mediaType = 'text';
       }
+    }
+
+    // Attach calibrated preview visualization and countdown metadata for multi-modal requests
+    if (parsedData.mediaType === 'image') {
+      if (!parsedData.imageParams) {
+        parsedData.imageParams = {
+          prompt: rawText,
+          style: 'Photorealistic Hyper-Detailed 8K',
+          lighting: 'Volumetric cinematic fill with atmospheric depth',
+          composition: 'Cinematic wide-angle rule-of-thirds',
+          aspectRatio: '16:9',
+          colorPalette: ['#6366f1', '#0ea5e9', '#f59e0b', '#0f172a'],
+        };
+      }
+      if (!parsedData.imageParams.previewUrl) {
+        parsedData.imageParams.previewUrl = generateGenerativeImageSvg(
+          parsedData.imageParams.prompt || rawText,
+          parsedData.imageParams.style || 'Photorealistic 8K',
+          parsedData.imageParams.colorPalette
+        );
+      }
+      parsedData.estimatedCountdownSeconds = 12;
+    } else if (parsedData.mediaType === 'video') {
+      if (!parsedData.videoParams) {
+        parsedData.videoParams = {
+          title: parsedData.title || 'Cinematic 8K Storyboard',
+          targetDuration: '00:08',
+          aspectRatio: '16:9',
+          cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
+          visualStyle: 'Photorealistic 8K Cinematic',
+          lighting: 'Golden hour volumetric illumination',
+          audioPrompt: 'Atmospheric ambient synthesis with low sub-bass drone',
+          scenes: [
+            {
+              shotNumber: 1,
+              duration: '0-3s',
+              camera: 'Wide establishing drone glide',
+              visualAction: `Establishing dynamic visual sequence for: ${rawText.slice(0, 60)}`,
+              audioSFX: 'Gentle riser with ambient environmental audio',
+            },
+            {
+              shotNumber: 2,
+              duration: '3-6s',
+              camera: 'Medium orbital tracking shot',
+              visualAction: 'Subject focus with smooth parallax and depth of field blur',
+              audioSFX: 'Subtle mechanical or atmospheric accents',
+            },
+            {
+              shotNumber: 3,
+              duration: '6-8s',
+              camera: 'Low-angle slow push-in',
+              visualAction: 'Hero focal climax with lighting accentuation',
+              audioSFX: 'Tonal resolve with spatial stereo fade',
+            },
+          ],
+          modelPromptVeoSora: `Cinematic 8k video scene of ${rawText}, photorealistic 8k, volumetric golden hour fill, smooth drone camera tracking, ultra-detailed textures, 60fps --ar 16:9`,
+        };
+      }
+      if (!parsedData.videoParams.previewPosterUrl) {
+        parsedData.videoParams.previewPosterUrl = generateGenerativeImageSvg(
+          parsedData.videoParams.title || rawText,
+          'Veo 8K Video Frame',
+          ['#06b6d4', '#3b82f6', '#10b981', '#0f172a']
+        );
+      }
+      parsedData.estimatedCountdownSeconds = 30;
     }
 
     // Ensure executive summary exists

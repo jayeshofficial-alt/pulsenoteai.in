@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ChatMessage, 
   TransformedReport, 
@@ -29,7 +29,10 @@ import {
   ArrowRight,
   Palette,
   Camera,
-  Play
+  Play,
+  Pause,
+  Download,
+  CheckCircle2
 } from 'lucide-react';
 
 interface GeminiMessageItemProps {
@@ -54,9 +57,34 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
   const [isCopied, setIsCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [userFeedback, setUserFeedback] = useState<'like' | 'dislike' | null>(message.feedback || null);
+  const [isPlayingVideo, setIsPlayingVideo] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [activeSceneIdx, setActiveSceneIdx] = useState(0);
+  const [isCopiedAsset, setIsCopiedAsset] = useState(false);
 
   const isUser = message.role === 'user';
   const report = message.report;
+
+  // Video playback simulation hook
+  useEffect(() => {
+    let interval: any;
+    if (isPlayingVideo) {
+      interval = setInterval(() => {
+        setVideoProgress((prev) => {
+          if (prev >= 100) {
+            setIsPlayingVideo(false);
+            return 0;
+          }
+          const next = prev + 2.5; // ~4s playback loop
+          if (next > 66) setActiveSceneIdx(2);
+          else if (next > 33) setActiveSceneIdx(1);
+          else setActiveSceneIdx(0);
+          return next;
+        });
+      }, 100);
+    }
+    return () => clearInterval(interval);
+  }, [isPlayingVideo]);
 
   const handleCopy = () => {
     const textToCopy = report?.markdownReport || message.content;
@@ -64,6 +92,13 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
     setIsCopied(true);
     onShowToast?.('success', 'Copied response to clipboard!');
     setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const handleCopyPrompt = (promptText: string) => {
+    navigator.clipboard.writeText(promptText);
+    setIsCopiedAsset(true);
+    onShowToast?.('success', 'Copied prompt to clipboard!');
+    setTimeout(() => setIsCopiedAsset(false), 2000);
   };
 
   const handleToggleSpeak = () => {
@@ -310,30 +345,63 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
               <div className="flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-indigo-400" />
                 <span className="text-xs font-bold text-indigo-300 uppercase tracking-wider">
-                  Gemini Image Generation Prompt Studio
+                  Gemini Image Generation Studio (8K Synthesized)
                 </span>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px]">
-                {report.imageParams.aspectRatio}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px]">
+                  {report.imageParams.aspectRatio}
+                </span>
+                <button
+                  onClick={() => handleCopyPrompt(report.imageParams?.prompt || '')}
+                  className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Copy Generation Prompt"
+                >
+                  {isCopiedAsset ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-indigo-400" />}
+                  <span>Prompt</span>
+                </button>
+              </div>
             </div>
 
-            {/* Visual Simulated Artwork Banner */}
-            <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-gradient-to-br from-indigo-950 via-slate-900 to-purple-950 border border-indigo-900/60 flex flex-col items-center justify-center p-6 text-center shadow-inner">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15),transparent_70%)]" />
-              <Palette className="w-10 h-10 text-indigo-400 mb-2 animate-pulse" />
-              <p className="text-xs font-mono text-indigo-200 max-w-md line-clamp-2 px-4 z-10">
-                "{report.imageParams.prompt}"
-              </p>
-              <div className="flex items-center gap-2 mt-3 z-10">
-                <span className="px-2 py-0.5 rounded-md bg-slate-900/80 border border-indigo-500/30 text-[10px] text-indigo-300 font-mono">
-                  {report.imageParams.style}
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-slate-900/80 border border-indigo-500/30 text-[10px] text-purple-300 font-mono">
-                  {report.imageParams.lighting}
-                </span>
+            {/* Visual Simulated Artwork Banner / Rendered Asset */}
+            {report.imageParams.previewUrl ? (
+              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-slate-900 border border-indigo-900/60 group shadow-2xl">
+                <img
+                  src={report.imageParams.previewUrl}
+                  alt={report.imageParams.prompt}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3.5">
+                  <p className="text-xs font-mono text-slate-200 line-clamp-1 max-w-md">
+                    "{report.imageParams.prompt}"
+                  </p>
+                  <a
+                    href={report.imageParams.previewUrl}
+                    download="pulsenote-8k-concept.svg"
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/40 transition-all shrink-0 ml-2"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download</span>
+                  </a>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-gradient-to-br from-indigo-950 via-slate-900 to-purple-950 border border-indigo-900/60 flex flex-col items-center justify-center p-6 text-center shadow-inner">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15),transparent_70%)]" />
+                <Palette className="w-10 h-10 text-indigo-400 mb-2 animate-pulse" />
+                <p className="text-xs font-mono text-indigo-200 max-w-md line-clamp-2 px-4 z-10">
+                  "{report.imageParams.prompt}"
+                </p>
+                <div className="flex items-center gap-2 mt-3 z-10">
+                  <span className="px-2 py-0.5 rounded-md bg-slate-900/80 border border-indigo-500/30 text-[10px] text-indigo-300 font-mono">
+                    {report.imageParams.style}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-900/80 border border-indigo-500/30 text-[10px] text-purple-300 font-mono">
+                    {report.imageParams.lighting}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Detailed Parameters */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -367,18 +435,83 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
                   Gemini Veo/Sora 8K Video Director Slate
                 </span>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono text-[10px]">
-                {report.videoParams.targetDuration} • {report.videoParams.aspectRatio}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono text-[10px]">
+                  {report.videoParams.targetDuration} • {report.videoParams.aspectRatio}
+                </span>
+                <button
+                  onClick={() => handleCopyPrompt(report.videoParams?.modelPromptVeoSora || '')}
+                  className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Copy Veo/Sora Prompt"
+                >
+                  {isCopiedAsset ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-cyan-400" />}
+                  <span>Prompt</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Video Player & Storyboard Preview */}
+            <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-slate-950 border border-cyan-500/40 group shadow-2xl">
+              {report.videoParams.previewPosterUrl && (
+                <img
+                  src={report.videoParams.previewPosterUrl}
+                  alt={report.videoParams.title}
+                  className="w-full h-full object-cover opacity-80"
+                />
+              )}
+
+              {/* Player Overlay Controls */}
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent flex flex-col justify-between p-4">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-[10px] font-mono text-cyan-300 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                    <span>8K VEO PREVIEW</span>
+                  </span>
+                  <span className="text-xs font-mono font-bold text-cyan-300 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
+                    {isPlayingVideo ? `00:0${Math.min(8, Math.floor((videoProgress / 100) * 8))}` : '00:00'} / {report.videoParams.targetDuration}
+                  </span>
+                </div>
+
+                {/* Center Play/Pause Trigger */}
+                <div className="flex items-center justify-center">
+                  <button
+                    onClick={() => setIsPlayingVideo(!isPlayingVideo)}
+                    className="w-12 h-12 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center shadow-lg shadow-cyan-500/40 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                  >
+                    {isPlayingVideo ? <Pause className="w-6 h-6 fill-slate-950" /> : <Play className="w-6 h-6 fill-slate-950 ml-0.5" />}
+                  </button>
+                </div>
+
+                {/* Bottom Timeline Scrubber */}
+                <div className="space-y-1.5">
+                  <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 to-teal-400 transition-all duration-100"
+                      style={{ width: `${videoProgress}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                    <span>Scene {activeSceneIdx + 1}: {report.videoParams.scenes[activeSceneIdx]?.camera || 'Camera Track'}</span>
+                    <span className="text-cyan-300 font-bold">{isPlayingVideo ? 'PLAYING 60FPS' : 'READY TO PLAY'}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Scenes Breakdown */}
             <div className="space-y-2">
-              {report.videoParams.scenes.map((scene) => (
-                <div key={scene.shotNumber} className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/80 text-xs flex flex-col gap-1">
+              {report.videoParams.scenes.map((scene, idx) => (
+                <div
+                  key={scene.shotNumber}
+                  className={`p-2.5 rounded-xl border text-xs flex flex-col gap-1 transition-all ${
+                    isPlayingVideo && activeSceneIdx === idx
+                      ? 'bg-cyan-950/40 border-cyan-500/50 shadow-md shadow-cyan-950/50'
+                      : 'bg-slate-900/80 border-slate-800/80'
+                  }`}
+                >
                   <div className="flex items-center justify-between font-mono font-bold text-cyan-300">
                     <span className="flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5" />
+                      <Camera className="w-3.5 h-3.5 text-cyan-400" />
                       Shot {scene.shotNumber}: {scene.camera}
                     </span>
                     <span className="text-slate-400">{scene.duration}</span>

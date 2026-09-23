@@ -1,12 +1,9 @@
 import React from 'react';
-import { TargetIndustry, UserUsageState, UserProfile } from '../types';
+import { TargetIndustry, UserUsageState, UserProfile, SearchFormatLens } from '../types';
 import { INDUSTRY_CONFIGS } from '../data/presets';
 import { DailyLimitBadge } from './DailyLimitBadge';
+import { FormatLensDropdown } from './FormatLensDropdown';
 import { 
-  Stethoscope, 
-  Building2, 
-  Cpu, 
-  Briefcase, 
   Smartphone, 
   Maximize2, 
   History,
@@ -27,6 +24,8 @@ import {
 interface HeaderProps {
   currentIndustry: TargetIndustry;
   onSelectIndustry: (industry: TargetIndustry) => void;
+  currentLens?: SearchFormatLens;
+  onSelectLens?: (lens: SearchFormatLens) => void;
   isDeviceMode: boolean;
   onToggleDeviceMode: () => void;
   onOpenHistory: () => void;
@@ -51,6 +50,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   currentIndustry,
   onSelectIndustry,
+  currentLens = 'general_assistant',
+  onSelectLens,
   isDeviceMode,
   onToggleDeviceMode,
   onOpenHistory,
@@ -71,16 +72,6 @@ export const Header: React.FC<HeaderProps> = ({
   viewMode,
   onToggleViewMode,
 }) => {
-  const getIndustryIcon = (iconName: string) => {
-    switch (iconName) {
-      case 'Stethoscope': return <Stethoscope className="w-4 h-4" />;
-      case 'Building2': return <Building2 className="w-4 h-4" />;
-      case 'Cpu': return <Cpu className="w-4 h-4" />;
-      case 'Briefcase': return <Briefcase className="w-4 h-4" />;
-      default: return <Activity className="w-4 h-4" />;
-    }
-  };
-
   const activeConfig = INDUSTRY_CONFIGS.find((c) => c.id === currentIndustry) || INDUSTRY_CONFIGS[0];
   const userEmail = currentUser?.email?.trim().toLowerCase();
   const isAdmin = Boolean(
@@ -145,9 +136,20 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-400 truncate hidden xs:block">
-              {activeConfig.tagline}
+              Universal Search & Multi-Modal Intelligence
             </p>
           </div>
+
+          {/* Expandable Format Lens Dropdown in Header */}
+          {onSelectLens && (
+            <div className="hidden md:block ml-1">
+              <FormatLensDropdown
+                currentLens={currentLens}
+                onSelectLens={onSelectLens}
+                compact
+              />
+            </div>
+          )}
         </div>
 
         {/* Action Controls */}
@@ -272,32 +274,6 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
         </div>
-      </div>
-
-      {/* Target Industry Selection Tabs */}
-      <div className="mt-2.5 -mx-1 px-1 overflow-x-auto flex gap-1.5 scrollbar-none pb-0.5">
-        {INDUSTRY_CONFIGS.map((industry) => {
-          const isSelected = industry.id === currentIndustry;
-          return (
-            <button
-              key={industry.id}
-              onClick={() => onSelectIndustry(industry.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all duration-200 shrink-0 ${
-                isSelected
-                  ? 'bg-slate-100 text-slate-950 font-semibold shadow-md shadow-white/5 ring-2 ring-emerald-500/30'
-                  : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
-              }`}
-            >
-              <span className={isSelected ? 'text-slate-950' : 'text-slate-400'}>
-                {getIndustryIcon(industry.icon)}
-              </span>
-              <span>{industry.name.split('/')[0].trim()}</span>
-              {isSelected && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              )}
-            </button>
-          );
-        })}
       </div>
     </header>
   );

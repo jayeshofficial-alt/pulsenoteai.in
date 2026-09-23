@@ -11,7 +11,8 @@ import {
   AppInterfaceSettings,
   ChatThread,
   ChatMessage,
-  ChatMessageAttachment
+  ChatMessageAttachment,
+  SearchFormatLens
 } from './types';
 import { PRESET_SAMPLES, INDUSTRY_CONFIGS } from './data/presets';
 import { AndroidFrame } from './components/AndroidFrame';
@@ -34,6 +35,7 @@ const TODAY_DATE_STR = () => new Date().toISOString().slice(0, 10);
 
 export default function App() {
   const [currentIndustry, setCurrentIndustry] = useState<TargetIndustry>('medical');
+  const [currentLens, setCurrentLens] = useState<SearchFormatLens>('general_assistant');
   const [rawText, setRawText] = useState<string>(PRESET_SAMPLES[0].rawText);
   const [tone, setTone] = useState<ToneSetting>('standard');
   const [responseMode, setResponseMode] = useState<DynamicResponseMode>('auto');
@@ -666,6 +668,7 @@ export default function App() {
         body: JSON.stringify({
           rawText: content,
           targetIndustry: currentIndustry,
+          formatLens: currentLens,
           tone,
           responseMode,
           customContext: attachments && attachments.length > 0 
@@ -792,6 +795,8 @@ export default function App() {
         <Header
           currentIndustry={currentIndustry}
           onSelectIndustry={handleSelectIndustry}
+          currentLens={currentLens}
+          onSelectLens={setCurrentLens}
           isDeviceMode={isDeviceMode}
           onToggleDeviceMode={() => setIsDeviceMode(!isDeviceMode)}
           onOpenHistory={() => setIsHistoryOpen(true)}
@@ -849,6 +854,8 @@ export default function App() {
                 isGenerating={isProcessing}
                 currentIndustry={currentIndustry}
                 onSelectIndustry={handleSelectIndustry}
+                currentLens={currentLens}
+                onSelectLens={setCurrentLens}
                 tone={tone}
                 onChangeTone={setTone}
                 responseMode={responseMode}
