@@ -4,7 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.js';
-import { mediaQueueManager } from './server/mediaQueue.js';
+import { mediaQueue } from './server/mediaQueue.js';
+import { generateGenerativeImageSvg } from './server/svgGenerator.js';
 
 dotenv.config();
 
@@ -26,7 +27,7 @@ const ai = new GoogleGenAI({
   },
 });
 
-const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
+const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and video concepts should be reviewed and verified before commercial or professional use. The platform bears zero liability.*`;
 
 const UPGRADE_BLOCK_VERBATIM = `🛑 **Daily Free Limit Reached (3/3 Prompts Used)**
 Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
@@ -83,53 +84,84 @@ function scrubAdminDetails(obj: any): any {
   return obj;
 }
 
-// Generative SVG synthesizer for instant synchronized rendering of 8K concept visuals
-function generateGenerativeImageSvg(prompt: string, style: string = 'Cinematic 8K', colors: string[] = ['#6366f1', '#0ea5e9', '#f59e0b', '#0f172a']): string {
-  const c1 = colors[0] || '#6366f1';
-  const c2 = colors[1] || '#0ea5e9';
-  const c3 = colors[2] || '#f59e0b';
-  const c4 = colors[3] || '#0f172a';
-  const safePrompt = prompt.slice(0, 80).replace(/[<>&"']/g, '');
+// ==========================================
+// MULTI-MODAL MEDIA GENERATION & FIFO QUEUE ENDPOINTS
+// ==========================================
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="100%" height="100%">
-    <defs>
-      <linearGradient id="skyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="${c4}" />
-        <stop offset="50%" stop-color="#1e1b4b" />
-        <stop offset="100%" stop-color="${c1}" stop-opacity="0.8" />
-      </linearGradient>
-      <linearGradient id="accentGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="${c2}" stop-opacity="0.9" />
-        <stop offset="100%" stop-color="${c3}" stop-opacity="0.9" />
-      </linearGradient>
-      <radialGradient id="sunGlow" cx="50%" cy="35%" r="45%">
-        <stop offset="0%" stop-color="${c3}" stop-opacity="0.6" />
-        <stop offset="100%" stop-color="${c4}" stop-opacity="0" />
-      </radialGradient>
-      <filter id="bloom">
-        <feGaussianBlur stdDeviation="25" result="coloredBlur"/>
-        <feMerge>
-          <feMergeNode in="coloredBlur"/>
-          <feMergeNode in="SourceGraphic"/>
-        </feMerge>
-      </filter>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#skyGrad)"/>
-    <circle cx="640" cy="260" r="280" fill="url(#sunGlow)"/>
-    <path d="M0,520 Q640,460 1280,520 L1280,720 L0,720 Z" fill="#090d16" opacity="0.95"/>
-    <path d="M120,530 L640,360 L1160,530" stroke="${c2}" stroke-width="1.5" opacity="0.3"/>
-    <path d="M280,540 L640,360 L1000,540" stroke="${c3}" stroke-width="1.5" opacity="0.4"/>
-    <circle cx="640" cy="360" r="8" fill="${c3}" filter="url(#bloom)"/>
-    <polygon points="500,480 640,300 780,480" fill="url(#accentGrad)" opacity="0.4" filter="url(#bloom)"/>
-    <polygon points="560,490 640,340 720,490" fill="url(#skyGrad)" opacity="0.7"/>
-    <rect x="40" y="40" width="400" height="42" rx="12" fill="#0f172a" fill-opacity="0.8" stroke="${c2}" stroke-width="1" stroke-opacity="0.5"/>
-    <text x="56" y="66" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="13" font-weight="700">8K SYNTHESIS • ${style.toUpperCase()}</text>
-    <rect x="40" y="630" width="1200" height="50" rx="12" fill="#0f172a" fill-opacity="0.85" stroke="#334155" stroke-width="1"/>
-    <text x="60" y="662" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="13">${safePrompt}...</text>
-  </svg>`;
+// Enqueue media generation request in FIFO queue (Google Imagen 3 / Veo 3.1)
+app.post('/api/media/generate', (req, res) => {
+  try {
+    const {
+      prompt,
+      mediaType = 'image',
+      aspectRatio = '16:9',
+      style,
+      userId = 'usr_guest',
+      dailyPromptCount = 0,
+      isPro = false,
+    } = req.body;
 
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      return res.status(400).json({ error: 'Prompt is required for media generation.' });
+    }
+
+    // Guardrail: Enforce 3 prompts per day free limit (settlement via wagh.jayesh@oksbi)
+    if (!isPro && dailyPromptCount >= 3) {
+      return res.status(403).json({
+        isLimitReached: true,
+        error: 'Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited media generation.',
+        upgradeMessage: UPGRADE_BLOCK_VERBATIM,
+        settlementVpa: 'wagh.jayesh@oksbi',
+      });
+    }
+
+    const job = mediaQueue.enqueueJob({
+      userId,
+      mediaType: mediaType === 'video' ? 'video' : 'image',
+      prompt,
+      aspectRatio,
+      style,
+    });
+
+    return res.json({
+      success: true,
+      jobId: job.id,
+      mediaType: job.mediaType,
+      status: job.status,
+      queuePosition: job.queuePosition,
+      estimatedSecondsRemaining: job.estimatedSecondsRemaining,
+      totalDurationSeconds: job.totalDurationSeconds,
+      phaseMessage: job.phaseMessage,
+      prompt: job.prompt,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to enqueue media generation job' });
+  }
+});
+
+// Synchronized polling status endpoint for media generation workers
+app.get('/api/media/status/:id', (req, res) => {
+  const { id } = req.params;
+  const job = mediaQueue.getJob(id);
+
+  if (!job) {
+    return res.status(404).json({ error: 'Media generation job not found' });
+  }
+
+  return res.json({
+    id: job.id,
+    mediaType: job.mediaType,
+    status: job.status,
+    queuePosition: job.queuePosition,
+    progressPercent: job.progressPercent,
+    phaseMessage: job.phaseMessage,
+    estimatedSecondsRemaining: job.estimatedSecondsRemaining,
+    totalDurationSeconds: job.totalDurationSeconds,
+    result: job.result ? scrubAdminDetails(job.result) : undefined,
+    error: job.error,
+    complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+  });
+});
 
 // API endpoint to transform rough notes/transcripts
 app.post('/api/transform', async (req, res) => {
@@ -409,7 +441,19 @@ Return a valid JSON object matching this schema:
           parsedData.imageParams.colorPalette
         );
       }
-      parsedData.estimatedCountdownSeconds = 12;
+
+      // Enqueue job into FIFO processing queue
+      const mediaJob = mediaQueue.enqueueJob({
+        userId: req.body.userId || 'usr_guest',
+        mediaType: 'image',
+        prompt: parsedData.imageParams.prompt || rawText,
+        aspectRatio: parsedData.imageParams.aspectRatio || '16:9',
+        style: parsedData.imageParams.style || 'Photorealistic Hyper-Detailed 8K',
+      });
+
+      parsedData.jobId = mediaJob.id;
+      parsedData.queuePosition = mediaJob.queuePosition;
+      parsedData.estimatedCountdownSeconds = mediaJob.totalDurationSeconds;
     } else if (parsedData.mediaType === 'video') {
       if (!parsedData.videoParams) {
         parsedData.videoParams = {
@@ -453,19 +497,19 @@ Return a valid JSON object matching this schema:
           ['#06b6d4', '#3b82f6', '#10b981', '#0f172a']
         );
       }
-      parsedData.estimatedCountdownSeconds = 30;
-    }
 
-    // If mediaType is image or video, enqueue into FIFO Media Queue Manager
-    if (parsedData.mediaType === 'image' || parsedData.mediaType === 'video') {
-      const mediaJob = mediaQueueManager.enqueueJob({
-        mediaType: parsedData.mediaType,
-        prompt: parsedData.imageParams?.prompt || parsedData.videoParams?.title || rawText,
-        aspectRatio: parsedData.imageParams?.aspectRatio || parsedData.videoParams?.aspectRatio || '16:9',
-        style: parsedData.imageParams?.style || parsedData.videoParams?.visualStyle || 'Photorealistic 8K',
+      // Enqueue job into FIFO processing queue
+      const mediaJob = mediaQueue.enqueueJob({
+        userId: req.body.userId || 'usr_guest',
+        mediaType: 'video',
+        prompt: parsedData.videoParams.modelPromptVeoSora || rawText,
+        aspectRatio: parsedData.videoParams.aspectRatio || '16:9',
+        style: parsedData.videoParams.visualStyle || 'Photorealistic 8K Cinematic',
       });
+
       parsedData.jobId = mediaJob.id;
       parsedData.queuePosition = mediaJob.queuePosition;
+      parsedData.estimatedCountdownSeconds = mediaJob.totalDurationSeconds;
     }
 
     // Ensure executive summary exists

@@ -6,7 +6,7 @@ interface FormatLensDropdownProps {
   currentLens: SearchFormatLens;
   onSelectLens: (lens: SearchFormatLens) => void;
   compact?: boolean;
-  dropDirection?: 'down' | 'up';
+  dropDirection?: 'down' | 'up' | 'auto';
   align?: 'left' | 'right';
 }
 
@@ -37,18 +37,25 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
     }
   };
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape key
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
 
@@ -63,15 +70,15 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-1.5 sm:gap-2 rounded-2xl border transition-all duration-200 cursor-pointer ${
           compact
-            ? 'px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 border-slate-700/80 text-xs'
-            : 'px-3.5 py-2 bg-slate-900/90 hover:bg-slate-850 border-slate-700/80 hover:border-slate-600 shadow-md text-xs sm:text-sm font-semibold'
-        } ${isOpen ? 'ring-2 ring-teal-500/30 border-teal-500/50 bg-slate-850' : ''}`}
+            ? 'px-2.5 py-1.5 bg-slate-900/90 hover:bg-slate-800 border-slate-700/80 text-xs shadow-sm'
+            : 'px-3 py-1.5 sm:px-3.5 sm:py-2 bg-slate-900/90 hover:bg-slate-850 border-slate-700/80 hover:border-slate-600 shadow-md text-xs sm:text-sm font-semibold'
+        } ${isOpen ? 'ring-2 ring-teal-500/40 border-teal-500/60 bg-slate-850' : ''}`}
         title="Select Output Format & Lens (General Assistant)"
       >
         <span className={`p-1 rounded-lg ${activeLens.badgeColor} shrink-0`}>
           {getIcon(activeLens.iconName, 'w-3.5 h-3.5 sm:w-4 sm:h-4')}
         </span>
-        <span className="text-white font-medium truncate max-w-[130px] sm:max-w-[180px]">
+        <span className="text-white font-medium truncate max-w-[130px] sm:max-w-[170px]">
           {activeLens.label}
         </span>
         <ChevronDown
@@ -81,7 +88,7 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
         />
       </button>
 
-      {/* Expandable Dropdown Menu Overlay: Absolute, z-index 9999, max-height 240px, overflow-y-auto */}
+      {/* Expandable Dropdown Menu Overlay: Absolute, z-index 9999, max-h-60, overflow-y-auto */}
       {isOpen && (
         <div
           style={{
@@ -89,15 +96,20 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
             zIndex: 9999,
             maxHeight: '240px',
           }}
-          className={`absolute ${directionClass} ${alignmentClass} w-72 sm:w-80 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl backdrop-blur-xl z-[9999] p-2 animate-in fade-in zoom-in-95 duration-150 max-h-[240px] overflow-y-auto`}
+          className={`absolute ${directionClass} ${alignmentClass} w-72 sm:w-80 rounded-2xl bg-slate-900/98 border border-slate-700 shadow-2xl backdrop-blur-2xl z-[9999] p-2 animate-in fade-in zoom-in-95 duration-150 max-h-60 overflow-y-auto`}
         >
-          <div className="sticky top-0 bg-slate-900/95 backdrop-blur-md px-3 py-1.5 border-b border-slate-800/80 mb-1 z-10">
-            <div className="text-[11px] font-mono uppercase tracking-wider font-bold text-slate-400">
-              Output Format & Lens
+          <div className="sticky top-0 bg-slate-900/98 backdrop-blur-md px-3 py-1.5 border-b border-slate-800/80 mb-1 z-10 flex items-center justify-between">
+            <div>
+              <div className="text-[11px] font-mono uppercase tracking-wider font-bold text-slate-300">
+                Output Format & Lens
+              </div>
+              <div className="text-[10px] text-slate-400">
+                Calibrate AI reasoning depth and structure
+              </div>
             </div>
-            <div className="text-[11px] text-slate-500">
-              Calibrate AI reasoning depth and structure
-            </div>
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/30">
+              5 Lenses
+            </span>
           </div>
 
           <div className="space-y-1">
@@ -113,7 +125,7 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
                   }}
                   className={`w-full flex items-start gap-3 p-2.5 rounded-xl text-left transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-slate-800/90 text-white shadow-sm border border-slate-700/80'
+                      ? 'bg-slate-800/95 text-white shadow-sm border border-slate-700/80'
                       : 'text-slate-300 hover:bg-slate-800/60 hover:text-white border border-transparent'
                   }`}
                 >

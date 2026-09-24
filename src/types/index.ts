@@ -135,6 +135,9 @@ export interface TransformedReport {
   rawInput: string;
   markdownReport: string;
   mediaType?: 'text' | 'image' | 'video';
+  jobId?: string;
+  queuePosition?: number;
+  estimatedCountdownSeconds?: number;
   imageParams?: ImageGenerationParams;
   videoParams?: VideoGenerationParams;
   executiveSummary?: string; // 1-2 sentence direct answer or synthesis right at the top
@@ -152,6 +155,30 @@ export interface TransformedReport {
   clarificationRequest?: string;
   clarifyingQuestions?: string[];
   defaultWorkingDraft?: string;
+}
+
+export interface MediaJobStatus {
+  id: string;
+  mediaType: 'image' | 'video';
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  queuePosition: number;
+  progressPercent: number;
+  phaseMessage: string;
+  estimatedSecondsRemaining: number;
+  totalDurationSeconds: number;
+  result?: {
+    mediaType: 'image' | 'video';
+    previewUrl: string;
+    downloadUrl?: string;
+    videoUrl?: string;
+    posterUrl?: string;
+    prompt: string;
+    aspectRatio: string;
+    style: string;
+    imageParams?: ImageGenerationParams;
+    videoParams?: VideoGenerationParams;
+  };
+  error?: string;
 }
 
 export interface IndustryConfig {

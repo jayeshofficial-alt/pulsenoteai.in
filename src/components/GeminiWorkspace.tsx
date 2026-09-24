@@ -100,6 +100,7 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
     mediaType: 'image' | 'video';
     promptSnippet: string;
     totalDurationSeconds: number;
+    jobId?: string;
   } | null>(null);
 
   const [isBackendReady, setIsBackendReady] = useState(false);
@@ -466,22 +467,33 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
                   </button>
                 </div>
 
-                {/* Send Prompt Button */}
-                <button
-                  onClick={() => handleSubmit()}
-                  disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md ${
-                    inputText.trim() || attachments.length > 0
-                      ? 'bg-gradient-to-tr from-teal-500 to-cyan-400 text-slate-950 hover:brightness-110 active:scale-95'
-                      : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                  }`}
-                >
-                  {isGenerating ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                  ) : (
-                    <ArrowUp className="w-4 h-4 stroke-[2.5]" />
-                  )}
-                </button>
+                {/* Right controls: Format Lens selector & Send Prompt Button */}
+                <div className="flex items-center gap-2">
+                  <FormatLensDropdown
+                    currentLens={currentLens}
+                    onSelectLens={onSelectLens}
+                    compact={true}
+                    dropDirection="down"
+                    align="right"
+                  />
+
+                  {/* Send Prompt Button */}
+                  <button
+                    onClick={() => handleSubmit()}
+                    disabled={(!inputText.trim() && attachments.length === 0) || isGenerating}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 ${
+                      inputText.trim() || attachments.length > 0
+                        ? 'bg-gradient-to-tr from-teal-500 to-cyan-400 text-slate-950 hover:brightness-110 active:scale-95'
+                        : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                    }`}
+                  >
+                    {isGenerating ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                    ) : (
+                      <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Embedded Voice Dictation Streaming Tray */}
@@ -565,6 +577,7 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
                 mediaType={activeMediaTimer.mediaType}
                 promptSnippet={activeMediaTimer.promptSnippet}
                 totalDurationSeconds={activeMediaTimer.totalDurationSeconds}
+                jobId={activeMediaTimer.jobId || (thread.messages.length > 0 ? thread.messages[thread.messages.length - 1]?.report?.jobId : undefined)}
                 isBackendReady={isBackendReady}
                 onCountdownComplete={handleCountdownComplete}
               />
