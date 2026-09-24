@@ -95,6 +95,19 @@ export interface SearchSource {
   snippet?: string;
 }
 
+export interface ImageSearchResult {
+  id: string;
+  title: string;
+  url: string;
+  thumbnailUrl: string;
+  sourceUrl?: string;
+  domain: string;
+  width?: number;
+  height?: number;
+  snippet?: string;
+  aspectRatio?: string;
+}
+
 export interface ImageGenerationParams {
   prompt: string;
   style: string;
@@ -104,6 +117,7 @@ export interface ImageGenerationParams {
   colorPalette?: string[];
   seed?: number;
   previewUrl?: string;
+  results?: ImageSearchResult[];
 }
 
 export interface VideoStoryboardScene {
@@ -139,6 +153,7 @@ export interface TransformedReport {
   queuePosition?: number;
   estimatedCountdownSeconds?: number;
   imageParams?: ImageGenerationParams;
+  imageResults?: ImageSearchResult[];
   videoParams?: VideoGenerationParams;
   executiveSummary?: string; // 1-2 sentence direct answer or synthesis right at the top
   responseMode?: 'research' | 'productivity' | 'problem_solving';

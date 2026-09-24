@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { generateGenerativeImageSvg } from './svgGenerator.js';
+import { searchLiveImages } from './imageSearchService.js';
 
 dotenv.config();
 
@@ -43,6 +44,7 @@ export interface MediaJob {
     aspectRatio: string;
     style: string;
     modelUsed?: string;
+    results?: any[];
     musicMeta?: {
       bpm?: number;
       genre?: string;
@@ -274,23 +276,34 @@ class MediaFIFOQueue {
       }
     }
 
-    const previewUrl = imageBase64 || generateGenerativeImageSvg(job.prompt, job.style, undefined, job.aspectRatio);
+    // Fetch live authentic image search results for the prompt
+    let liveResults: any[] = [];
+    try {
+      liveResults = await searchLiveImages(job.prompt, 8);
+    } catch (e) {
+      console.warn('[MEDIA_QUEUE] Image search fallback error:', e);
+    }
+
+    const fallbackSvg = generateGenerativeImageSvg(job.prompt, job.style, undefined, job.aspectRatio);
+    const primaryUrl = imageBase64 || (liveResults.length > 0 ? liveResults[0].url : fallbackSvg);
 
     job.result = {
       mediaType: 'image',
-      previewUrl,
-      downloadUrl: previewUrl,
+      previewUrl: primaryUrl,
+      downloadUrl: primaryUrl,
       prompt: job.prompt,
       aspectRatio: job.aspectRatio,
       style: job.style,
       modelUsed,
+      results: liveResults,
       imageParams: {
         prompt: job.prompt,
         style: job.style,
         lighting: 'Volumetric cinematic fill with atmospheric depth',
         composition: 'Rule-of-thirds wide-angle 8K composition',
         aspectRatio: job.aspectRatio,
-        previewUrl,
+        previewUrl: primaryUrl,
+        results: liveResults,
       },
     };
   }

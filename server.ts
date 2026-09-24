@@ -6,6 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.js';
 import { mediaQueue } from './server/mediaQueue.js';
 import { generateGenerativeImageSvg } from './server/svgGenerator.js';
+import { searchLiveImages } from './server/imageSearchService.js';
 
 dotenv.config();
 
@@ -412,29 +413,36 @@ app.post('/api/transform', async (req, res) => {
           style: 'Photorealistic Hyper-Detailed 8K',
         });
 
-        const previewUrl = generateGenerativeImageSvg(
+        // 1. Fetch live authentic image search results for the dynamic query
+        const liveResults = await searchLiveImages(cleanPrompt, 8);
+
+        const proceduralFallbackUrl = generateGenerativeImageSvg(
           cleanPrompt,
           'Photorealistic 8K',
           undefined,
           aspectRatio
         );
 
+        const activePreviewUrl = liveResults.length > 0 ? liveResults[0].url : proceduralFallbackUrl;
+
         return res.json({
           success: true,
           mediaType: 'image',
           title: `Image: ${cleanPrompt.slice(0, 42)}`,
-          executiveSummary: `Generated 8K visual asset rendering for: "${cleanPrompt.slice(0, 80)}"`,
+          executiveSummary: `Generated live visual asset search results for: "${cleanPrompt.slice(0, 80)}"`,
           responseMode: 'productivity',
           jobId: mediaJob.id,
           queuePosition: mediaJob.queuePosition,
           estimatedCountdownSeconds: mediaJob.totalDurationSeconds,
+          imageResults: liveResults,
           imageParams: {
             prompt: cleanPrompt,
             style: 'Photorealistic Hyper-Detailed 8K',
             lighting: 'Volumetric cinematic fill with atmospheric depth',
             composition: 'Cinematic wide-angle rule-of-thirds',
             aspectRatio,
-            previewUrl,
+            previewUrl: activePreviewUrl,
+            results: liveResults,
           },
           markdownReport: '',
           sections: [],
@@ -2578,6 +2586,31 @@ app.post('/api/transcribe', async (req, res) => {
       errorCode: String(errorCode),
       details: errorMessage,
       preserved: true
+    });
+  }
+});
+
+// Live Image Search API Endpoint (Live Google/Wikimedia/Unsplash Results)
+app.get('/api/images/search', async (req, res) => {
+  try {
+    const query = (req.query.q as string) || '';
+    const limit = parseInt(req.query.limit as string) || 8;
+    if (!query.trim()) {
+      return res.status(400).json({ success: false, error: 'Search query is required.' });
+    }
+
+    const results = await searchLiveImages(query, limit);
+    return res.json({
+      success: true,
+      query,
+      count: results.length,
+      results,
+    });
+  } catch (err: any) {
+    console.error('[IMAGE_SEARCH_ERR]', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to fetch live image results.',
     });
   }
 });

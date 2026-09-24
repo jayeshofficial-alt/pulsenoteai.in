@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { TransformedReport, TargetIndustry } from '../types';
 import { INDUSTRY_CONFIGS } from '../data/presets';
 import { MediaExportDropdown } from './MediaExportDropdown';
+import { ImageResultsGrid } from './ImageResultsGrid';
 import { 
   Copy, 
   Check, 
@@ -453,33 +454,40 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   </div>
                 </div>
 
-                {/* Generative Visual Art Canvas Preview */}
-                <div className="relative w-full rounded-2xl overflow-hidden border border-purple-500/30 bg-gradient-to-br from-slate-950 via-purple-950/60 to-indigo-950 p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[170px]">
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_50%_50%,rgba(168,85,247,0.4),transparent_70%)]" />
-                  <div className="relative z-10 w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-purple-300 shadow-lg">
-                    <Sparkles className="w-6 h-6 animate-pulse" />
-                  </div>
-                  <div className="relative z-10 max-w-lg">
-                    <div className="text-xs font-bold text-purple-300 uppercase tracking-widest mb-1">Generative Model Blueprint</div>
-                    <p className="text-xs text-slate-300 font-mono line-clamp-2 px-4">
-                      "{report.imageParams?.prompt || report.title}"
-                    </p>
-                  </div>
-                  {/* Color Palette Swatches */}
-                  {report.imageParams?.colorPalette && (
-                    <div className="relative z-10 flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-slate-400 uppercase font-mono mr-1">Palette:</span>
-                      {report.imageParams.colorPalette.map((color, cIdx) => (
-                        <div
-                          key={cIdx}
-                          title={color}
-                          style={{ backgroundColor: color }}
-                          className="w-5 h-5 rounded-full border border-white/20 shadow-sm transition-transform hover:scale-110"
-                        />
-                      ))}
+                {/* Live Image Search Results Gallery or Blueprint Banner */}
+                {(report.imageResults?.length || report.imageParams?.results?.length) ? (
+                  <ImageResultsGrid
+                    results={report.imageResults || report.imageParams?.results || []}
+                    queryTitle={report.imageParams?.prompt || report.title}
+                  />
+                ) : (
+                  <div className="relative w-full rounded-2xl overflow-hidden border border-purple-500/30 bg-gradient-to-br from-slate-950 via-purple-950/60 to-indigo-950 p-6 flex flex-col items-center justify-center text-center gap-3 min-h-[170px]">
+                    <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_50%_50%,rgba(168,85,247,0.4),transparent_70%)]" />
+                    <div className="relative z-10 w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-purple-300 shadow-lg">
+                      <Sparkles className="w-6 h-6 animate-pulse" />
                     </div>
-                  )}
-                </div>
+                    <div className="relative z-10 max-w-lg">
+                      <div className="text-xs font-bold text-purple-300 uppercase tracking-widest mb-1">Generative Model Blueprint</div>
+                      <p className="text-xs text-slate-300 font-mono line-clamp-2 px-4">
+                        "{report.imageParams?.prompt || report.title}"
+                      </p>
+                    </div>
+                    {/* Color Palette Swatches */}
+                    {report.imageParams?.colorPalette && (
+                      <div className="relative z-10 flex items-center gap-2 mt-1">
+                        <span className="text-[10px] text-slate-400 uppercase font-mono mr-1">Palette:</span>
+                        {report.imageParams.colorPalette.map((color, cIdx) => (
+                          <div
+                            key={cIdx}
+                            title={color}
+                            style={{ backgroundColor: color }}
+                            className="w-5 h-5 rounded-full border border-white/20 shadow-sm transition-transform hover:scale-110"
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Prompt & Technical Optics Details */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

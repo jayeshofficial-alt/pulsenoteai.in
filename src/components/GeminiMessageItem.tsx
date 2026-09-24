@@ -6,6 +6,7 @@ import {
   SearchSource 
 } from '../types';
 import { MediaExportDropdown } from './MediaExportDropdown';
+import { ImageResultsGrid } from './ImageResultsGrid';
 import { 
   Sparkles, 
   User, 
@@ -375,8 +376,14 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
               </div>
             </div>
 
-            {/* Visual Simulated Artwork Banner / Rendered Asset */}
-            {report.imageParams.previewUrl ? (
+            {/* Live Search Multi-Column Grid Results (Google Images Style) */}
+            {(report.imageResults?.length || report.imageParams?.results?.length) ? (
+              <ImageResultsGrid
+                results={report.imageResults || report.imageParams?.results || []}
+                queryTitle={report.imageParams.prompt}
+                onShowToast={onShowToast}
+              />
+            ) : report.imageParams.previewUrl ? (
               <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-slate-900 border border-indigo-900/60 group shadow-2xl">
                 <img
                   src={report.imageParams.previewUrl}
