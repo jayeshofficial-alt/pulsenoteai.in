@@ -387,10 +387,21 @@ app.post('/api/transform', async (req, res) => {
       /^(generate|create|render|make|synthesize|video of|animation of)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene)\b/i.test(trimmedInput) ||
       /\b(video of|cinematic scene of|animation of)\b/i.test(trimmedInput);
 
+    // Helper to sanitize prompt prefixes and extract pure subject
+    const extractCleanPrompt = (input: string) => {
+      let cleaned = input
+        .replace(/^\[.*?\]/g, '')
+        .replace(/^(please\s+)?(generate|create|render|draw|make|synthesize|show\s+me)(\s+an?|\s+the)?\s+(image|photo|picture|wallpaper|illustration|art|portrait|render|video|clip|animation)\s*(of|for|showing|depicting)?\s*[:,-]?\s*/i, '')
+        .replace(/^(photo|image|picture|video|animation|illustration|portrait|render)\s+of\s*[:,-]?\s*/i, '')
+        .replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/gi, '')
+        .trim();
+      return cleaned.length > 0 ? cleaned : input.replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/gi, '').trim();
+    };
+
     if (isExplicitImage && !isExplicitVideo) {
       const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i);
       const aspectRatio = arMatch ? arMatch[1] : '16:9';
-      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i, '').trim();
+      const cleanPrompt = extractCleanPrompt(trimmedInput);
 
       try {
         const mediaJob = mediaQueue.enqueueJob({
@@ -404,14 +415,15 @@ app.post('/api/transform', async (req, res) => {
         const previewUrl = generateGenerativeImageSvg(
           cleanPrompt,
           'Photorealistic 8K',
-          ['#6366f1', '#0ea5e9', '#f59e0b', '#0f172a']
+          undefined,
+          aspectRatio
         );
 
         return res.json({
           success: true,
           mediaType: 'image',
           title: `Image: ${cleanPrompt.slice(0, 42)}`,
-          executiveSummary: `Generated visual asset rendering for: "${cleanPrompt.slice(0, 80)}"`,
+          executiveSummary: `Generated 8K visual asset rendering for: "${cleanPrompt.slice(0, 80)}"`,
           responseMode: 'productivity',
           jobId: mediaJob.id,
           queuePosition: mediaJob.queuePosition,
@@ -442,7 +454,7 @@ app.post('/api/transform', async (req, res) => {
     if (isExplicitVideo) {
       const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
       const aspectRatio = arMatch ? arMatch[1] : '16:9';
-      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16)/i, '').trim();
+      const cleanPrompt = extractCleanPrompt(trimmedInput);
 
       try {
         const mediaJob = mediaQueue.enqueueJob({
@@ -456,7 +468,8 @@ app.post('/api/transform', async (req, res) => {
         const previewPosterUrl = generateGenerativeImageSvg(
           cleanPrompt,
           'Veo 8K Video Frame',
-          ['#06b6d4', '#3b82f6', '#10b981', '#0f172a']
+          ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
+          aspectRatio
         );
 
         return res.json({

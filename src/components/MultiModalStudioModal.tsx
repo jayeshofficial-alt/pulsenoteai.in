@@ -18,6 +18,7 @@ import {
   Volume2
 } from 'lucide-react';
 import { UserUsageState } from '../types';
+import { MediaExportDropdown } from './MediaExportDropdown';
 
 interface MultiModalStudioModalProps {
   isOpen: boolean;
@@ -502,17 +503,16 @@ export const MultiModalStudioModal: React.FC<MultiModalStudioModalProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-teal-300 flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Synthesized Output ({generatedResult.modelUsed || 'Gemini Core'})</span>
+                  <span>Synthesized Output ({generatedResult.modelUsed || 'PulseNote AI Engine'})</span>
                 </span>
-                {generatedResult.downloadUrl && (
-                  <a
-                    href={generatedResult.downloadUrl}
-                    download="generated_asset"
-                    className="text-xs text-teal-400 hover:underline flex items-center gap-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download</span>
-                  </a>
+                {(generatedResult.previewUrl || generatedResult.downloadUrl) && (
+                  <MediaExportDropdown
+                    mediaType={activeTab === 'video_animate' ? 'video' : 'image'}
+                    mediaUrl={generatedResult.previewUrl || generatedResult.downloadUrl}
+                    title={imagePrompt || videoPrompt || 'Synthesized Asset'}
+                    aspectRatio={activeTab === 'video_animate' ? videoAspectRatio : imageAspectRatio}
+                    onShowToast={onShowToast}
+                  />
                 )}
               </div>
 

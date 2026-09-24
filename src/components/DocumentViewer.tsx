@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TransformedReport, TargetIndustry } from '../types';
 import { INDUSTRY_CONFIGS } from '../data/presets';
+import { MediaExportDropdown } from './MediaExportDropdown';
 import { 
   Copy, 
   Check, 
@@ -441,6 +442,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       {copiedMediaPrompt === 'image' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{copiedMediaPrompt === 'image' ? 'Copied Prompt' : 'Copy Image Prompt'}</span>
                     </button>
+                    {report.imageParams?.previewUrl && (
+                      <MediaExportDropdown
+                        mediaType="image"
+                        mediaUrl={report.imageParams.previewUrl}
+                        title={report.title || report.imageParams.prompt}
+                        aspectRatio={report.imageParams.aspectRatio}
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -519,6 +528,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       {copiedMediaPrompt === 'video' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{copiedMediaPrompt === 'video' ? 'Copied Prompt' : 'Copy Veo/Sora Prompt'}</span>
                     </button>
+                    {report.videoParams?.previewPosterUrl && (
+                      <MediaExportDropdown
+                        mediaType="video"
+                        mediaUrl={report.videoParams.previewPosterUrl}
+                        title={report.videoParams.title || report.title}
+                        aspectRatio={report.videoParams.aspectRatio}
+                      />
+                    )}
                   </div>
                 </div>
 

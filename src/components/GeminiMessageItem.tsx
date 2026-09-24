@@ -5,6 +5,7 @@ import {
   ActionItem,
   SearchSource 
 } from '../types';
+import { MediaExportDropdown } from './MediaExportDropdown';
 import { 
   Sparkles, 
   User, 
@@ -362,6 +363,15 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
                   {isCopiedAsset ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-indigo-400" />}
                   <span>Prompt</span>
                 </button>
+                {report.imageParams.previewUrl && (
+                  <MediaExportDropdown
+                    mediaType="image"
+                    mediaUrl={report.imageParams.previewUrl}
+                    title={report.title || report.imageParams.prompt}
+                    aspectRatio={report.imageParams.aspectRatio}
+                    onShowToast={onShowToast}
+                  />
+                )}
               </div>
             </div>
 
@@ -377,14 +387,13 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
                   <p className="text-xs font-mono text-slate-200 line-clamp-1 max-w-md">
                     "{report.imageParams.prompt}"
                   </p>
-                  <a
-                    href={report.imageParams.previewUrl}
-                    download="pulsenote-8k-concept.svg"
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-indigo-600/40 transition-all shrink-0 ml-2"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download</span>
-                  </a>
+                  <MediaExportDropdown
+                    mediaType="image"
+                    mediaUrl={report.imageParams.previewUrl}
+                    title={report.title || report.imageParams.prompt}
+                    aspectRatio={report.imageParams.aspectRatio}
+                    onShowToast={onShowToast}
+                  />
                 </div>
               </div>
             ) : (
@@ -449,6 +458,15 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
                   {isCopiedAsset ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-cyan-400" />}
                   <span>Prompt</span>
                 </button>
+                {report.videoParams.previewPosterUrl && (
+                  <MediaExportDropdown
+                    mediaType="video"
+                    mediaUrl={report.videoParams.previewPosterUrl}
+                    title={report.videoParams.title || report.title}
+                    aspectRatio={report.videoParams.aspectRatio}
+                    onShowToast={onShowToast}
+                  />
+                )}
               </div>
             </div>
 

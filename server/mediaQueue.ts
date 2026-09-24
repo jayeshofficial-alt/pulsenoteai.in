@@ -274,7 +274,7 @@ class MediaFIFOQueue {
       }
     }
 
-    const previewUrl = imageBase64 || generateGenerativeImageSvg(job.prompt, job.style, ['#6366f1', '#0ea5e9', '#10b981', '#0f172a']);
+    const previewUrl = imageBase64 || generateGenerativeImageSvg(job.prompt, job.style, undefined, job.aspectRatio);
 
     job.result = {
       mediaType: 'image',
@@ -357,7 +357,7 @@ class MediaFIFOQueue {
       console.warn(`[VEO_FALLBACK] Veo API notice: ${veoErr?.message || veoErr}`);
     }
 
-    const posterUrl = job.sourceImageUrl || generateGenerativeImageSvg(job.prompt, 'Veo 8K Video Frame', ['#06b6d4', '#3b82f6', '#10b981', '#0f172a']);
+    const posterUrl = job.sourceImageUrl || generateGenerativeImageSvg(job.prompt, 'Veo 8K Video Frame', ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'], formattedAspectRatio);
 
     job.result = {
       mediaType: 'video',
