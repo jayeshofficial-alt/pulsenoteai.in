@@ -709,6 +709,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rawText: content,
+          creativeMode,
           targetIndustry: currentIndustry,
           formatLens: currentLens,
           tone,

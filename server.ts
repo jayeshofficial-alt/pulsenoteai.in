@@ -332,7 +332,8 @@ app.post('/api/transform', async (req, res) => {
       customContext = '',
       responseMode = 'auto',
       dailyPromptCount = 0,
-      isPro = false
+      isPro = false,
+      creativeMode,
     } = req.body;
 
     if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
@@ -371,6 +372,126 @@ app.post('/api/transform', async (req, res) => {
         ],
         complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
       });
+    }
+
+    // =========================================================================
+    // EXPLICIT INTENT INTERCEPTION: Route Media Generation Requests Exclusively
+    // (Eliminating Text Bloat, Markdown Walls, and Spec Sheets on Media Queries)
+    // =========================================================================
+    const trimmedInput = rawText.trim();
+    const isExplicitImage = creativeMode === 'image' || 
+      /^(generate|create|render|draw|make|synthesize|photo of|image of|picture of)\b/i.test(trimmedInput) ||
+      /\b(photo of|render of|image of|picture of|illustration of|portrait of)\b/i.test(trimmedInput);
+
+    const isExplicitVideo = creativeMode === 'video' || 
+      /^(generate|create|render|make|synthesize|video of|animation of)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene)\b/i.test(trimmedInput) ||
+      /\b(video of|cinematic scene of|animation of)\b/i.test(trimmedInput);
+
+    if (isExplicitImage && !isExplicitVideo) {
+      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i);
+      const aspectRatio = arMatch ? arMatch[1] : '16:9';
+      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i, '').trim();
+
+      try {
+        const mediaJob = mediaQueue.enqueueJob({
+          userId: req.body.userId || 'usr_guest',
+          mediaType: 'image',
+          prompt: cleanPrompt,
+          aspectRatio,
+          style: 'Photorealistic Hyper-Detailed 8K',
+        });
+
+        const previewUrl = generateGenerativeImageSvg(
+          cleanPrompt,
+          'Photorealistic 8K',
+          ['#6366f1', '#0ea5e9', '#f59e0b', '#0f172a']
+        );
+
+        return res.json({
+          success: true,
+          mediaType: 'image',
+          title: `Image: ${cleanPrompt.slice(0, 42)}`,
+          executiveSummary: `Generated visual asset rendering for: "${cleanPrompt.slice(0, 80)}"`,
+          responseMode: 'productivity',
+          jobId: mediaJob.id,
+          queuePosition: mediaJob.queuePosition,
+          estimatedCountdownSeconds: mediaJob.totalDurationSeconds,
+          imageParams: {
+            prompt: cleanPrompt,
+            style: 'Photorealistic Hyper-Detailed 8K',
+            lighting: 'Volumetric cinematic fill with atmospheric depth',
+            composition: 'Cinematic wide-angle rule-of-thirds',
+            aspectRatio,
+            previewUrl,
+          },
+          markdownReport: '',
+          sections: [],
+          actionItems: [],
+          detectedEntities: [],
+          keyTakeaways: [],
+          complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+        });
+      } catch (err: any) {
+        return res.status(503).json({
+          success: false,
+          error: 'Media generation busy. Please retry.',
+        });
+      }
+    }
+
+    if (isExplicitVideo) {
+      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
+      const aspectRatio = arMatch ? arMatch[1] : '16:9';
+      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16)/i, '').trim();
+
+      try {
+        const mediaJob = mediaQueue.enqueueJob({
+          userId: req.body.userId || 'usr_guest',
+          mediaType: 'video',
+          prompt: cleanPrompt,
+          aspectRatio,
+          style: 'Photorealistic 8K Cinematic',
+        });
+
+        const previewPosterUrl = generateGenerativeImageSvg(
+          cleanPrompt,
+          'Veo 8K Video Frame',
+          ['#06b6d4', '#3b82f6', '#10b981', '#0f172a']
+        );
+
+        return res.json({
+          success: true,
+          mediaType: 'video',
+          title: `Video: ${cleanPrompt.slice(0, 42)}`,
+          executiveSummary: `Generated Veo Cinematic Sequence for: "${cleanPrompt.slice(0, 80)}"`,
+          responseMode: 'productivity',
+          jobId: mediaJob.id,
+          queuePosition: mediaJob.queuePosition,
+          estimatedCountdownSeconds: mediaJob.totalDurationSeconds,
+          videoParams: {
+            title: `Cinematic Sequence: ${cleanPrompt.slice(0, 36)}`,
+            targetDuration: '00:08',
+            aspectRatio,
+            cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
+            visualStyle: 'Photorealistic 8K Cinematic',
+            lighting: 'Golden hour volumetric illumination',
+            audioPrompt: 'Atmospheric ambient synthesis with low sub-bass drone',
+            previewPosterUrl,
+            modelPromptVeoSora: cleanPrompt,
+          },
+          markdownReport: '',
+          sections: [],
+          actionItems: [],
+          detectedEntities: [],
+          keyTakeaways: [],
+          complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+        });
+      } catch (err: any) {
+        return res.status(503).json({
+          success: false,
+          error: 'Media generation busy. Please retry.',
+        });
+      }
     }
 
     const industryMap: Record<string, string> = {

@@ -315,6 +315,8 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
   }
 
   // 3. Gemini Assistant Message
+  const isMediaMessage = report?.mediaType === 'image' || report?.mediaType === 'video' || message.creativeMode === 'image' || message.creativeMode === 'video';
+
   return (
     <div className="flex items-start gap-3 sm:gap-4 max-w-3xl w-full my-4 group">
       {/* Gemini Sparkle Avatar */}
@@ -323,8 +325,8 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
       </div>
 
       <div className="flex-1 space-y-4 overflow-hidden">
-        {/* Instant Synthesis (Summary) */}
-        {(report?.executiveSummary || report?.immediateSolution) && (
+        {/* Instant Synthesis (Summary) - Rendered only for Text Queries */}
+        {!isMediaMessage && (report?.executiveSummary || report?.immediateSolution) && (
           <div className="p-4 rounded-2xl bg-gradient-to-r from-teal-950/40 via-slate-900/60 to-cyan-950/30 border border-teal-800/40 shadow-sm space-y-1.5">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-teal-400"></span>
@@ -529,10 +531,12 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
           </div>
         )}
 
-        {/* Structured Deep-Dive Markdown */}
-        <div className="text-slate-200">
-          {renderFormattedMarkdown(report?.markdownReport || message.content)}
-        </div>
+        {/* Structured Deep-Dive Markdown - Rendered when markdown content exists */}
+        {(report?.markdownReport || (!isMediaMessage && message.content)) && (
+          <div className="text-slate-200">
+            {renderFormattedMarkdown(report?.markdownReport || message.content)}
+          </div>
+        )}
 
         {/* Actionable Execution Steps (Checklist) */}
         {report?.actionItems && report.actionItems.length > 0 && (
