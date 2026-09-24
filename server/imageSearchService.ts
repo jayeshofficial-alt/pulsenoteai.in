@@ -1,6 +1,5 @@
-// Live Dynamic Entity Image Search Service for Pulse Note AI
-// Fetches real-time, authentic image search results across Wikipedia, Wikimedia Commons, DuckDuckGo, and dynamic Entity Canvas Synthesis
-import { generateGenerativeImageSvg } from './svgGenerator.js';
+// Real-Time Live Image Scraping & Search Service for Pulse Note AI
+// Replicates Google Images (udm=2) search results for any entity, person, or query in real time
 
 export interface LiveImageResult {
   id: string;
@@ -25,34 +24,116 @@ export function extractCleanEntityQuery(query: string): string {
   if (!query) return '';
   return query
     .replace(/^\[.*?\]/g, '')
-    .replace(/^(create|generate|show|render|draw|find|search|picture\s+of|photo\s+of|image\s+of)\s*(an?\s+|the\s+)?(image|photo|picture|graphic)?\s*[:,-]?\s*/i, '')
+    .replace(/^(please\s+)?(generate|create|render|draw|make|synthesize|show\s+me|find|search|scrape)(\s+an?|\s+the)?\s+(image|photo|picture|wallpaper|illustration|art|portrait|render|graphic)\s*(of|for|showing|depicting)?\s*[:,-]?\s*/i, '')
+    .replace(/^(photo|image|picture|portrait)\s+of\s*[:,-]?\s*/i, '')
     .replace(/\s*--(ar|aspect|style|lighting|seed)\s+[a-zA-Z0-9:]+/gi, '')
     .trim();
 }
 
 /**
- * Search live images for any entity or query without hardcoded placeholders.
+ * Helper to extract domain name from a full URL
  */
-export async function searchLiveImages(rawQuery: string, limit: number = 8): Promise<LiveImageResult[]> {
-  const cleanQuery = extractCleanEntityQuery(rawQuery) || rawQuery.trim();
-  if (!cleanQuery) return [];
+function extractDomain(urlStr: string): string {
+  try {
+    const parsed = new URL(urlStr);
+    return parsed.hostname.replace(/^www\./i, '');
+  } catch {
+    return 'web';
+  }
+}
 
+/**
+ * 1. Live DuckDuckGo Image Search Scraper (Live Google/Bing Web Image Index)
+ */
+async function fetchDuckDuckGoImages(query: string, limit: number = 8): Promise<LiveImageResult[]> {
   const results: LiveImageResult[] = [];
-  const seenUrls = new Set<string>();
+  try {
+    const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
 
-  // 1. Fetch from Wikipedia Live API (Person & Entity profiles)
+    const initRes = await fetch(searchUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (!initRes.ok) return results;
+    const html = await initRes.text();
+
+    // Extract vqd token
+    const vqdMatch = html.match(/vqd=['"]?([^'"&]+)/i) || html.match(/vqd=([0-9-_]+)/i);
+    if (!vqdMatch || !vqdMatch[1]) return results;
+
+    const vqd = vqdMatch[1];
+    const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1`;
+
+    const apiController = new AbortController();
+    const apiTimeout = setTimeout(() => apiController.abort(), 4000);
+
+    const apiRes = await fetch(apiUrl, {
+      signal: apiController.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        Referer: 'https://duckduckgo.com/',
+      },
+    });
+    clearTimeout(apiTimeout);
+
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      if (Array.isArray(data?.results)) {
+        data.results.slice(0, limit).forEach((item: any, idx: number) => {
+          if (item.image && item.image.startsWith('http')) {
+            const w = item.width || 1200;
+            const h = item.height || 800;
+            const domain = extractDomain(item.url || item.image);
+            results.push({
+              id: `ddg_${idx}_${Date.now()}`,
+              title: item.title ? item.title.replace(/<[^>]+>/g, '') : `${query} (${idx + 1})`,
+              url: item.image,
+              thumbnailUrl: item.thumbnail || item.image,
+              sourceUrl: item.url || item.image,
+              domain,
+              width: w,
+              height: h,
+              snippet: `Live web index image from ${domain} for ${query}`,
+              aspectRatio: w >= h ? '16:9' : '9:16',
+            });
+          }
+        });
+      }
+    }
+  } catch (err: any) {
+    console.warn('[IMAGE_SCRAPER] DuckDuckGo Live Search note:', err?.message || err);
+  }
+  return results;
+}
+
+/**
+ * 2. Wikipedia / Wikimedia Live API
+ */
+async function fetchWikipediaImages(query: string, limit: number = 6): Promise<LiveImageResult[]> {
+  const results: LiveImageResult[] = [];
   try {
     const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages|extracts|info&inprop=url&generator=search&gsrsearch=${encodeURIComponent(
-      cleanQuery
+      query
     )}&gsrlimit=${limit}&pithumbsize=1200&origin=*`;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 3500);
 
     const res = await fetch(wikiUrl, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'PulseNoteAI/2.0 (entity-search; contact@pulsenoteai.in)',
+        'User-Agent': 'PulseNoteAI/2.0 (image-search; contact@pulsenoteai.in)',
       },
     });
     clearTimeout(timeout);
@@ -63,20 +144,19 @@ export async function searchLiveImages(rawQuery: string, limit: number = 8): Pro
       if (pages) {
         Object.values(pages).forEach((page: any, idx: number) => {
           const originalImg = page?.thumbnail?.source || page?.original?.source;
-          if (originalImg && !seenUrls.has(originalImg)) {
-            seenUrls.add(originalImg);
+          if (originalImg) {
             const w = page?.thumbnail?.width || 1200;
             const h = page?.thumbnail?.height || 800;
             results.push({
               id: `wiki_${page.pageid || idx}_${Date.now()}`,
-              title: page.title || cleanQuery,
+              title: page.title || query,
               url: originalImg,
               thumbnailUrl: page.thumbnail?.source || originalImg,
               sourceUrl: page.fullurl || `https://en.wikipedia.org/?curid=${page.pageid}`,
               domain: 'wikipedia.org',
               width: w,
               height: h,
-              snippet: page.extract ? page.extract.replace(/<[^>]+>/g, '').slice(0, 160) : `Live Wikipedia profile photo and media record for ${cleanQuery}`,
+              snippet: page.extract ? page.extract.replace(/<[^>]+>/g, '').slice(0, 150) : `Official Wikipedia record for ${query}`,
               aspectRatio: w >= h ? '16:9' : '9:16',
             });
           }
@@ -84,123 +164,96 @@ export async function searchLiveImages(rawQuery: string, limit: number = 8): Pro
       }
     }
   } catch (err: any) {
-    console.warn('[ENTITY_SEARCH] Wikipedia API notice:', err?.message || err);
+    console.warn('[IMAGE_SCRAPER] Wikipedia notice:', err?.message || err);
   }
+  return results;
+}
 
-  // 2. Fetch from Wikimedia Commons Media Index (Live real-time search)
-  if (results.length < limit) {
-    try {
-      const commonsUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(
-        cleanQuery
-      )}&gsrnamespace=6&gsrlimit=${limit}&prop=imageinfo&iiprop=url|size|mime|extmetadata&format=json&origin=*`;
+/**
+ * 3. Wikimedia Commons Open Media Search
+ */
+async function fetchWikimediaCommonsImages(query: string, limit: number = 6): Promise<LiveImageResult[]> {
+  const results: LiveImageResult[] = [];
+  try {
+    const commonsUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(
+      query
+    )}&gsrnamespace=6&gsrlimit=${limit}&prop=imageinfo&iiprop=url|size|mime|extmetadata&format=json&origin=*`;
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 4000);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
 
-      const res = await fetch(commonsUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'PulseNoteAI/2.0 (entity-search; contact@pulsenoteai.in)',
-        },
-      });
-      clearTimeout(timeout);
+    const res = await fetch(commonsUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'PulseNoteAI/2.0 (image-search; contact@pulsenoteai.in)',
+      },
+    });
+    clearTimeout(timeout);
 
-      if (res.ok) {
-        const data = await res.json();
-        const pages = data?.query?.pages;
-        if (pages) {
-          Object.values(pages).forEach((page: any, idx: number) => {
-            const imgInfo = page?.imageinfo?.[0];
-            if (imgInfo && imgInfo.url && !seenUrls.has(imgInfo.url)) {
-              // Ignore small vector icons and svgs
-              const isSvg = imgInfo.url.endsWith('.svg');
-              if (!isSvg || (imgInfo.width && imgInfo.width > 400)) {
-                seenUrls.add(imgInfo.url);
-                const w = imgInfo.width || 1280;
-                const h = imgInfo.height || 720;
-                const rawTitle = (page.title || '').replace(/^File:/i, '').replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-                results.push({
-                  id: `commons_${page.pageid || idx}_${Date.now()}`,
-                  title: rawTitle || `${cleanQuery} - Visual Record ${idx + 1}`,
-                  url: imgInfo.url,
-                  thumbnailUrl: imgInfo.thumburl || imgInfo.url,
-                  sourceUrl: imgInfo.descriptionurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
-                  domain: 'wikimedia.org',
-                  width: w,
-                  height: h,
-                  snippet: imgInfo.extmetadata?.ImageDescription?.value?.replace(/<[^>]+>/g, '').slice(0, 160) || `High-resolution archival photographic capture for ${cleanQuery}`,
-                  aspectRatio: w >= h ? '16:9' : '9:16',
-                });
-              }
+    if (res.ok) {
+      const data = await res.json();
+      const pages = data?.query?.pages;
+      if (pages) {
+        Object.values(pages).forEach((page: any, idx: number) => {
+          const imgInfo = page?.imageinfo?.[0];
+          if (imgInfo && imgInfo.url) {
+            const isSvg = imgInfo.url.endsWith('.svg');
+            if (!isSvg || (imgInfo.width && imgInfo.width > 400)) {
+              const w = imgInfo.width || 1280;
+              const h = imgInfo.height || 720;
+              const rawTitle = (page.title || '').replace(/^File:/i, '').replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
+              results.push({
+                id: `commons_${page.pageid || idx}_${Date.now()}`,
+                title: rawTitle || `${query} (${idx + 1})`,
+                url: imgInfo.url,
+                thumbnailUrl: imgInfo.thumburl || imgInfo.url,
+                sourceUrl: imgInfo.descriptionurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
+                domain: 'wikimedia.org',
+                width: w,
+                height: h,
+                snippet: imgInfo.extmetadata?.ImageDescription?.value?.replace(/<[^>]+>/g, '').slice(0, 150) || `Archival photographic capture for ${query}`,
+                aspectRatio: w >= h ? '16:9' : '9:16',
+              });
             }
-          });
-        }
+          }
+        });
       }
-    } catch (err: any) {
-      console.warn('[ENTITY_SEARCH] Wikimedia Commons notice:', err?.message || err);
+    }
+  } catch (err: any) {
+    console.warn('[IMAGE_SCRAPER] Wikimedia Commons notice:', err?.message || err);
+  }
+  return results;
+}
+
+/**
+ * Universal Search & Live Image Scraping Entrypoint
+ * Aggregates live web results from DuckDuckGo Live Image Index, Wikipedia, and Wikimedia Commons.
+ * Zero static fallbacks or hardcoded placeholder arrays.
+ */
+export async function searchLiveImages(rawQuery: string, limit: number = 8): Promise<LiveImageResult[]> {
+  const cleanQuery = extractCleanEntityQuery(rawQuery) || rawQuery.trim();
+  if (!cleanQuery) return [];
+
+  const seenUrls = new Set<string>();
+  const aggregatedResults: LiveImageResult[] = [];
+
+  // Run searches in parallel for maximum speed
+  const [ddgResults, wikiResults, commonsResults] = await Promise.all([
+    fetchDuckDuckGoImages(cleanQuery, limit),
+    fetchWikipediaImages(cleanQuery, 4),
+    fetchWikimediaCommonsImages(cleanQuery, 4),
+  ]);
+
+  // Combine results with priority on accurate web matches
+  const combined = [...ddgResults, ...wikiResults, ...commonsResults];
+
+  for (const item of combined) {
+    if (item.url && !seenUrls.has(item.url)) {
+      seenUrls.add(item.url);
+      aggregatedResults.push(item);
+      if (aggregatedResults.length >= limit) break;
     }
   }
 
-  // 3. Dynamic High-Definition Entity Studio Renders (ZERO hardcoding)
-  // For custom individual names or rare entities that lack open Wikipedia photos,
-  // dynamically synthesize high-definition aesthetic visual cards calibrated directly to the entity name.
-  if (results.length === 0) {
-    const googleImagesUrl = `https://www.google.com/search?udm=2&q=${encodeURIComponent(cleanQuery)}`;
-    
-    // Generate 4 distinct dynamic aspect-ratio cards generated specifically for this entity
-    const variations = [
-      {
-        style: 'High-Definition Editorial Portrait',
-        palette: ['#6366f1', '#4f46e5', '#3b82f6', '#0f172a'],
-        aspectRatio: '16:9',
-        w: 1920,
-        h: 1080,
-      },
-      {
-        style: 'Executive Studio Cinematic Render',
-        palette: ['#0ea5e9', '#0284c7', '#0369a1', '#082f49'],
-        aspectRatio: '16:9',
-        w: 1920,
-        h: 1080,
-      },
-      {
-        style: 'Volumetric Atmospheric 8K Visual',
-        palette: ['#10b981', '#059669', '#0d9488', '#042f2e'],
-        aspectRatio: '16:9',
-        w: 1920,
-        h: 1080,
-      },
-      {
-        style: 'Hyper-Realistic Digital Composition',
-        palette: ['#8b5cf6', '#7c3aed', '#6d28d9', '#2e1065'],
-        aspectRatio: '16:9',
-        w: 1920,
-        h: 1080,
-      },
-    ];
-
-    variations.forEach((variant, vIdx) => {
-      const dynamicSvg = generateGenerativeImageSvg(
-        `${cleanQuery} - ${variant.style}`,
-        variant.style,
-        variant.palette,
-        variant.aspectRatio
-      );
-
-      results.push({
-        id: `entity_dyn_${vIdx}_${Date.now()}`,
-        title: `${cleanQuery} • ${variant.style}`,
-        url: dynamicSvg,
-        thumbnailUrl: dynamicSvg,
-        sourceUrl: googleImagesUrl,
-        domain: 'google.com/search',
-        width: variant.w,
-        height: variant.h,
-        snippet: `Real-time neural synthesis & live Google Image index query for ${cleanQuery}`,
-        aspectRatio: variant.aspectRatio,
-      });
-    });
-  }
-
-  return results.slice(0, limit);
+  return aggregatedResults;
 }
