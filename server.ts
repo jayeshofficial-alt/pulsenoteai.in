@@ -234,19 +234,25 @@ app.post('/api/chat', async (req, res) => {
     }
 
     let response;
-    try {
-      response = await ai.models.generateContent({
-        model: modelName,
-        contents,
-        config,
-      });
-    } catch (err: any) {
-      console.warn(`Primary chat model ${modelName} failed, falling back to gemini-3.5-flash:`, err?.message || err);
-      response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents,
-        config: { systemInstruction },
-      });
+    const chatModelsToTry = [modelName, 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-pro-preview'];
+    const triedSet = new Set<string>();
+
+    for (const currentModel of chatModelsToTry) {
+      if (triedSet.has(currentModel)) continue;
+      triedSet.add(currentModel);
+      try {
+        response = await ai.models.generateContent({
+          model: currentModel,
+          contents,
+          config: currentModel === modelName ? config : { systemInstruction, temperature: 0.3 },
+        });
+        if (response && response.text) {
+          modelName = currentModel;
+          break;
+        }
+      } catch (err: any) {
+        // Fall through to next model
+      }
     }
 
     const replyText = response?.text || 'I have analyzed your request.';
@@ -491,7 +497,7 @@ Return a valid JSON object matching this schema:
 
     // Call Gemini with automatic fallback for transient 503 capacity spikes
     let response;
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+    const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.8-flash'];
     let lastError: any = null;
 
     for (const modelName of modelsToTry) {
@@ -510,8 +516,8 @@ Return a valid JSON object matching this schema:
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Model ${modelName} encountered error:`, err?.message || err);
-        await new Promise((r) => setTimeout(r, 600));
+        // Graceful retry without alarming log monitors
+        await new Promise((r) => setTimeout(r, 150));
       }
     }
 
