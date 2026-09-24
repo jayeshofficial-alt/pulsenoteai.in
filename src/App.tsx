@@ -93,6 +93,11 @@ export default function App() {
     } catch (e) {
       console.warn('Failed to save chat threads:', e);
     }
+    if (currentUser?.id) {
+      import('./lib/firebase').then(({ saveThreadToFirestore }) => {
+        newThreads.forEach((t) => saveThreadToFirestore(currentUser.id, t));
+      }).catch(e => console.warn('Firestore sync error:', e));
+    }
   };
 
   // User Authentication & Profile
@@ -130,7 +135,7 @@ export default function App() {
     activePlan: 'free',
   });
 
-  // Load user usage & legal status on mount
+  // Load user usage & legal status on mount + Firebase Auth listener
   useEffect(() => {
     // 1. Check legal onboarding
     try {
@@ -143,7 +148,44 @@ export default function App() {
       console.warn('Could not read legal acceptance status:', e);
     }
 
-    // 2. Load usage state
+    // 2. Firebase Auth listener
+    import('./lib/firebase').then(({ auth, loadUserThreadsFromFirestore }) => {
+      auth.onAuthStateChanged(async (firebaseUser) => {
+        if (firebaseUser) {
+          const userEmail = firebaseUser.email || '';
+          const mappedUser: UserProfile = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || userEmail.split('@')[0] || 'User',
+            email: userEmail,
+            mobile: firebaseUser.phoneNumber || '',
+            role: (userEmail === 'jayeshofficial@gmail.com' || userEmail === 'contact@pulsenoteai.in') ? 'admin' : 'client',
+            status: 'active',
+            isActivated: true,
+            privacyConsent: true,
+            consentTimestamp: new Date().toISOString(),
+            dailyPromptCount: 0,
+            lastPromptDate: new Date().toISOString().slice(0, 10),
+            createdAt: Date.now(),
+            subscription: {
+              tier: 'free',
+              isPro: false,
+              startDate: Date.now(),
+              expiresAt: null,
+            },
+          };
+          setCurrentUser(mappedUser);
+
+          // Load remote threads from Firestore
+          const remoteThreads = await loadUserThreadsFromFirestore(firebaseUser.uid);
+          if (remoteThreads && remoteThreads.length > 0) {
+            setThreads(remoteThreads);
+            setActiveThreadId(remoteThreads[0].id);
+          }
+        }
+      });
+    }).catch(e => console.warn('Firebase init error:', e));
+
+    // 3. Load usage state
     try {
       const storedUsage = localStorage.getItem('pulsenote_user_usage');
       if (storedUsage) {
@@ -578,7 +620,7 @@ export default function App() {
   const handleSendMessage = async (
     content: string,
     attachments?: ChatMessageAttachment[],
-    creativeMode?: 'text' | 'image' | 'video'
+    creativeMode?: 'text' | 'image' | 'video' | 'music' | 'live_voice' | 'maps_query'
   ) => {
     const targetThread = threads.find((t) => t.id === activeThreadId) || threads[0];
     if (!targetThread) return;

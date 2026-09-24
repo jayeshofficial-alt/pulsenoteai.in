@@ -157,9 +157,28 @@ export interface TransformedReport {
   defaultWorkingDraft?: string;
 }
 
+export type ChatbotRole =
+  | 'general'
+  | 'executive'
+  | 'code_architect'
+  | 'deep_research'
+  | 'creative_producer'
+  | 'medical_expert';
+
+export interface MusicGenerationParams {
+  prompt: string;
+  genre?: string;
+  bpm?: number;
+  key?: string;
+  duration?: string;
+  audioUrl?: string;
+  previewUrl?: string;
+  modelUsed?: string;
+}
+
 export interface MediaJobStatus {
   id: string;
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'music' | 'edit_image';
   status: 'queued' | 'processing' | 'completed' | 'failed';
   queuePosition: number;
   progressPercent: number;
@@ -167,14 +186,22 @@ export interface MediaJobStatus {
   estimatedSecondsRemaining: number;
   totalDurationSeconds: number;
   result?: {
-    mediaType: 'image' | 'video';
+    mediaType: 'image' | 'video' | 'music';
     previewUrl: string;
     downloadUrl?: string;
     videoUrl?: string;
+    audioUrl?: string;
     posterUrl?: string;
     prompt: string;
     aspectRatio: string;
     style: string;
+    modelUsed?: string;
+    musicMeta?: {
+      bpm?: number;
+      genre?: string;
+      key?: string;
+      duration?: string;
+    };
     imageParams?: ImageGenerationParams;
     videoParams?: VideoGenerationParams;
   };
@@ -219,7 +246,7 @@ export interface PricingPlan {
   savingsBadge?: string;
 }
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'admin' | 'user' | 'client';
 export type UserStatus = 'pending_activation' | 'active' | 'suspended';
 
 export interface UserSubscriptionInfo {
@@ -318,7 +345,9 @@ export interface ChatMessage {
   report?: TransformedReport;
   attachments?: ChatMessageAttachment[];
   feedback?: 'like' | 'dislike' | null;
-  creativeMode?: 'text' | 'image' | 'video';
+  creativeMode?: 'text' | 'image' | 'video' | 'music' | 'live_voice' | 'maps_query';
+  modelUsed?: string;
+  groundingSources?: { title?: string; url?: string; snippet?: string }[];
 }
 
 export interface ChatThread {

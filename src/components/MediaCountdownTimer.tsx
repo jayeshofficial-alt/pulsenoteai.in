@@ -3,7 +3,7 @@ import { ImageIcon, Film, Clock, Sparkles, CheckCircle2, Zap, Layers, AlertCircl
 import { MediaJobStatus } from '../types';
 
 interface MediaCountdownTimerProps {
-  mediaType: 'image' | 'video';
+  mediaType: 'image' | 'video' | 'music' | 'edit_image';
   totalDurationSeconds?: number;
   promptSnippet: string;
   isBackendReady: boolean;

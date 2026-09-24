@@ -88,7 +88,7 @@ function scrubAdminDetails(obj: any): any {
 // MULTI-MODAL MEDIA GENERATION & FIFO QUEUE ENDPOINTS
 // ==========================================
 
-// Enqueue media generation request in FIFO queue (Google Imagen 3 / Veo 3.1)
+// Enqueue media generation request in FIFO queue (Google Imagen 3 / Veo 3.1 / Lyria 3 / Gemini Flash Image)
 app.post('/api/media/generate', (req, res) => {
   try {
     const {
@@ -96,6 +96,8 @@ app.post('/api/media/generate', (req, res) => {
       mediaType = 'image',
       aspectRatio = '16:9',
       style,
+      sourceImageUrl,
+      musicType = 'clip',
       userId = 'usr_guest',
       dailyPromptCount = 0,
       isPro = false,
@@ -117,10 +119,12 @@ app.post('/api/media/generate', (req, res) => {
 
     const job = mediaQueue.enqueueJob({
       userId,
-      mediaType: mediaType === 'video' ? 'video' : 'image',
+      mediaType: mediaType as any,
       prompt,
+      sourceImageUrl,
       aspectRatio,
       style,
+      musicType,
     });
 
     return res.json({
@@ -160,6 +164,154 @@ app.get('/api/media/status/:id', (req, res) => {
     result: job.result ? scrubAdminDetails(job.result) : undefined,
     error: job.error,
     complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+  });
+});
+
+// Multi-turn Gemini Chatbot with Role Selection and Model Routing
+// Models: gemini-3.1-pro-preview (complex tasks), gemini-3.5-flash (general tasks), gemini-3.1-flash-lite (fast tasks)
+app.post('/api/chat', async (req, res) => {
+  try {
+    const {
+      messages = [],
+      role = 'general',
+      taskComplexity = 'general', // 'complex' | 'general' | 'fast'
+      useMaps = false,
+      dailyPromptCount = 0,
+      isPro = false,
+    } = req.body;
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required for multi-turn chat.' });
+    }
+
+    if (!isPro && dailyPromptCount >= 3) {
+      return res.status(403).json({
+        isLimitReached: true,
+        error: 'Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited chat.',
+        upgradeMessage: UPGRADE_BLOCK_VERBATIM,
+        settlementVpa: 'wagh.jayesh@oksbi',
+      });
+    }
+
+    // Role-specific System Instructions
+    const roleInstructions: Record<string, string> = {
+      general: 'You are PulseNote AI, a high-performance executive intelligence and multi-modal assistant. Provide direct, highly actionable, structured, and insightful answers.',
+      executive: 'You are the Executive Strategy Advisor. Focus on business decisions, OKRs, risk mitigation, financial ROI, and clear executive memos.',
+      code_architect: 'You are the Principal Software Architect. Focus on clean code, optimal algorithms, system architecture diagrams, and production-grade TypeScript/Node/React.',
+      deep_research: 'You are the Lead Research Analyst. Provide exhaustive, evidence-backed synthesis, citations, comparative matrices, and rigorous analysis.',
+      creative_producer: 'You are the Creative Media Producer. Specialize in crafting evocative visual prompts, cinematic video storyboards for Veo, and music themes for Lyria.',
+      medical_expert: 'You are the Clinical Documentation Specialist. Formulate structured clinical notes, SOAP formats, and medical terminology accuracy.',
+    };
+
+    const systemInstruction = roleInstructions[role] || roleInstructions.general;
+
+    // Model selection based on task complexity
+    let modelName = 'gemini-3.5-flash';
+    if (taskComplexity === 'complex') {
+      modelName = 'gemini-3.1-pro-preview';
+    } else if (taskComplexity === 'fast') {
+      modelName = 'gemini-3.1-flash-lite';
+    }
+
+    // Format conversation history into Gemini SDK contents
+    const contents = messages.map((m: any) => ({
+      role: m.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: m.text || m.content || '' }],
+    }));
+
+    const config: any = {
+      systemInstruction,
+      temperature: 0.3,
+    };
+
+    // Enable Google Maps Grounding if requested or if prompt mentions locations/navigation
+    const lastUserMsg = messages[messages.length - 1]?.text || '';
+    const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
+
+    if (hasLocationIntent) {
+      modelName = 'gemini-3.5-flash';
+      config.tools = [{ googleMaps: {} }];
+    }
+
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: modelName,
+        contents,
+        config,
+      });
+    } catch (err: any) {
+      console.warn(`Primary chat model ${modelName} failed, falling back to gemini-3.5-flash:`, err?.message || err);
+      response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents,
+        config: { systemInstruction },
+      });
+    }
+
+    const replyText = response?.text || 'I have analyzed your request.';
+    
+    // Extract grounding metadata if available
+    const groundingChunks = (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+    return res.json({
+      text: replyText,
+      modelUsed: modelName,
+      groundingChunks,
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+    });
+  } catch (err: any) {
+    console.error('Chat endpoint error:', err);
+    return res.status(500).json({ error: err.message || 'Chat generation failed' });
+  }
+});
+
+// Google Maps Grounding Specialized Search Endpoint (gemini-3.5-flash with googleMaps tool)
+app.post('/api/maps/query', async (req, res) => {
+  try {
+    const { query: searchQuery } = req.body;
+    if (!searchQuery) {
+      return res.status(400).json({ error: 'Search query is required for Maps Grounding.' });
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: `Provide accurate location intelligence, addresses, hours, ratings, and practical visiting advice for: ${searchQuery}`,
+      config: {
+        tools: [{ googleMaps: {} }],
+      },
+    });
+
+    const text = response?.text || 'Location search completed.';
+    const groundingMetadata = (response as any)?.candidates?.[0]?.groundingMetadata;
+
+    return res.json({
+      result: text,
+      groundingMetadata,
+      modelUsed: 'gemini-3.5-flash (Google Maps Grounded)',
+    });
+  } catch (err: any) {
+    console.error('Maps query error:', err);
+    return res.status(500).json({ error: err.message || 'Maps grounding query failed' });
+  }
+});
+
+// Real-Time Voice Conversation & Live Session Info (gemini-3.8-live)
+app.get('/api/live/config', (_req, res) => {
+  res.json({
+    liveModel: 'gemini-3.8-live',
+    transcriptionModel: 'gemini-3.5-transcribe',
+    imageEditModel: 'gemini-3.1-flash-image-preview',
+    videoModel: 'veo-3.1-fast-generate-preview',
+    musicModelClip: 'lyria-3-clip-preview',
+    musicModelPro: 'lyria-3-pro-preview',
+    chatModels: {
+      complex: 'gemini-3.1-pro-preview',
+      general: 'gemini-3.5-flash',
+      fast: 'gemini-3.1-flash-lite',
+    },
+    audioSampleRate: 24000,
+    supportedMimeTypes: ['audio/webm', 'audio/wav', 'audio/mp4'],
   });
 });
 
@@ -2089,7 +2241,7 @@ async function transcribeAudioPayload(audioBase64: string, cleanMime: string, cu
     },
   };
 
-  const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'];
+  const CANDIDATE_MODELS = ['gemini-3.5-transcribe', 'gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'];
   let lastModelError: any = null;
   let transcriptText = '';
 
