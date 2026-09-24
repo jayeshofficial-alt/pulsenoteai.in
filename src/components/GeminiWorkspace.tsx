@@ -312,7 +312,7 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#090d16]">
       {/* Universal Header & Expandable Lens Dropdown */}
-      <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md shrink-0 z-10">
+      <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md shrink-0 z-30">
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-2">
             <div className="p-1.5 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-sm shadow-cyan-500/20">
@@ -721,6 +721,8 @@ export const GeminiWorkspace: React.FC<GeminiWorkspaceProps> = ({
                   <FormatLensDropdown
                     currentLens={currentLens}
                     onSelectLens={onSelectLens}
+                    dropDirection="up"
+                    align="right"
                   />
                 </div>
               </div>

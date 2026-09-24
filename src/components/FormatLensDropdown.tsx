@@ -6,12 +6,16 @@ interface FormatLensDropdownProps {
   currentLens: SearchFormatLens;
   onSelectLens: (lens: SearchFormatLens) => void;
   compact?: boolean;
+  dropDirection?: 'down' | 'up';
+  align?: 'left' | 'right';
 }
 
 export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
   currentLens,
   onSelectLens,
   compact = false,
+  dropDirection = 'down',
+  align = 'left',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -48,6 +52,9 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
     };
   }, [isOpen]);
 
+  const alignmentClass = align === 'right' ? 'right-0' : 'left-0';
+  const directionClass = dropDirection === 'up' ? 'bottom-full mb-2' : 'top-full mt-2';
+
   return (
     <div className="relative inline-block text-left" ref={dropdownRef}>
       {/* Dropdown Trigger Button */}
@@ -59,7 +66,7 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
             ? 'px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 border-slate-700/80 text-xs'
             : 'px-3.5 py-2 bg-slate-900/90 hover:bg-slate-850 border-slate-700/80 hover:border-slate-600 shadow-md text-xs sm:text-sm font-semibold'
         } ${isOpen ? 'ring-2 ring-teal-500/30 border-teal-500/50 bg-slate-850' : ''}`}
-        title="Select Output Format & Lens"
+        title="Select Output Format & Lens (General Assistant)"
       >
         <span className={`p-1 rounded-lg ${activeLens.badgeColor} shrink-0`}>
           {getIcon(activeLens.iconName, 'w-3.5 h-3.5 sm:w-4 sm:h-4')}
@@ -74,10 +81,17 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
         />
       </button>
 
-      {/* Expandable Dropdown Menu Overlay */}
+      {/* Expandable Dropdown Menu Overlay: Absolute, z-index 9999, max-height 240px, overflow-y-auto */}
       {isOpen && (
-        <div className="absolute left-0 mt-2 w-72 sm:w-80 rounded-2xl bg-slate-900/95 border border-slate-750 shadow-2xl backdrop-blur-xl z-50 p-2 animate-in fade-in zoom-in-95 duration-150">
-          <div className="px-3 py-2 border-b border-slate-800/80 mb-1">
+        <div
+          style={{
+            position: 'absolute',
+            zIndex: 9999,
+            maxHeight: '240px',
+          }}
+          className={`absolute ${directionClass} ${alignmentClass} w-72 sm:w-80 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl backdrop-blur-xl z-[9999] p-2 animate-in fade-in zoom-in-95 duration-150 max-h-[240px] overflow-y-auto`}
+        >
+          <div className="sticky top-0 bg-slate-900/95 backdrop-blur-md px-3 py-1.5 border-b border-slate-800/80 mb-1 z-10">
             <div className="text-[11px] font-mono uppercase tracking-wider font-bold text-slate-400">
               Output Format & Lens
             </div>
@@ -133,3 +147,4 @@ export const FormatLensDropdown: React.FC<FormatLensDropdownProps> = ({
     </div>
   );
 };
+

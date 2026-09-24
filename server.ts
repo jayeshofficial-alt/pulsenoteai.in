@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.js';
+import { mediaQueueManager } from './server/mediaQueue.js';
 
 dotenv.config();
 
@@ -25,7 +26,7 @@ const ai = new GoogleGenAI({
   },
 });
 
-const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and video concepts should be reviewed and verified before commercial or professional use. The platform bears zero liability.*`;
+const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
 
 const UPGRADE_BLOCK_VERBATIM = `🛑 **Daily Free Limit Reached (3/3 Prompts Used)**
 Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
@@ -453,6 +454,18 @@ Return a valid JSON object matching this schema:
         );
       }
       parsedData.estimatedCountdownSeconds = 30;
+    }
+
+    // If mediaType is image or video, enqueue into FIFO Media Queue Manager
+    if (parsedData.mediaType === 'image' || parsedData.mediaType === 'video') {
+      const mediaJob = mediaQueueManager.enqueueJob({
+        mediaType: parsedData.mediaType,
+        prompt: parsedData.imageParams?.prompt || parsedData.videoParams?.title || rawText,
+        aspectRatio: parsedData.imageParams?.aspectRatio || parsedData.videoParams?.aspectRatio || '16:9',
+        style: parsedData.imageParams?.style || parsedData.videoParams?.visualStyle || 'Photorealistic 8K',
+      });
+      parsedData.jobId = mediaJob.id;
+      parsedData.queuePosition = mediaJob.queuePosition;
     }
 
     // Ensure executive summary exists
