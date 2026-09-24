@@ -7,6 +7,9 @@ export type SearchFormatLens =
   | 'business_strategy'
   | 'general_assistant';
 
+export type FormatLensId = SearchFormatLens;
+export type ResponseMode = 'research' | 'productivity' | 'problem_solving';
+
 export interface FormatLensOption {
   id: SearchFormatLens;
   label: string;
@@ -281,6 +284,7 @@ export interface UserProfile {
   name: string;
   email: string;
   mobile: string;
+  avatarUrl?: string;
   role: UserRole;
   status: UserStatus;
   isActivated: boolean;
@@ -374,4 +378,124 @@ export interface ChatThread {
   currentReport?: TransformedReport;
   industry?: TargetIndustry;
 }
+
+// =========================================================================
+// GOOGLE FLOW ENGINE: Multi-Modal Infinite Canvas Types
+// =========================================================================
+export type FlowNodeType = 'research' | 'image' | 'video' | 'code' | 'document' | 'audio' | 'prompt';
+export type FlowNodeStatus = 'idle' | 'generating' | 'completed' | 'error';
+
+export interface FlowNodeVersion {
+  id: string;
+  timestamp: number;
+  authorName: string;
+  authorEmail?: string;
+  title: string;
+  prompt?: string;
+  previewUrl?: string;
+  summary?: string;
+}
+
+export interface FlowNodeComment {
+  id: string;
+  authorName: string;
+  authorAvatar?: string;
+  authorEmail?: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface AttachedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  category: 'image' | 'video' | 'document' | 'other';
+  previewUrl?: string;
+  data?: string;
+}
+
+export interface FlowNode {
+  id: string;
+  type: FlowNodeType;
+  title: string;
+  prompt: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  status: FlowNodeStatus;
+  progress?: number;
+  attachment?: AttachedFile;
+  report?: TransformedReport;
+  imageParams?: ImageGenerationParams;
+  imageResults?: ImageSearchResult[];
+  videoParams?: VideoGenerationParams;
+  codeSnippet?: {
+    language: string;
+    code: string;
+    output?: string;
+  };
+  audioParams?: {
+    prompt: string;
+    audioUrl?: string;
+    bpm?: number;
+    genre?: string;
+  };
+  ownerId?: string;
+  ownerName: string;
+  ownerEmail?: string;
+  ownerAvatar?: string;
+  createdAt: number;
+  updatedAt: number;
+  versions: FlowNodeVersion[];
+  comments: FlowNodeComment[];
+  colorAccent?: string;
+  tags?: string[];
+}
+
+export interface FlowConnection {
+  id: string;
+  fromNodeId?: string;
+  toNodeId?: string;
+  sourceNodeId?: string;
+  targetNodeId?: string;
+  label?: string;
+  type?: 'derivation' | 'reference' | 'pipeline' | 'parent_child';
+  style?: string;
+  color?: string;
+  createdAt?: number;
+}
+
+export interface FlowCollaborator {
+  id: string;
+  name: string;
+  email: string;
+  color: string;
+  avatarUrl?: string;
+  x?: number;
+  y?: number;
+  activeNodeId?: string;
+  lastSeen: number;
+}
+
+export interface FlowProject {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: number;
+  updatedAt: number;
+  ownerId: string;
+  ownerName: string;
+  nodes: FlowNode[];
+  connections: FlowConnection[];
+  collaborators: FlowCollaborator[];
+  viewport: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+  thumbnail?: string;
+}
+
 

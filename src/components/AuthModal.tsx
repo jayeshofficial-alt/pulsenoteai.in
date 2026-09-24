@@ -308,28 +308,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               try {
                 const { signInWithGoogle } = await import('../lib/firebase');
                 const firebaseUser = await signInWithGoogle();
-                if (firebaseUser) {
-                  const mappedUser: UserProfile = {
-                    id: firebaseUser.uid,
-                    name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-                    email: firebaseUser.email || '',
-                    mobile: firebaseUser.phoneNumber || '',
-                    role: (firebaseUser.email === 'jayeshofficial@gmail.com' || firebaseUser.email === 'contact@pulsenoteai.in') ? 'admin' : 'client',
-                    status: 'active',
-                    isActivated: true,
-                    privacyConsent: true,
-                    consentTimestamp: new Date().toISOString(),
-                    dailyPromptCount: 0,
-                    lastPromptDate: new Date().toISOString().slice(0, 10),
-                    createdAt: Date.now(),
-                    subscription: {
-                      tier: 'free',
-                      isPro: false,
-                      startDate: Date.now(),
-                      expiresAt: null,
-                    },
-                  };
-                  onLoginSuccess(mappedUser, `firebase_${firebaseUser.uid}`);
+                if (firebaseUser && firebaseUser.email) {
+                  // Resolve profile authoritatively from backend
+                  const res = await fetch('/api/auth/resolve-profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      email: firebaseUser.email,
+                      name: firebaseUser.displayName || firebaseUser.email.split('@')[0] || 'User',
+                      avatarUrl: firebaseUser.photoURL || '',
+                    }),
+                  });
+
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error || 'Failed to authenticate.');
+
+                  onLoginSuccess(data.user, data.token || `USER_TOKEN_${data.user.id}`);
                   onClose();
                 }
               } catch (authErr: any) {

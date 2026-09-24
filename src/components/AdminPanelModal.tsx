@@ -387,11 +387,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                  {filteredUsers.map((u) => {
+                  {filteredUsers.map((u, idx) => {
                     const isPro = u.subscription?.isPro;
                     const expiresAt = u.subscription?.expiresAt;
                     return (
-                      <tr key={u.id} className="hover:bg-slate-900/40 transition-colors">
+                      <tr key={`admin-user-${u.id || 'usr'}-${idx}`} className="hover:bg-slate-900/40 transition-colors">
                         <td className="p-3">
                           <div className="font-bold text-white flex items-center gap-1.5">
                             {u.name}
@@ -593,8 +593,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   No activity logs recorded yet. Once users transform notes, logs appear here.
                 </div>
               ) : (
-                activityLogs.map((log) => (
-                  <div key={log.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition-all space-y-2">
+                activityLogs.map((log, lIdx) => (
+                  <div key={`admin-log-${log.id || 'log'}-${lIdx}`} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition-all space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-white">{log.userName}</span>
@@ -881,8 +881,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   No system emails sent yet.
                 </div>
               ) : (
-                systemEmails.map((em) => (
-                  <div key={em.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                systemEmails.map((em, eIdx) => (
+                  <div key={`admin-email-${em.id || 'em'}-${eIdx}`} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-white flex items-center gap-1.5">
                         <Mail className="w-3.5 h-3.5 text-amber-400" />

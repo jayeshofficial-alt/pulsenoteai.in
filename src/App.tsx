@@ -1,143 +1,155 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  TargetIndustry, 
-  ToneSetting, 
-  DynamicResponseMode,
-  TransformedReport, 
-  ActionItem, 
+  FlowProject, 
+  FlowNode, 
+  FlowNodeType, 
+  FlowConnection, 
+  FlowCollaborator, 
+  UserProfile, 
   UserUsageState, 
   SubscriptionPlan,
-  UserProfile,
-  AppInterfaceSettings,
-  ChatThread,
-  ChatMessage,
-  ChatMessageAttachment,
-  SearchFormatLens
+  TargetIndustry,
+  FormatLensId,
+  ResponseMode,
+  AttachedFile
 } from './types';
-import { PRESET_SAMPLES, INDUSTRY_CONFIGS } from './data/presets';
-import { AndroidFrame } from './components/AndroidFrame';
-import { Header } from './components/Header';
-import { GeminiSidebar } from './components/GeminiSidebar';
-import { GeminiWorkspace } from './components/GeminiWorkspace';
-import { InputPanel } from './components/InputPanel';
-import { DocumentViewer } from './components/DocumentViewer';
-import { HistoryModal } from './components/HistoryModal';
+import { UploadCloud, Sparkles, File, Film, FileText, Image as ImageIcon } from 'lucide-react';
+import { FlowCanvas } from './components/flow/FlowCanvas';
+import { FlowProjectHeader } from './components/flow/FlowProjectHeader';
+import { FlowCommandBar } from './components/flow/FlowCommandBar';
+import { FlowNodeVersionModal } from './components/flow/FlowNodeVersionModal';
+import { FlowNodeCommentDrawer } from './components/flow/FlowNodeCommentDrawer';
 import { PricingModal } from './components/PricingModal';
 import { OnboardingLegalModal } from './components/OnboardingLegalModal';
 import { AuthModal } from './components/AuthModal';
-import { ClientBillingModal } from './components/ClientBillingModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
-import { SystemEmailsModal } from './components/SystemEmailsModal';
+import { ClientBillingModal } from './components/ClientBillingModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
-import { Sparkles, ShieldCheck, Zap, Lock, ExternalLink, ShieldAlert, Receipt, Mail } from 'lucide-react';
+import { auth, onAuthStateChanged, logOut } from './lib/firebase';
 
 const TODAY_DATE_STR = () => new Date().toISOString().slice(0, 10);
 
-export default function App() {
-  const [currentIndustry, setCurrentIndustry] = useState<TargetIndustry>('medical');
-  const [currentLens, setCurrentLens] = useState<SearchFormatLens>('general_assistant');
-  const [rawText, setRawText] = useState<string>(PRESET_SAMPLES[0].rawText);
-  const [tone, setTone] = useState<ToneSetting>('standard');
-  const [responseMode, setResponseMode] = useState<DynamicResponseMode>('auto');
-  const [customContext, setCustomContext] = useState<string>('');
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [currentReport, setCurrentReport] = useState<TransformedReport | null>(null);
-  const [isDeviceMode, setIsDeviceMode] = useState<boolean>(false);
-  const [history, setHistory] = useState<TransformedReport[]>([]);
-  const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
-  const [isPricingModalOpen, setIsPricingModalOpen] = useState<boolean>(false);
-  const [isLegalModalOpen, setIsLegalModalOpen] = useState<boolean>(false);
-  const [hasAcceptedLegalOnboarding, setHasAcceptedLegalOnboarding] = useState<boolean>(true);
+export function App() {
+  // Global Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Gemini Universal Chat & Search Workspace State
-  const [threads, setThreads] = useState<ChatThread[]>(() => {
-    try {
-      const saved = localStorage.getItem('pulsenote_chat_threads');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.warn('Failed to parse chat threads:', e);
-    }
-    const defaultThread: ChatThread = {
-      id: 'thread-' + Date.now(),
-      title: 'New Chat',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: [],
-      industry: 'medical',
-    };
-    return [defaultThread];
-  });
+  // Modals & Authentication
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isClientBillingOpen, setIsClientBillingOpen] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
+  const [hasAcceptedLegalOnboarding, setHasAcceptedLegalOnboarding] = useState(true);
 
-  const [activeThreadId, setActiveThreadId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('pulsenote_chat_threads');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
-      }
-    } catch {}
-    return 'thread-init';
-  });
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
-  const [viewMode, setViewMode] = useState<'gemini' | 'document'>('gemini');
-
-  const saveThreads = (newThreads: ChatThread[]) => {
-    setThreads(newThreads);
-    try {
-      localStorage.setItem('pulsenote_chat_threads', JSON.stringify(newThreads));
-    } catch (e) {
-      console.warn('Failed to save chat threads:', e);
-    }
-    if (currentUser?.id) {
-      import('./lib/firebase').then(({ saveThreadToFirestore }) => {
-        newThreads.forEach((t) => saveThreadToFirestore(currentUser.id, t));
-      }).catch(e => console.warn('Firestore sync error:', e));
-    }
-  };
-
-  // User Authentication & Profile
+  // Authenticated User Profile
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     try {
-      const saved = localStorage.getItem('pulsenote_auth_user');
-      return saved ? JSON.parse(saved) : null;
+      const stored = localStorage.getItem('pulsenote_user_profile');
+      return stored ? JSON.parse(stored) : null;
     } catch {
       return null;
     }
   });
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authModalTab, setAuthModalTab] = useState<'login' | 'register' | 'forgot'>('login');
-  const [isBillingModalOpen, setIsBillingModalOpen] = useState<boolean>(false);
-  const [isAdminPanelModalOpen, setIsAdminPanelModalOpen] = useState<boolean>(false);
-  const [isMailboxModalOpen, setIsMailboxModalOpen] = useState<boolean>(false);
 
-  // Dynamic Interface Settings from Admin
-  const [appSettings, setAppSettings] = useState<AppInterfaceSettings>({
-    appTagline: 'Transform messy voice memos and rough notes into structured industry documentation.',
-    announcementBanner: '🚀 PulseNote Pro Power Pack is live! 45% discount for annual subscriptions.',
-    isBannerActive: true,
-    heroHeadline: 'Turn messy voice transcripts into elite documentation',
-    heroSubhead: 'PulseNote filters filler words, extracts action owners & deadlines, and structures records to strict industry standards.',
-    customComplianceNote: 'Mandatory verification required by a licensed professional prior to clinical or legal submission.',
-    updatedAt: Date.now(),
-    lastUpdatedBy: 'System Administrator',
-  });
+  // Staged File Attachment for Prompt Input & Drag-and-Drop Pipeline
+  const [stagedAttachment, setStagedAttachment] = useState<AttachedFile | null>(null);
+  const [isGlobalDragOver, setIsGlobalDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
   // User Usage State & Daily Monetization Tracking (3 Free Prompts / Day)
-  const [usageState, setUsageState] = useState<UserUsageState>({
-    dailyPromptCount: 0,
-    lastResetDate: TODAY_DATE_STR(),
-    isPro: false,
-    activePlan: 'free',
+  const [usageState, setUsageState] = useState<UserUsageState>(() => {
+    try {
+      const stored = localStorage.getItem('pulsenote_user_usage');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.lastResetDate !== TODAY_DATE_STR()) {
+          return { ...parsed, dailyPromptCount: 0, lastResetDate: TODAY_DATE_STR() };
+        }
+        return parsed;
+      }
+    } catch {}
+    return {
+      dailyPromptCount: 0,
+      lastResetDate: TODAY_DATE_STR(),
+      isPro: false,
+      activePlan: 'free',
+    };
   });
 
-  // Load user usage & legal status on mount + Firebase Auth listener
+  // Google Flow Engine Projects & State
+  const [projects, setProjects] = useState<FlowProject[]>([]);
+  const [currentProject, setCurrentProject] = useState<FlowProject>({
+    id: 'proj_flow_genesis',
+    name: 'Autonomous Vision & Neural Launch',
+    description: 'Multi-modal workspace exploring Imagen 3 generative pipelines and Deep Research',
+    createdAt: Date.now() - 3600000 * 24,
+    updatedAt: Date.now(),
+    ownerId: 'usr_lead_arch',
+    ownerName: 'Lead Architect',
+    viewport: { x: 80, y: 80, zoom: 0.85 },
+    collaborators: [],
+    nodes: [],
+    connections: [],
+  });
+
+  const [collaborators, setCollaborators] = useState<FlowCollaborator[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [activeVersionNode, setActiveVersionNode] = useState<FlowNode | null>(null);
+  const [activeCommentNode, setActiveCommentNode] = useState<FlowNode | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // WebSocket reference for live collaboration
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Toast Helper
+  const addToast = (type: 'success' | 'error' | 'info', message: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
+    setToasts((prev) => [...prev, { id, type, message }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Sync / Verify User Profile Authoritatively with Backend
+  const syncAuthoritativeProfile = async (email: string, name?: string, avatarUrl?: string) => {
+    try {
+      const res = await fetch('/api/auth/resolve-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name, avatarUrl }),
+      });
+      const data = await res.json();
+      if (data.success && data.user) {
+        setCurrentUser(data.user);
+        try {
+          localStorage.setItem('pulsenote_user_profile', JSON.stringify(data.user));
+          if (data.token) localStorage.setItem('pulsenote_auth_token', data.token);
+        } catch {}
+
+        if (data.isAdmin || data.isPro) {
+          setUsageState((prev) => {
+            const updated: UserUsageState = {
+              ...prev,
+              isPro: true,
+              activePlan: data.isAdmin ? 'admin_grant' : (data.user.subscription?.tier || 'pro_monthly'),
+              dailyPromptCount: 0,
+            };
+            try {
+              localStorage.setItem('pulsenote_user_usage', JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Profile sync notice:', e);
+    }
+  };
+
+  // 1. Initial Load & Firebase Auth Lifecycle
   useEffect(() => {
-    // 1. Check legal onboarding
     try {
       const accepted = localStorage.getItem('pulsenote_legal_accepted_v1');
       if (!accepted) {
@@ -145,943 +157,906 @@ export default function App() {
         setIsLegalModalOpen(true);
       }
     } catch (e) {
-      console.warn('Could not read legal acceptance status:', e);
+      console.warn('Legal check notice:', e);
     }
 
-    // 2. Firebase Auth listener
-    import('./lib/firebase').then(({ auth, loadUserThreadsFromFirestore }) => {
-      auth.onAuthStateChanged(async (firebaseUser) => {
-        if (firebaseUser) {
-          const userEmail = firebaseUser.email || '';
-          const mappedUser: UserProfile = {
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || userEmail.split('@')[0] || 'User',
-            email: userEmail,
-            mobile: firebaseUser.phoneNumber || '',
-            role: (userEmail === 'jayeshofficial@gmail.com' || userEmail === 'contact@pulsenoteai.in') ? 'admin' : 'client',
-            status: 'active',
-            isActivated: true,
-            privacyConsent: true,
-            consentTimestamp: new Date().toISOString(),
-            dailyPromptCount: 0,
-            lastPromptDate: new Date().toISOString().slice(0, 10),
-            createdAt: Date.now(),
-            subscription: {
-              tier: 'free',
-              isPro: false,
-              startDate: Date.now(),
-              expiresAt: null,
-            },
-          };
-          setCurrentUser(mappedUser);
+    // If stored user exists, refresh authoritative role
+    if (currentUser?.email) {
+      syncAuthoritativeProfile(currentUser.email, currentUser.name, currentUser.avatarUrl);
+    }
 
-          // Load remote threads from Firestore
-          const remoteThreads = await loadUserThreadsFromFirestore(firebaseUser.uid);
-          if (remoteThreads && remoteThreads.length > 0) {
-            setThreads(remoteThreads);
-            setActiveThreadId(remoteThreads[0].id);
-          }
-        }
-      });
-    }).catch(e => console.warn('Firebase init error:', e));
-
-    // 3. Load usage state
-    try {
-      const storedUsage = localStorage.getItem('pulsenote_user_usage');
-      if (storedUsage) {
-        const parsed: UserUsageState = JSON.parse(storedUsage);
-        const today = TODAY_DATE_STR();
-        
-        // Reset daily count if date has changed
-        if (parsed.lastResetDate !== today) {
-          const resetState: UserUsageState = {
-            ...parsed,
-            dailyPromptCount: 0,
-            lastResetDate: today,
-          };
-          setUsageState(resetState);
-          localStorage.setItem('pulsenote_user_usage', JSON.stringify(resetState));
-        } else {
-          setUsageState(parsed);
-        }
+    // Listen to Firebase auth state changes
+    const unsubscribe = onAuthStateChanged(auth, (fbUser: any) => {
+      if (fbUser && fbUser.email) {
+        syncAuthoritativeProfile(
+          fbUser.email,
+          fbUser.displayName || fbUser.email.split('@')[0],
+          fbUser.photoURL || ''
+        );
       }
-    } catch (e) {
-      console.warn('Could not read user usage state:', e);
-    }
+    });
 
-    // 3. Load history
-    try {
-      const stored = localStorage.getItem('pulsenote_history');
-      if (stored) {
-        setHistory(JSON.parse(stored));
-      }
-    } catch (e) {
-      console.warn('Could not load history:', e);
-    }
-
-    // 4. Fetch dynamic app settings
-    fetch('/api/admin/settings')
+    // Load initial project list from backend
+    fetch('/api/flow/projects')
       .then((res) => res.json())
       .then((data) => {
-        if (data.settings) {
-          setAppSettings(data.settings);
+        if (data.success && Array.isArray(data.projects) && data.projects.length > 0) {
+          setProjects(data.projects);
+          setCurrentProject(data.projects[0]);
         }
       })
-      .catch((e) => console.warn('Could not load settings:', e));
+      .catch((e) => console.warn('Fetch projects notice:', e));
 
-    // 5. Sync user session if logged in
-    if (currentUser?.id) {
-      refreshUserProfile(currentUser.id);
-    }
+    return () => unsubscribe();
   }, []);
 
-  const refreshUserProfile = async (userId: string) => {
-    try {
-      const res = await fetch(`/api/auth/me?userId=${encodeURIComponent(userId)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setCurrentUser(data.user);
-          localStorage.setItem('pulsenote_auth_user', JSON.stringify(data.user));
-
-          // Sync usage state with fresh backend subscription status
-          const isPro = data.user.subscription?.isPro || false;
-          setUsageState((prev) => ({
-            ...prev,
-            isPro,
-            activePlan: isPro ? data.user.subscription?.tier : 'free',
-            expiresAt: data.user.subscription?.expiresAt,
-          }));
-        }
+  // Update usage state when currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      const isAdmin = currentUser.role === 'admin';
+      const isPro = isAdmin || currentUser.subscription?.isPro;
+      if (isPro) {
+        setUsageState((prev) => ({
+          ...prev,
+          isPro: true,
+          activePlan: isAdmin ? 'admin_grant' : (currentUser.subscription?.tier || 'pro_monthly'),
+        }));
       }
-    } catch (err) {
-      console.error('Failed to refresh user profile:', err);
     }
-  };
+  }, [currentUser]);
 
-  const handleLoginSuccess = (user: UserProfile, token: string) => {
-    setCurrentUser(user);
+  // Handle Log Out
+  const handleLogout = async () => {
     try {
-      localStorage.setItem('pulsenote_auth_user', JSON.stringify(user));
-      localStorage.setItem('pulsenote_auth_token', token);
+      await logOut();
     } catch (e) {
-      console.warn('Failed to save auth token:', e);
+      console.warn('Firebase logout notice:', e);
     }
-
-    // Strict Role-Based Access Control Check
-    const cleanEmail = (user.email || '').trim().toLowerCase();
-    const isAdmin = cleanEmail === 'jayeshofficial@gmail.com' || cleanEmail === 'contact@pulsenoteai.in' || user.role === 'admin';
-
-    // Synchronize subscription status: admins get perpetual Pro access; clients get their tier or Free 3/day
-    const isPro = isAdmin ? true : Boolean(user.subscription?.isPro);
-    setUsageState((prev) => ({
-      ...prev,
-      isPro,
-      activePlan: isPro ? (isAdmin ? 'admin_grant' : (user.subscription?.tier || 'free')) : 'free',
-      expiresAt: isAdmin ? null : user.subscription?.expiresAt,
-    }));
-
-    // Close the login modal
-    setIsAuthModalOpen(false);
-
-    // Dynamic RBAC Redirection:
-    if (isAdmin) {
-      addToast('success', `Admin authentication verified (${user.name}). Redirecting to Super Admin Dashboard...`);
-      setIsAdminPanelModalOpen(true);
-      setIsBillingModalOpen(false);
-    } else {
-      addToast('success', `Welcome back, ${user.name}! Redirecting to Customer Profile...`);
-      setIsBillingModalOpen(true);
-      setIsAdminPanelModalOpen(false);
-    }
-  };
-
-  const handleLogout = () => {
+    localStorage.removeItem('pulsenote_user_profile');
+    localStorage.removeItem('pulsenote_auth_token');
     setCurrentUser(null);
-    try {
-      localStorage.removeItem('pulsenote_auth_user');
-      localStorage.removeItem('pulsenote_auth_token');
-    } catch (e) {
-      console.warn('Failed to clear auth:', e);
-    }
-
-    setUsageState((prev) => ({
-      ...prev,
-      isPro: false,
-      activePlan: 'free',
-    }));
+    setUsageState((prev) => {
+      const reset: UserUsageState = {
+        ...prev,
+        isPro: false,
+        activePlan: 'free',
+      };
+      try {
+        localStorage.setItem('pulsenote_user_usage', JSON.stringify(reset));
+      } catch {}
+      return reset;
+    });
     addToast('info', 'Logged out successfully.');
   };
 
-  const handleActivateAccountFromMailbox = async (token: string, email: string) => {
-    try {
-      const res = await fetch('/api/auth/activate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, token }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Activation failed');
+  // 2. Real-Time WebSocket Connection for Google Flow
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const userName = currentUser?.name || 'Lead Architect';
+    const userEmail = currentUser?.email || 'architect@pulsenoteai.in';
+    const userId = currentUser?.id || `usr_${Date.now()}`;
+    const userColor = currentUser?.role === 'admin' ? '#ec4899' : '#6366f1';
 
-      addToast('success', '🎉 Account successfully activated! You can now sign in.');
-      setIsAuthModalOpen(true);
-      setAuthModalTab('login');
-    } catch (err: any) {
-      addToast('error', err.message);
-    }
-  };
+    const wsUrl = `${protocol}//${host}/ws/flow?projectId=${encodeURIComponent(
+      currentProject.id
+    )}&userName=${encodeURIComponent(userName)}&userEmail=${encodeURIComponent(
+      userEmail
+    )}&userId=${encodeURIComponent(userId)}&userColor=${encodeURIComponent(userColor)}`;
 
-  const saveUsageState = (newState: UserUsageState) => {
-    setUsageState(newState);
-    try {
-      localStorage.setItem('pulsenote_user_usage', JSON.stringify(newState));
-    } catch (e) {
-      console.warn('Could not save user usage:', e);
-    }
-  };
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
-  const handleAcceptLegalOnboarding = () => {
-    try {
-      localStorage.setItem('pulsenote_legal_accepted_v1', 'true');
-    } catch (e) {
-      console.warn('Could not store legal accepted flag:', e);
-    }
-    setHasAcceptedLegalOnboarding(true);
-    setIsLegalModalOpen(false);
-    addToast('success', 'User Agreement accepted. Welcome to PulseNote AI.');
-  };
-
-  const handleUpgradeSuccess = (plan: SubscriptionPlan, txnRef: string) => {
-    const isAnnual = plan === 'pro_annual';
-    const expiresAt = Date.now() + (isAnnual ? 365 : 30) * 24 * 60 * 60 * 1000;
-
-    const updatedState: UserUsageState = {
-      ...usageState,
-      isPro: true,
-      activePlan: plan,
-      subscribedAt: Date.now(),
-      expiresAt,
-      transactionRef: txnRef,
+    ws.onopen = () => {
+      console.log('[FLOW_WS] Connected to live project canvas room:', currentProject.id);
     };
 
-    saveUsageState(updatedState);
-    if (currentUser?.id) {
-      refreshUserProfile(currentUser.id);
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        switch (msg.type) {
+          case 'init': {
+            if (msg.project) {
+              setCurrentProject(msg.project);
+              const uniqueCollabs: FlowCollaborator[] = [];
+              const seenIds = new Set<string>();
+              for (const c of msg.project.collaborators || []) {
+                if (c && c.id && !seenIds.has(c.id)) {
+                  seenIds.add(c.id);
+                  uniqueCollabs.push(c);
+                }
+              }
+              setCollaborators(uniqueCollabs);
+            }
+            break;
+          }
+          case 'user_joined': {
+            if (msg.collaborator) {
+              setCollaborators((prev) => {
+                const filtered = prev.filter((c) => c.id !== msg.collaborator.id);
+                return [...filtered, msg.collaborator];
+              });
+              addToast('info', `${msg.collaborator.name} joined the Flow canvas`);
+            }
+            break;
+          }
+          case 'user_left': {
+            if (msg.userId) {
+              setCollaborators((prev) => prev.filter((c) => c.id !== msg.userId));
+            }
+            break;
+          }
+          case 'cursor_move': {
+            if (msg.userId && msg.cursor) {
+              setCollaborators((prev) =>
+                prev.map((c) => (c.id === msg.userId ? { ...c, cursor: msg.cursor } : c))
+              );
+            }
+            break;
+          }
+          case 'node_created': {
+            if (msg.node) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                nodes: [...(prev.nodes || []).filter((n) => n.id !== msg.node.id), msg.node],
+              }));
+            }
+            break;
+          }
+          case 'node_updated': {
+            if (msg.node) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                nodes: (prev.nodes || []).map((n) => (n.id === msg.node.id ? { ...n, ...msg.node } : n)),
+              }));
+            }
+            break;
+          }
+          case 'node_moved': {
+            if (msg.nodeId) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                nodes: (prev.nodes || []).map((n) =>
+                  n.id === msg.nodeId ? { ...n, x: msg.x, y: msg.y } : n
+                ),
+              }));
+            }
+            break;
+          }
+          case 'node_deleted': {
+            if (msg.nodeId) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                nodes: (prev.nodes || []).filter((n) => n.id !== msg.nodeId),
+                connections: (prev.connections || []).filter(
+                  (conn) => conn.sourceNodeId !== msg.nodeId && conn.targetNodeId !== msg.nodeId
+                ),
+              }));
+            }
+            break;
+          }
+          case 'connection_created': {
+            if (msg.connection) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                connections: [...(prev.connections || []), msg.connection],
+              }));
+            }
+            break;
+          }
+          case 'connection_deleted': {
+            if (msg.connectionId) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                connections: (prev.connections || []).filter((c) => c.id !== msg.connectionId),
+              }));
+            }
+            break;
+          }
+          case 'comment_added': {
+            if (msg.nodeId && msg.comment) {
+              setCurrentProject((prev) => ({
+                ...prev,
+                nodes: (prev.nodes || []).map((n) =>
+                  n.id === msg.nodeId
+                    ? { ...n, comments: [...(n.comments || []), msg.comment] }
+                    : n
+                ),
+              }));
+            }
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (err) {
+        console.error('Error handling WebSocket message:', err);
+      }
+    };
+
+    ws.onerror = (e) => {
+      console.warn('[FLOW_WS] WebSocket notice:', e);
+    };
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, [currentProject.id, currentUser?.id]);
+
+  // Broadcast cursor movement
+  const handleCursorMove = (x: number, y: number) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'cursor_move',
+          projectId: currentProject.id,
+          cursor: { x, y },
+        })
+      );
     }
-    addToast('success', `🎉 Upgraded to PulseNote ${isAnnual ? 'Pro Annual' : 'Pro Monthly'}! Unlimited prompts unlocked.`);
   };
 
-  const saveHistory = (newHistory: TransformedReport[]) => {
-    setHistory(newHistory);
-    try {
-      localStorage.setItem('pulsenote_history', JSON.stringify(newHistory));
-    } catch (e) {
-      console.warn('Could not save history:', e);
+  // Broadcast node move
+  const handleUpdateNodePos = (nodeId: string, x: number, y: number) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).map((n) => (n.id === nodeId ? { ...n, x, y } : n)),
+    }));
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'node_moved',
+          projectId: currentProject.id,
+          nodeId,
+          x,
+          y,
+        })
+      );
     }
   };
 
-  const addToast = (type: 'success' | 'error' | 'info', message: string) => {
-    const id = Date.now().toString() + Math.random().toString().slice(2, 6);
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
+  // Node Deletion
+  const handleDeleteNode = async (nodeId: string) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).filter((n) => n.id !== nodeId),
+      connections: (prev.connections || []).filter(
+        (c) => c.sourceNodeId !== nodeId && c.targetNodeId !== nodeId
+      ),
+    }));
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'node_deleted',
+          projectId: currentProject.id,
+          nodeId,
+        })
+      );
+    }
+    addToast('info', 'Node deleted from canvas');
   };
 
-  const dismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  // Duplicate Node
+  const handleDuplicateNode = (nodeId: string) => {
+    const target = currentProject.nodes?.find((n) => n.id === nodeId);
+    if (!target) return;
+
+    const newNode: FlowNode = {
+      ...target,
+      id: `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: `${target.title} (Copy)`,
+      x: target.x + 40,
+      y: target.y + 40,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      comments: [],
+    };
+
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), newNode],
+    }));
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'node_created',
+          projectId: currentProject.id,
+          node: newNode,
+        })
+      );
+    }
+    addToast('success', 'Duplicated Flow Card');
   };
 
-  const handleSelectIndustry = (ind: TargetIndustry) => {
-    setCurrentIndustry(ind);
-    const matchingPreset = PRESET_SAMPLES.find((p) => p.industry === ind);
-    if (matchingPreset && (!rawText || rawText === PRESET_SAMPLES[0].rawText)) {
-      setRawText(matchingPreset.rawText);
+  // Create Connection between Nodes
+  const handleCreateConnection = (sourceNodeId: string, targetNodeId: string) => {
+    if (sourceNodeId === targetNodeId) return;
+
+    const newConnection: FlowConnection = {
+      id: `conn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sourceNodeId,
+      targetNodeId,
+      label: 'Flow Vector',
+      createdAt: Date.now(),
+      style: 'bezier',
+    };
+
+    setCurrentProject((prev) => ({
+      ...prev,
+      connections: [...(prev.connections || []), newConnection],
+    }));
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'connection_created',
+          projectId: currentProject.id,
+          connection: newConnection,
+        })
+      );
+    }
+    addToast('success', 'Connected Flow Nodes');
+  };
+
+  // Delete Connection
+  const handleDeleteConnection = (connectionId: string) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      connections: (prev.connections || []).filter((c) => c.id !== connectionId),
+    }));
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'connection_deleted',
+          projectId: currentProject.id,
+          connectionId,
+        })
+      );
     }
   };
 
-  // Transform rough notes into industry documentation
-  const handleTransform = async () => {
-    if (!rawText.trim()) {
-      addToast('error', 'Please provide notes or voice transcript to transform.');
+  // Restore Node Version Snapshot
+  const handleRestoreVersion = (nodeId: string, version: any) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).map((n) => {
+        if (n.id === nodeId) {
+          return {
+            ...n,
+            title: version.title,
+            report: version.report || n.report,
+            imageParams: version.imageParams || n.imageParams,
+            videoParams: version.videoParams || n.videoParams,
+            codeSnippet: version.codeSnippet || n.codeSnippet,
+            updatedAt: Date.now(),
+          };
+        }
+        return n;
+      }),
+    }));
+    setActiveVersionNode(null);
+    addToast('success', `Restored snapshot "${version.title}"`);
+  };
+
+  // Add Comment
+  const handleAddComment = (nodeId: string, text: string) => {
+    const newComment = {
+      id: `com_${Date.now()}`,
+      authorName: currentUser?.name || 'Lead Architect',
+      authorAvatar: currentUser?.avatarUrl,
+      text,
+      timestamp: Date.now(),
+    };
+
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).map((n) =>
+        n.id === nodeId ? { ...n, comments: [...(n.comments || []), newComment] } : n
+      ),
+    }));
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'comment_added',
+          projectId: currentProject.id,
+          nodeId,
+          comment: newComment,
+        })
+      );
+    }
+  };
+
+  // Handle Drag-and-Drop Ingestion on Global Window & Canvas
+  const processDroppedFile = (file: File) => {
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    const maxSizeBytes = isVideo ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+    const maxSizeLabel = isVideo ? '100MB' : '20MB';
+
+    if (file.size > maxSizeBytes) {
+      addToast(
+        'error',
+        `File size exceeds limit (${(file.size / (1024 * 1024)).toFixed(1)}MB). Max allowed for ${isVideo ? 'video' : 'images/documents'} is ${maxSizeLabel}.`
+      );
       return;
     }
 
-    // Check client-side daily limit for free tier
-    if (!usageState.isPro && usageState.dailyPromptCount >= 3) {
+    let category: 'image' | 'video' | 'document' | 'other' = 'other';
+    if (isImage) category = 'image';
+    else if (isVideo) category = 'video';
+    else if (
+      file.type.includes('pdf') ||
+      file.type.includes('text') ||
+      file.type.includes('document') ||
+      file.name.match(/\.(pdf|txt|docx|doc|csv|json|md)$/i)
+    ) {
+      category = 'document';
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = e.target?.result as string;
+      const previewUrl = category === 'image' || category === 'video' ? data : undefined;
+      const newAttachment: AttachedFile = {
+        id: `att_${Date.now()}`,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        category,
+        previewUrl,
+        data,
+      };
+      setStagedAttachment(newAttachment);
+      addToast('success', `Attached "${file.name}" to prompt workspace`);
+    };
+    reader.onerror = () => {
+      addToast('error', 'Failed to read dropped file. Please try again.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGlobalDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsGlobalDragOver(true);
+    }
+  };
+
+  const handleGlobalDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleGlobalDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsGlobalDragOver(false);
+    }
+  };
+
+  const handleGlobalDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsGlobalDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processDroppedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  // Generate new Google Flow Card on Infinite Canvas
+  const handleGenerateOnCanvas = async (
+    prompt: string,
+    mode: FlowNodeType,
+    options?: { aspectRatio?: string; attachedFile?: AttachedFile }
+  ) => {
+    const aspectRatio = options?.aspectRatio || '16:9';
+    const attachedFile = options?.attachedFile;
+    const isAdmin = currentUser?.role === 'admin';
+    const effectiveIsPro = usageState.isPro || isAdmin;
+
+    // Check freemium guardrails (3/day) for non-pro / non-admin users
+    if (!effectiveIsPro && usageState.dailyPromptCount >= 3) {
       setIsPricingModalOpen(true);
-      addToast('info', 'Daily free limit reached (3/3). Please upgrade to Pro for unlimited prompts.');
+      addToast('error', 'Daily free limit reached (3/3 prompts). Upgrade to Pro for unlimited generation.');
       return;
     }
 
+    setIsGenerating(true);
+
+    // Calculate dynamic node spawn coordinate on canvas near current center
+    const existingCount = currentProject.nodes?.length || 0;
+    const spawnX = 120 + (existingCount % 4) * 440;
+    const spawnY = 120 + Math.floor(existingCount / 4) * 360;
+
+    const tempNodeId = `node_${Date.now()}`;
+    const initialNode: FlowNode = {
+      id: tempNodeId,
+      type: mode,
+      title: `${(prompt || attachedFile?.name || 'Multi-modal Card').slice(0, 36)}...`,
+      prompt: prompt || (attachedFile ? `Attached: ${attachedFile.name}` : ''),
+      x: spawnX,
+      y: spawnY,
+      width: mode === 'research' || mode === 'video' ? 520 : 460,
+      status: 'generating',
+      attachment: attachedFile,
+      ownerId: currentUser?.id || 'usr_lead',
+      ownerName: currentUser?.name || 'Lead Architect',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      versions: [],
+      comments: [],
+    };
+
+    // Optimistically place node on canvas
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), initialNode],
+    }));
+
     try {
-      setIsProcessing(true);
+      const creativeMode = mode === 'image' ? 'image' : mode === 'video' ? 'video' : undefined;
+      const formatLens: FormatLensId = mode === 'code' ? 'code_generation' : 'deep_research';
+
       const response = await fetch('/api/transform', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rawText,
-          targetIndustry: currentIndustry,
-          tone,
-          responseMode,
-          customContext,
+          rawText: prompt,
+          targetIndustry: 'general',
+          formatLens,
+          responseMode: mode === 'research' ? 'research' : 'productivity',
           dailyPromptCount: usageState.dailyPromptCount,
-          isPro: usageState.isPro,
-          userId: currentUser?.id || 'usr_guest',
-          userEmail: currentUser?.email || 'client@pulsenote.ai',
-          userName: currentUser?.name || 'Guest Client',
+          isPro: effectiveIsPro,
+          userEmail: currentUser?.email || '',
+          creativeMode,
+          attachedFile: attachedFile ? {
+            id: attachedFile.id,
+            name: attachedFile.name,
+            size: attachedFile.size,
+            type: attachedFile.type,
+            category: attachedFile.category,
+            data: attachedFile.data,
+            previewUrl: attachedFile.previewUrl,
+          } : undefined,
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${response.status}`);
-      }
-
       const data = await response.json();
 
-      // Check if server halted request due to monetization guardrail
       if (data.isLimitReached) {
-        const limitReport: TransformedReport = {
-          id: Date.now().toString(),
-          timestamp: Date.now(),
-          industry: currentIndustry,
-          title: 'Daily Free Limit Reached',
-          rawInput: rawText,
-          executiveSummary: 'Daily free prompt limit reached. Upgrade to Pro for unlimited prompts.',
-          responseMode: 'productivity',
-          markdownReport: data.markdownReport,
-          sections: data.sections || [],
-          actionItems: data.actionItems || [],
-          detectedEntities: [],
-          keyTakeaways: data.keyTakeaways || [],
-          complianceDisclaimer: data.complianceDisclaimer,
-        };
-        setCurrentReport(limitReport);
         setIsPricingModalOpen(true);
+        // Remove generating placeholder
+        setCurrentProject((prev) => ({
+          ...prev,
+          nodes: (prev.nodes || []).filter((n) => n.id !== tempNodeId),
+        }));
         return;
       }
 
-      const newReport: TransformedReport = {
-        id: Date.now().toString(),
-        timestamp: Date.now(),
-        industry: currentIndustry,
-        title: data.title || `${currentIndustry.toUpperCase()} Documentation`,
-        rawInput: rawText,
-        executiveSummary: data.executiveSummary || '',
-        responseMode: data.responseMode || (responseMode !== 'auto' ? responseMode : 'productivity'),
-        immediateSolution: data.immediateSolution || '',
-        bestOnlinePractices: data.bestOnlinePractices || '',
-        actionableStrategicPlan: data.actionableStrategicPlan || '',
-        searchSources: data.searchSources || [],
-        markdownReport: data.markdownReport || '',
-        sections: data.sections || [],
-        actionItems: (data.actionItems || []).map((item: ActionItem) => ({
-          ...item,
-          completed: false,
-        })),
-        detectedEntities: data.detectedEntities || [],
-        keyTakeaways: data.keyTakeaways || [],
-        complianceDisclaimer: data.complianceDisclaimer || '',
-        isVague: data.isVague || false,
-        clarificationRequest: data.clarificationRequest || '',
-      };
-
-      setCurrentReport(newReport);
-
-      if (data.isVague) {
-        addToast('info', 'Guardrail Notice: More context needed for professional summary.');
-      } else {
-        addToast('success', 'Flawless industry documentation generated!');
-        saveHistory([newReport, ...history]);
-
-        // Increment daily prompt count if on Free tier
-        if (!usageState.isPro) {
-          const newCount = usageState.dailyPromptCount + 1;
-          const updatedUsage = {
-            ...usageState,
-            dailyPromptCount: newCount,
+      // Increment daily prompt count if free tier
+      if (!effectiveIsPro) {
+        setUsageState((prev) => {
+          const updated: UserUsageState = {
+            ...prev,
+            dailyPromptCount: prev.dailyPromptCount + 1,
             lastResetDate: TODAY_DATE_STR(),
           };
-          saveUsageState(updatedUsage);
-        }
+          try {
+            localStorage.setItem('pulsenote_user_usage', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
       }
-    } catch (err: unknown) {
-      console.error('Transform error:', err);
-      const msg = err instanceof Error ? err.message : 'Transformation failed';
-      addToast('error', msg);
+
+      // Populate resolved Flow Card data
+      const completedNode: FlowNode = {
+        ...initialNode,
+        title: data.title || prompt.slice(0, 42) || attachedFile?.name || 'Flow Card',
+        status: 'completed',
+        attachment: data.attachment || attachedFile,
+        report: data.markdownReport || data.executiveSummary ? {
+          id: `rep_${Date.now()}`,
+          timestamp: Date.now(),
+          industry: 'general',
+          rawInput: prompt,
+          responseMode: data.responseMode || 'research',
+          title: data.title || 'Analysis',
+          executiveSummary: data.executiveSummary || '',
+          markdownReport: data.markdownReport || '',
+          sections: data.sections || [],
+          actionItems: data.actionItems || [],
+          detectedEntities: data.detectedEntities || [],
+          keyTakeaways: data.keyTakeaways || [],
+        } : undefined,
+        imageResults: data.imageResults || data.imageParams?.results,
+        imageParams: data.imageParams ? {
+          ...data.imageParams,
+          aspectRatio,
+        } : undefined,
+        videoParams: data.videoParams ? {
+          ...data.videoParams,
+          aspectRatio,
+        } : undefined,
+        codeSnippet: mode === 'code' ? {
+          language: 'typescript',
+          code: data.markdownReport || '// Synthesized architecture and logic',
+        } : undefined,
+        versions: [
+          {
+            id: `v_init_${Date.now()}`,
+            timestamp: Date.now(),
+            title: 'Initial Flow Synthesis',
+            authorName: currentUser?.name || 'Lead Architect',
+          },
+        ],
+      };
+
+      setCurrentProject((prev) => ({
+        ...prev,
+        nodes: (prev.nodes || []).map((n) => (n.id === tempNodeId ? completedNode : n)),
+      }));
+
+      // Broadcast new node to collaborators
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'node_created',
+            projectId: currentProject.id,
+            node: completedNode,
+          })
+        );
+      }
+
+      addToast('success', `Generated ${mode.toUpperCase()} Flow Card`);
+    } catch (err: any) {
+      addToast('error', 'Generation encountered an error. Please retry.');
+      setCurrentProject((prev) => ({
+        ...prev,
+        nodes: (prev.nodes || []).filter((n) => n.id !== tempNodeId),
+      }));
     } finally {
-      setIsProcessing(false);
+      setIsGenerating(false);
     }
   };
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    addToast('success', 'Copied documentation to clipboard!');
-  };
-
-  const handleUpdateActionItem = (index: number, completed: boolean) => {
-    if (!currentReport) return;
-    const updatedActions = [...currentReport.actionItems];
-    updatedActions[index] = { ...updatedActions[index], completed };
-    const updatedReport = { ...currentReport, actionItems: updatedActions };
-    setCurrentReport(updatedReport);
-
-    const updatedHistory = history.map((h) => (h.id === updatedReport.id ? updatedReport : h));
-    saveHistory(updatedHistory);
-  };
-
-  const handleEditMarkdown = (newMarkdown: string) => {
-    if (!currentReport) return;
-    const updatedReport = { ...currentReport, markdownReport: newMarkdown };
-    setCurrentReport(updatedReport);
-  };
-
-  const handleDeleteReport = (id: string) => {
-    const updated = history.filter((h) => h.id !== id);
-    saveHistory(updated);
-    if (currentReport?.id === id) {
-      setCurrentReport(null);
-    }
-    addToast('info', 'Report deleted from archive.');
-  };
-
-  const handleClearAllHistory = () => {
-    saveHistory([]);
-    addToast('info', 'Archive cleared.');
-  };
-
-  // Find current active thread safely
-  const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || {
-    id: 'thread-init',
-    title: 'New Chat',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    messages: [],
-    industry: currentIndustry,
-  };
-
-  const handleNewChat = () => {
-    const newThread: ChatThread = {
-      id: 'thread-' + Date.now(),
-      title: 'New Chat',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: [],
-      industry: currentIndustry,
-    };
-    const updated = [newThread, ...threads];
-    saveThreads(updated);
-    setActiveThreadId(newThread.id);
-    setViewMode('gemini');
-    setCurrentReport(null);
-  };
-
-  const handleSelectThread = (threadId: string) => {
-    setActiveThreadId(threadId);
-    const target = threads.find((t) => t.id === threadId);
-    if (target?.currentReport) {
-      setCurrentReport(target.currentReport);
-    } else {
-      setCurrentReport(null);
-    }
-    setViewMode('gemini');
-  };
-
-  const handleRenameThread = (threadId: string, newTitle: string) => {
-    const updated = threads.map((t) => (t.id === threadId ? { ...t, title: newTitle } : t));
-    saveThreads(updated);
-  };
-
-  const handleDeleteThread = (threadId: string) => {
-    const remaining = threads.filter((t) => t.id !== threadId);
-    if (remaining.length === 0) {
-      const fresh: ChatThread = {
-        id: 'thread-' + Date.now(),
-        title: 'New Chat',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        messages: [],
-        industry: currentIndustry,
-      };
-      saveThreads([fresh]);
-      setActiveThreadId(fresh.id);
-      setCurrentReport(null);
-    } else {
-      saveThreads(remaining);
-      if (activeThreadId === threadId) {
-        setActiveThreadId(remaining[0].id);
-        setCurrentReport(remaining[0].currentReport || null);
-      }
-    }
-    addToast('info', 'Chat deleted.');
-  };
-
-  const handleSendMessage = async (
-    content: string,
-    attachments?: ChatMessageAttachment[],
-    creativeMode?: 'text' | 'image' | 'video' | 'music' | 'live_voice' | 'maps_query'
-  ) => {
-    const targetThread = threads.find((t) => t.id === activeThreadId) || threads[0];
-    if (!targetThread) return;
-
-    // Check client-side daily limit for free tier
-    if (!usageState.isPro && usageState.dailyPromptCount >= 3) {
-      setIsPricingModalOpen(true);
-      const limitUserMsg: ChatMessage = {
-        id: 'msg-u-' + Date.now(),
-        role: 'user',
-        content,
-        timestamp: Date.now(),
-        attachments,
-        creativeMode,
-      };
-
-      const limitReport: TransformedReport = {
-        id: Date.now().toString(),
-        timestamp: Date.now(),
-        industry: currentIndustry,
-        title: 'Daily Free Limit Reached',
-        rawInput: content,
-        executiveSummary: 'Daily free prompt limit reached (3/3). Upgrade to Pro for unlimited prompts.',
-        responseMode: 'productivity',
-        markdownReport: `🛑 **Daily Free Limit Reached (3/3 Prompts Used)**\nUpgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.\n\n* **Pro Monthly:** ₹299/month (~$3.99)\n* **Pro Annual:** ₹1,999/year (~₹166/mo) — Save 45%\n\n👉 Pay via Secure UPI (\`wagh.jayesh@oksbi\`), Credit/Debit Card, or Net Banking.`,
-        sections: [],
-        actionItems: [],
-        detectedEntities: [],
-        keyTakeaways: [],
-        complianceDisclaimer: '[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, and media must be verified before professional or commercial use. The platform bears zero liability.',
-      };
-
-      const limitAssistantMsg: ChatMessage = {
-        id: 'msg-a-' + Date.now(),
-        role: 'assistant',
-        content: limitReport.markdownReport,
-        timestamp: Date.now(),
-        report: limitReport,
-      };
-
-      const updatedThreads = threads.map((t) =>
-        t.id === targetThread.id
-          ? {
-              ...t,
-              messages: [...t.messages, limitUserMsg, limitAssistantMsg],
-              updatedAt: Date.now(),
-              currentReport: limitReport,
-            }
-          : t
-      );
-      saveThreads(updatedThreads);
-      addToast('info', 'Daily free limit reached (3/3). Please upgrade to Pro.');
-      return;
-    }
-
-    const userMsg: ChatMessage = {
-      id: 'msg-u-' + Date.now(),
-      role: 'user',
-      content,
-      timestamp: Date.now(),
-      attachments,
-      creativeMode,
-    };
-
-    let updatedTitle = targetThread.title;
-    if (targetThread.title === 'New Chat' || !targetThread.title) {
-      updatedTitle = content.slice(0, 36) + (content.length > 36 ? '...' : '');
-    }
-
-    const intermediateThreads = threads.map((t) =>
-      t.id === targetThread.id
-        ? {
-            ...t,
-            title: updatedTitle,
-            messages: [...t.messages, userMsg],
-            updatedAt: Date.now(),
-          }
-        : t
-    );
-    saveThreads(intermediateThreads);
-
+  // Create new Canvas Project
+  const handleCreateProject = async (name: string) => {
     try {
-      setIsProcessing(true);
-      const response = await fetch('/api/transform', {
+      const res = await fetch('/api/flow/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rawText: content,
-          creativeMode,
-          targetIndustry: currentIndustry,
-          formatLens: currentLens,
-          tone,
-          responseMode,
-          customContext: attachments && attachments.length > 0 
-            ? `Attachments:\n${attachments.map(a => `${a.name}: ${a.base64 ? a.base64.slice(0, 1000) : ''}`).join('\n')}\n\n${customContext}`
-            : customContext,
-          dailyPromptCount: usageState.dailyPromptCount,
-          isPro: usageState.isPro,
-          userId: currentUser?.id || 'usr_guest',
-          userEmail: currentUser?.email || 'client@pulsenote.ai',
-          userName: currentUser?.name || 'Guest Client',
+          name,
+          ownerId: currentUser?.id || 'usr_guest',
+          ownerName: currentUser?.name || 'Flow Architect',
         }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${response.status}`);
+      const data = await res.json();
+      if (data.success && data.project) {
+        setProjects((prev) => [data.project, ...prev]);
+        setCurrentProject(data.project);
+        addToast('success', `Created Project: ${data.project.name}`);
       }
-
-      const data = await response.json();
-
-      if (data.isLimitReached) {
-        setIsPricingModalOpen(true);
-      }
-
-      const newReport: TransformedReport = {
-        id: Date.now().toString(),
-        timestamp: Date.now(),
-        industry: currentIndustry,
-        title: data.title || `${currentIndustry.toUpperCase()} Documentation`,
-        rawInput: content,
-        executiveSummary: data.executiveSummary || '',
-        responseMode: data.responseMode || (responseMode !== 'auto' ? responseMode : 'productivity'),
-        mediaType: data.mediaType,
-        jobId: data.jobId,
-        queuePosition: data.queuePosition,
-        estimatedCountdownSeconds: data.estimatedCountdownSeconds,
-        immediateSolution: data.immediateSolution || '',
-        bestOnlinePractices: data.bestOnlinePractices || '',
-        actionableStrategicPlan: data.actionableStrategicPlan || '',
-        imageParams: data.imageParams,
-        videoParams: data.videoParams,
-        searchSources: data.searchSources || [],
-        markdownReport: data.markdownReport || '',
-        sections: data.sections || [],
-        actionItems: (data.actionItems || []).map((item: ActionItem) => ({
-          ...item,
-          completed: false,
-        })),
-        detectedEntities: data.detectedEntities || [],
-        keyTakeaways: data.keyTakeaways || [],
-        complianceDisclaimer: data.complianceDisclaimer || '[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, and media must be verified before professional or commercial use. The platform bears zero liability.',
-        isVague: data.isVague || false,
-        clarificationRequest: data.clarificationRequest || '',
-      };
-
-      const assistantMsg: ChatMessage = {
-        id: 'msg-a-' + Date.now(),
-        role: 'assistant',
-        content: newReport.markdownReport,
-        timestamp: Date.now(),
-        report: newReport,
-        creativeMode,
-      };
-
-      const finalThreads = threads.map((t) =>
-        t.id === targetThread.id
-          ? {
-              ...t,
-              title: updatedTitle,
-              messages: [...t.messages, userMsg, assistantMsg],
-              updatedAt: Date.now(),
-              currentReport: newReport,
-            }
-          : t
-      );
-      saveThreads(finalThreads);
-      setCurrentReport(newReport);
-
-      if (!data.isLimitReached) {
-        saveHistory([newReport, ...history]);
-        if (!usageState.isPro) {
-          const newCount = usageState.dailyPromptCount + 1;
-          const updatedUsage = {
-            ...usageState,
-            dailyPromptCount: newCount,
-            lastResetDate: TODAY_DATE_STR(),
-          };
-          saveUsageState(updatedUsage);
-        }
-      }
-    } catch (err: unknown) {
-      console.error('Transform error:', err);
-      const msg = err instanceof Error ? err.message : 'Transformation failed';
-      addToast('error', msg);
-    } finally {
-      setIsProcessing(false);
+    } catch (e: any) {
+      addToast('error', 'Failed to create project');
     }
   };
 
-  const handleRegenerate = () => {
-    const targetThread = threads.find((t) => t.id === activeThreadId) || threads[0];
-    if (!targetThread || targetThread.messages.length === 0) return;
-
-    const userMsgs = targetThread.messages.filter((m) => m.role === 'user');
-    const lastUserMsg = userMsgs[userMsgs.length - 1];
-    if (lastUserMsg) {
-      handleSendMessage(lastUserMsg.content, lastUserMsg.attachments, lastUserMsg.creativeMode);
-    }
-  };
-
-  const handleFeedback = (messageId: string, feedback: 'like' | 'dislike') => {
-    const updatedThreads = threads.map((t) => ({
-      ...t,
-      messages: t.messages.map((m) => (m.id === messageId ? { ...m, feedback } : m)),
-    }));
-    saveThreads(updatedThreads);
-  };
-
-  const activeConfig = INDUSTRY_CONFIGS.find((c) => c.id === currentIndustry) || INDUSTRY_CONFIGS[0];
+  const isAdmin = currentUser?.role === 'admin';
+  const effectiveIsPro = usageState.isPro || isAdmin;
 
   return (
-    <AndroidFrame
-      isDeviceMode={isDeviceMode}
-      onToggleDeviceMode={() => setIsDeviceMode(!isDeviceMode)}
+    <div 
+      className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans"
+      onDragEnter={handleGlobalDragEnter}
+      onDragOver={handleGlobalDragOver}
+      onDragLeave={handleGlobalDragLeave}
+      onDrop={handleGlobalDrop}
     >
-      <div className="flex flex-col h-screen min-h-screen bg-[#090d16] text-slate-100 overflow-hidden">
-        {/* Top Header with Gemini Branding, Usage Badge & Account Trigger */}
-        <Header
-          currentIndustry={currentIndustry}
-          onSelectIndustry={handleSelectIndustry}
-          currentLens={currentLens}
-          onSelectLens={setCurrentLens}
-          isDeviceMode={isDeviceMode}
-          onToggleDeviceMode={() => setIsDeviceMode(!isDeviceMode)}
-          onOpenHistory={() => setIsHistoryOpen(true)}
-          historyCount={history.length}
-          usageState={usageState}
-          onOpenPricing={() => setIsPricingModalOpen(true)}
-          onOpenLegal={() => setIsLegalModalOpen(true)}
-          currentUser={currentUser}
-          onOpenAuth={() => {
-            setAuthModalTab('login');
-            setIsAuthModalOpen(true);
-          }}
-          onOpenBilling={() => setIsBillingModalOpen(true)}
-          onOpenAdmin={() => setIsAdminPanelModalOpen(true)}
-          onOpenMailbox={() => setIsMailboxModalOpen(true)}
-          onLogout={handleLogout}
-          announcementBanner={appSettings.announcementBanner}
-          isBannerActive={appSettings.isBannerActive}
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-          onNewChat={handleNewChat}
-          viewMode={viewMode}
-          onToggleViewMode={() => setViewMode(viewMode === 'gemini' ? 'document' : 'gemini')}
-        />
-
-        {/* Gemini Workspace Layout Container */}
-        <div className="flex-1 flex overflow-hidden relative">
-          {/* Gemini Chat Sidebar */}
-          <GeminiSidebar
-            isOpen={isSidebarOpen}
-            onToggleOpen={() => setIsSidebarOpen(!isSidebarOpen)}
-            threads={threads}
-            activeThreadId={activeThreadId}
-            onSelectThread={handleSelectThread}
-            onNewChat={handleNewChat}
-            onRenameThread={handleRenameThread}
-            onDeleteThread={handleDeleteThread}
-            usageState={usageState}
-            onOpenPricing={() => setIsPricingModalOpen(true)}
-            onOpenAdmin={() => setIsAdminPanelModalOpen(true)}
-            onOpenBilling={() => setIsBillingModalOpen(true)}
-            onOpenMailbox={() => setIsMailboxModalOpen(true)}
-            currentUser={currentUser}
-            onLogout={handleLogout}
-          />
-
-          {/* Main Conversational Workspace or Document Viewer */}
-          <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-            {viewMode === 'gemini' ? (
-              <GeminiWorkspace
-                thread={activeThread}
-                threads={threads}
-                onSendMessage={handleSendMessage}
-                onRegenerate={handleRegenerate}
-                onFeedback={handleFeedback}
-                isGenerating={isProcessing}
-                currentIndustry={currentIndustry}
-                onSelectIndustry={handleSelectIndustry}
-                currentLens={currentLens}
-                onSelectLens={setCurrentLens}
-                tone={tone}
-                onChangeTone={setTone}
-                responseMode={responseMode}
-                onChangeResponseMode={setResponseMode}
-                usageState={usageState}
-                onOpenPricing={() => setIsPricingModalOpen(true)}
-                currentUser={currentUser}
-                onViewReportDetails={(rep) => {
-                  setCurrentReport(rep);
-                  setViewMode('document');
-                }}
-                onUpdateActionItem={handleUpdateActionItem}
-                onShowToast={addToast}
-                onNewChat={handleNewChat}
-              />
-            ) : (
-              <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 max-w-5xl mx-auto w-full space-y-6">
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={() => setViewMode('gemini')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-semibold transition-all cursor-pointer shadow-sm"
-                  >
-                    ← Back to Gemini Chat
-                  </button>
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
-                    Structured Document Architecture Hub
-                  </span>
-                </div>
-
-                {currentReport ? (
-                  <DocumentViewer
-                    report={currentReport}
-                    onCopy={handleCopy}
-                    onUpdateActionItem={handleUpdateActionItem}
-                    onEditMarkdown={handleEditMarkdown}
-                    onOpenPricing={() => setIsPricingModalOpen(true)}
-                  />
-                ) : (
-                  <div className="text-center py-16 text-slate-400 space-y-3 bg-slate-900/60 rounded-3xl border border-slate-800 p-8">
-                    <p className="text-base font-semibold text-white">No active document report selected.</p>
-                    <p className="text-xs text-slate-400 max-w-md mx-auto">
-                      Submit any rough notes, search queries, or creative prompts in the Gemini Workspace to generate full documentation.
-                    </p>
-                    <button
-                      onClick={() => setViewMode('gemini')}
-                      className="mt-2 px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md transition-all"
-                    >
-                      Open Gemini Workspace
-                    </button>
-                  </div>
-                )}
-                {/* Industry Guidelines & Quality Safeguards Card */}
-                <section className="mt-4 p-4 sm:p-5 rounded-2xl bg-slate-900/40 border border-slate-800/60 flex flex-col gap-3 text-xs text-slate-400 no-print">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-300 flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      Industry Compliance & Template Rules ({activeConfig.name})
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-500">Android Flagship Engine</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
-                    {activeConfig.keyFields.map((field, idx) => (
-                      <div
-                        key={idx}
-                        className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2"
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                        <span className="font-medium text-slate-300 truncate">{field}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                {/* Legal Notice & Payment Direct Settlement Footer */}
-                <footer className="pt-4 border-t border-slate-800/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 no-print">
-                  <div className="flex items-center gap-2">
-                    <Lock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>
-                      Direct Settlement UPI: <strong className="text-slate-300 font-mono">wagh.jayesh@oksbi</strong>
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => setIsLegalModalOpen(true)}
-                      className="hover:text-amber-400 underline underline-offset-2 transition-colors cursor-pointer"
-                    >
-                      Legal Agreement & Disclaimer
-                    </button>
-                    <button
-                      onClick={() => setIsPricingModalOpen(true)}
-                      className="hover:text-emerald-400 underline underline-offset-2 transition-colors cursor-pointer"
-                    >
-                      Pro Pricing (₹299/mo)
-                    </button>
-                  </div>
-                </footer>
-              </div>
-            )}
-          </main>
+      {/* Global Drag-and-Drop Attachment Overlay */}
+      {isGlobalDragOver && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-8 pointer-events-none animate-in fade-in duration-200">
+          <div className="max-w-md w-full p-8 rounded-3xl bg-slate-900/95 border-2 border-dashed border-indigo-500 shadow-2xl flex flex-col items-center text-center space-y-4 ring-8 ring-indigo-500/10">
+            <div className="p-4 rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 animate-bounce">
+              <UploadCloud className="w-10 h-10" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white mb-1">
+                Drop files here to attach to Pulse Note AI
+              </h3>
+              <p className="text-xs text-slate-400">
+                Supports images (.png, .jpg, .webp), videos (.mp4, .webm), PDFs, code & documents (up to 100MB)
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
+              <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">
+                Max 20MB Docs/Images
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">
+                Max 100MB Videos
+              </span>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Pricing & Checkout Modal */}
+      {/* 1. Google Flow Top Project Header */}
+      <FlowProjectHeader
+        currentProject={currentProject}
+        projects={projects}
+        collaborators={collaborators}
+        currentUser={currentUser}
+        isPro={effectiveIsPro}
+        onSelectProject={(projId) => {
+          const p = projects.find((x) => x.id === projId);
+          if (p) setCurrentProject(p);
+        }}
+        onCreateProject={handleCreateProject}
+        onOpenUpgradeModal={() => setIsPricingModalOpen(true)}
+        onOpenAuthModal={(tab = 'login') => {
+          setAuthModalTab(tab);
+          setIsAuthModalOpen(true);
+        }}
+        onOpenAdminDashboard={() => setIsAdminPanelOpen(true)}
+        onOpenBillingModal={() => setIsClientBillingOpen(true)}
+        onLogout={handleLogout}
+        onShowToast={addToast}
+      />
+
+      {/* 2. Google Flow Infinite Canvas */}
+      <FlowCanvas
+        project={currentProject}
+        collaborators={collaborators}
+        onUpdateNodePos={handleUpdateNodePos}
+        onSelectNode={setSelectedNodeId}
+        selectedNodeId={selectedNodeId}
+        onDeleteNode={handleDeleteNode}
+        onDuplicateNode={handleDuplicateNode}
+        onCreateConnection={handleCreateConnection}
+        onDeleteConnection={handleDeleteConnection}
+        onOpenVersions={setActiveVersionNode}
+        onOpenComments={setActiveCommentNode}
+        onCursorMove={handleCursorMove}
+        onShowToast={addToast}
+      />
+
+      {/* 3. Floating Bottom Command Generator Deck (Google Flow Prompt Engine) */}
+      <FlowCommandBar
+        onGenerate={handleGenerateOnCanvas}
+        isGenerating={isGenerating}
+        dailyPromptsRemaining={effectiveIsPro ? 999 : Math.max(0, 3 - usageState.dailyPromptCount)}
+        isPro={effectiveIsPro}
+        onOpenUpgradeModal={() => setIsPricingModalOpen(true)}
+        attachedFile={stagedAttachment}
+        onSetAttachedFile={setStagedAttachment}
+        onShowToast={addToast}
+      />
+
+      {/* 4. Version History Modal */}
+      {activeVersionNode && (
+        <FlowNodeVersionModal
+          node={activeVersionNode}
+          onClose={() => setActiveVersionNode(null)}
+          onRestoreVersion={handleRestoreVersion}
+        />
+      )}
+
+      {/* 5. Live Comment Drawer */}
+      {activeCommentNode && (
+        <FlowNodeCommentDrawer
+          node={activeCommentNode}
+          onClose={() => setActiveCommentNode(null)}
+          onAddComment={handleAddComment}
+          currentUser={{
+            name: currentUser?.name || 'Lead Architect',
+            email: currentUser?.email || 'architect@pulsenoteai.in',
+          }}
+        />
+      )}
+
+      {/* 6. Pricing & Pro Upgrade Modal (₹499 UPI wagh.jayesh@oksbi) */}
       <PricingModal
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
         usageState={usageState}
-        onUpgradeSuccess={handleUpgradeSuccess}
         currentUser={currentUser}
+        onUpgradeSuccess={(plan: SubscriptionPlan) => {
+          setUsageState((prev) => {
+            const updated: UserUsageState = { ...prev, isPro: true, activePlan: plan };
+            try {
+              localStorage.setItem('pulsenote_user_usage', JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+          setIsPricingModalOpen(false);
+          addToast('success', `Upgraded to PulseNote AI ${plan.toUpperCase()}! Unlimited canvas generation active.`);
+        }}
       />
 
-      {/* Mandatory Onboarding Legal Modal */}
+      {/* 7. Legal Disclaimer Onboarding Modal */}
       <OnboardingLegalModal
         isOpen={isLegalModalOpen}
-        onAccept={handleAcceptLegalOnboarding}
-        canDismissWithoutAccept={hasAcceptedLegalOnboarding}
-        onClose={() => setIsLegalModalOpen(false)}
+        onAccept={() => {
+          try {
+            localStorage.setItem('pulsenote_legal_accepted_v1', 'true');
+          } catch {}
+          setHasAcceptedLegalOnboarding(true);
+          setIsLegalModalOpen(false);
+          addToast('success', 'Terms accepted. Welcome to Pulse Note AI Flow Engine.');
+        }}
       />
 
-      {/* User Authentication & OTP Reset Modal */}
+      {/* 8. Auth Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
         initialTab={authModalTab}
-        onLoginSuccess={handleLoginSuccess}
-        onOpenSystemEmails={() => {
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={(user: UserProfile, token: string) => {
+          setCurrentUser(user);
+          try {
+            localStorage.setItem('pulsenote_user_profile', JSON.stringify(user));
+            localStorage.setItem('pulsenote_auth_token', token);
+          } catch {}
+
+          if (user.role === 'admin') {
+            setUsageState((prev) => ({
+              ...prev,
+              isPro: true,
+              activePlan: 'admin_grant',
+              dailyPromptCount: 0,
+            }));
+            addToast('success', `Welcome Super Admin, ${user.name}! Admin Dashboard & Unlimited Flow unlocked.`);
+          } else {
+            addToast('success', `Welcome back, ${user.name}!`);
+          }
           setIsAuthModalOpen(false);
-          setIsMailboxModalOpen(true);
         }}
       />
 
-      {/* Client Billing & Subscription Tenure Modal */}
-      <ClientBillingModal
-        isOpen={isBillingModalOpen}
-        onClose={() => setIsBillingModalOpen(false)}
-        currentUser={currentUser}
-        onOpenPricing={() => {
-          setIsBillingModalOpen(false);
-          setIsPricingModalOpen(true);
-        }}
-        onRefreshUser={() => {
-          if (currentUser?.id) refreshUserProfile(currentUser.id);
-        }}
-      />
+      {/* 9. Super Admin Control Center Modal */}
+      {isAdminPanelOpen && (
+        <AdminPanelModal
+          isOpen={isAdminPanelOpen}
+          onClose={() => setIsAdminPanelOpen(false)}
+          currentUser={currentUser}
+        />
+      )}
 
-      {/* Super Admin Control Panel Modal */}
-      <AdminPanelModal
-        isOpen={isAdminPanelModalOpen}
-        onClose={() => setIsAdminPanelModalOpen(false)}
-        onSettingsUpdated={(newSettings) => setAppSettings(newSettings)}
-        currentUser={currentUser}
-      />
+      {/* 10. Client Billing & Account Modal */}
+      {isClientBillingOpen && (
+        <ClientBillingModal
+          isOpen={isClientBillingOpen}
+          onClose={() => setIsClientBillingOpen(false)}
+          currentUser={currentUser}
+          onOpenPricing={() => {
+            setIsClientBillingOpen(false);
+            setIsPricingModalOpen(true);
+          }}
+          onRefreshUser={() => {
+            if (currentUser?.email) {
+              syncAuthoritativeProfile(currentUser.email, currentUser.name, currentUser.avatarUrl);
+            }
+          }}
+        />
+      )}
 
-      {/* Simulated System Mailbox & SMS Center */}
-      <SystemEmailsModal
-        isOpen={isMailboxModalOpen}
-        onClose={() => setIsMailboxModalOpen(false)}
-        userEmail={currentUser?.email}
-        onActivateAccount={handleActivateAccountFromMailbox}
-      />
-
-      {/* History Archive Modal */}
-      <HistoryModal
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        reports={history}
-        onSelectReport={(rep) => {
-          setCurrentReport(rep);
-          setCurrentIndustry(rep.industry);
-          setRawText(rep.rawInput);
-        }}
-        onDeleteReport={handleDeleteReport}
-        onClearAll={handleClearAllHistory}
-      />
-
-      {/* Floating Toast Feedback */}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-    </AndroidFrame>
+      {/* 11. Global Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
+    </div>
   );
 }
+
+export default App;

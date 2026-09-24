@@ -141,6 +141,20 @@ class Store {
     if (!db.userPasswords[admin2.id]) {
       db.userPasswords[admin2.id] = defaultPassHash;
     }
+
+    // Deduplicate db.users by ID and email to prevent any duplicate key errors
+    const seenUserIds = new Set<string>();
+    const seenUserEmails = new Set<string>();
+    db.users = db.users.filter((u) => {
+      const emailLower = (u.email || '').toLowerCase().trim();
+      const id = u.id || `usr_${Math.random()}`;
+      if (seenUserIds.has(id) || seenUserEmails.has(emailLower)) {
+        return false;
+      }
+      seenUserIds.add(id);
+      seenUserEmails.add(emailLower);
+      return true;
+    });
   }
 
   private loadDatabase(): DatabaseSchema {
@@ -391,6 +405,37 @@ class Store {
     if (!email) return false;
     const clean = email.trim().toLowerCase();
     return STRICT_ADMIN_EMAILS.includes(clean);
+  }
+
+  public getSuperAdminProfile(email: string): UserProfile {
+    const clean = email.trim().toLowerCase();
+    let admin = this.findUserByEmail(clean);
+    if (!admin) {
+      admin = {
+        id: `admin_${clean.replace(/[^a-z0-9]/g, '_')}`,
+        name: clean.includes('jayesh') ? 'Jayesh (Super Admin)' : 'PulseNote Admin',
+        email: clean,
+        mobile: '+91 98765 43210',
+        role: 'admin',
+        status: 'active',
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: new Date().toISOString(),
+        subscription: {
+          tier: 'admin_grant',
+          isPro: true,
+          startDate: Date.now() - 30 * 86400000,
+          expiresAt: null,
+          grantedByAdmin: true,
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: new Date().toISOString().slice(0, 10),
+        createdAt: Date.now() - 30 * 86400000,
+      };
+      this.db.users.unshift(admin);
+      this.saveDatabase();
+    }
+    return admin;
   }
 
   public verifyAdminLogin(email: string, password: string): UserProfile | null {

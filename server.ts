@@ -7,6 +7,8 @@ import { store } from './server/store.js';
 import { mediaQueue } from './server/mediaQueue.js';
 import { generateGenerativeImageSvg } from './server/svgGenerator.js';
 import { searchLiveImages } from './server/imageSearchService.js';
+import { flowStore } from './server/flowStore.js';
+import { initFlowWebSocketServer } from './server/flowWebSocket.js';
 
 dotenv.config();
 
@@ -16,8 +18,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -334,15 +336,21 @@ app.post('/api/transform', async (req, res) => {
       responseMode = 'auto',
       dailyPromptCount = 0,
       isPro = false,
+      userEmail = '',
       creativeMode,
+      attachedFile,
     } = req.body;
 
-    if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
-      return res.status(400).json({ error: 'Please provide raw notes or transcript text to process.' });
+    if ((!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) && !attachedFile) {
+      return res.status(400).json({ error: 'Please provide raw notes, query, or attach a file to process.' });
     }
 
-    // 3. Usage Tracking & Monetization Guardrails (3 Free Prompts/Day Rule)
-    if (!isPro && dailyPromptCount >= 3) {
+    const cleanEmail = (userEmail || '').trim().toLowerCase();
+    const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
+    const effectiveIsPro = isPro || isAdminUser;
+
+    // 3. Usage Tracking & Monetization Guardrails (3 Free Prompts/Day Rule for non-Pro / non-Admin)
+    if (!effectiveIsPro && dailyPromptCount >= 3) {
       return res.json({
         isLimitReached: true,
         dailyPromptCount,
@@ -535,19 +543,22 @@ app.post('/api/transform', async (req, res) => {
 
     const formatLensDescription = formatLensMap[formatLens] || formatLensMap.general_assistant;
 
+    const attachmentContext = attachedFile
+      ? `\n[Attached Asset Context]: User has attached a ${attachedFile.category} file named "${attachedFile.name}" (MIME: ${attachedFile.type}, Size: ${(attachedFile.size / 1024).toFixed(1)} KB). Synthesize and incorporate insights directly from this asset.\n`
+      : '';
+
     const userPrompt = `Target Scope / Context: ${targetIndustryName}
 Selected Output Format & Lens: ${formatLensDescription}
 Tone/Detail Specification: ${tone}
 Requested Dynamic Response Mode: ${responseMode}
-${customContext ? `Additional Context/Organization: ${customContext}\n` : ''}
-
+${customContext ? `Additional Context/Organization: ${customContext}\n` : ''}${attachmentContext}
 Raw User Query or Prompt (Text, creative concept, media generation, or technical challenge):
 """
-${rawText}
+${rawText || (attachedFile ? `Analyze and evaluate attached file: ${attachedFile.name}` : '')}
 """
 
 Instructions for response (Emulating Google Gemini deep search, universal multimodal processing, and structured clarity):
-Please deeply analyze the query. Accept any open-domain prompt, creative brainstorm, or technical problem without rigid silos.
+Please deeply analyze the query and any attached asset. Accept any open-domain prompt, creative brainstorm, or technical problem without rigid silos.
 If the user is requesting an image (e.g., "Create an image...", "Generate a photo...", "Draw...", "Render..."):
   - Analyze aesthetic, style, lighting, composition, and aspect ratio.
   - Set "mediaType": "image".
@@ -637,6 +648,28 @@ Return a valid JSON object matching this schema:
 }
 `;
 
+    // Construct multi-modal contents payload
+    let geminiContents: any = userPrompt;
+    if (attachedFile?.data && attachedFile?.type) {
+      const cleanBase64 = attachedFile.data.includes('base64,')
+        ? attachedFile.data.split('base64,')[1]
+        : attachedFile.data;
+      
+      geminiContents = {
+        parts: [
+          {
+            inlineData: {
+              mimeType: attachedFile.type,
+              data: cleanBase64,
+            },
+          },
+          {
+            text: userPrompt,
+          },
+        ],
+      };
+    }
+
     // Call Gemini with automatic fallback for transient 503 capacity spikes
     let response;
     const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.8-flash'];
@@ -646,7 +679,7 @@ Return a valid JSON object matching this schema:
       try {
         response = await ai.models.generateContent({
           model: modelName,
-          contents: userPrompt,
+          contents: geminiContents,
           config: {
             systemInstruction: SYSTEM_INSTRUCTION_BASE,
             responseMimeType: 'application/json',
@@ -840,6 +873,18 @@ Return a valid JSON object matching this schema:
       });
     } catch (logErr) {
       console.warn('Failed to log user activity:', logErr);
+    }
+
+    // Attach file metadata if provided
+    if (attachedFile) {
+      parsedData.attachment = {
+        id: attachedFile.id,
+        name: attachedFile.name,
+        size: attachedFile.size,
+        type: attachedFile.type,
+        category: attachedFile.category,
+        previewUrl: attachedFile.previewUrl,
+      };
     }
 
     // Part 2: Mandatory Disclaimer & Legal Safeguard Integration on every output
@@ -2086,6 +2131,66 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
+// Resolve or Sync User Profile with RBAC & Admin Verification
+app.post('/api/auth/resolve-profile', (req, res) => {
+  try {
+    const { email, name, avatarUrl } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required.' });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const isAdmin = store.isStrictAdminEmail(cleanEmail);
+
+    let user = store.findUserByEmail(cleanEmail);
+    if (!user) {
+      if (isAdmin) {
+        user = store.getSuperAdminProfile(cleanEmail);
+      } else {
+        const registered = store.registerUser({
+          name: name || cleanEmail.split('@')[0] || 'User',
+          email: cleanEmail,
+          mobile: '',
+          password: 'firebase_oauth_user',
+          privacyConsent: true,
+        });
+        user = registered.user;
+        user.isActivated = true;
+        user.status = 'active';
+      }
+    }
+
+    if (!user) {
+      return res.status(500).json({ error: 'Failed to initialize profile.' });
+    }
+
+    if (isAdmin) {
+      user.role = 'admin';
+      user.subscription = {
+        tier: 'admin_grant',
+        isPro: true,
+        startDate: Date.now() - 3600000 * 24 * 30,
+        expiresAt: null,
+        grantedByAdmin: true,
+      };
+    }
+
+    const resolvedUser = {
+      ...user,
+      avatarUrl: avatarUrl || (user as any).avatarUrl || '',
+    };
+
+    return res.json({
+      success: true,
+      isAdmin,
+      isPro: isAdmin || user.subscription?.isPro || false,
+      user: resolvedUser,
+      token: isAdmin ? `ADMIN_TOKEN_${user.id}_${Date.now()}` : `USER_TOKEN_${user.id}`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to resolve user profile' });
+  }
+});
+
 // Get Current User Profile & Fresh Subscription Tenure
 app.get('/api/auth/me', (req, res) => {
   const userId = (req.query.userId as string) || (req.headers.authorization?.replace('Bearer ', ''));
@@ -2615,6 +2720,103 @@ app.get('/api/images/search', async (req, res) => {
   }
 });
 
+// =========================================================================
+// GOOGLE FLOW ENGINE: REST APIs for Projects, Nodes, Connections & Collab
+// =========================================================================
+app.get('/api/flow/projects', (_req, res) => {
+  try {
+    const projects = flowStore.getAllProjects();
+    return res.json({ success: true, projects });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to fetch projects.' });
+  }
+});
+
+app.get('/api/flow/projects/:id', (req, res) => {
+  try {
+    const project = flowStore.getProject(req.params.id);
+    if (!project) {
+      return res.status(404).json({ success: false, error: 'Flow Project not found.' });
+    }
+    return res.json({ success: true, project });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to fetch project.' });
+  }
+});
+
+app.post('/api/flow/projects', (req, res) => {
+  try {
+    const { name, description, ownerId, ownerName } = req.body;
+    const project = flowStore.createProject(name, description, ownerId, ownerName);
+    return res.json({ success: true, project });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to create project.' });
+  }
+});
+
+app.post('/api/flow/projects/:id/nodes', (req, res) => {
+  try {
+    const node = req.body.node;
+    if (!node) return res.status(400).json({ success: false, error: 'Node data is required.' });
+    const created = flowStore.addNode(req.params.id, node);
+    if (!created) return res.status(404).json({ success: false, error: 'Project not found.' });
+    return res.json({ success: true, node: created });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to create node.' });
+  }
+});
+
+app.patch('/api/flow/projects/:id/nodes/:nodeId', (req, res) => {
+  try {
+    const { changes, createVersion } = req.body;
+    const updated = flowStore.updateNode(req.params.id, req.params.nodeId, changes, createVersion);
+    if (!updated) return res.status(404).json({ success: false, error: 'Node or project not found.' });
+    return res.json({ success: true, node: updated });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to update node.' });
+  }
+});
+
+app.delete('/api/flow/projects/:id/nodes/:nodeId', (req, res) => {
+  try {
+    const ok = flowStore.deleteNode(req.params.id, req.params.nodeId);
+    return res.json({ success: ok });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete node.' });
+  }
+});
+
+app.post('/api/flow/projects/:id/connections', (req, res) => {
+  try {
+    const { connection } = req.body;
+    if (!connection) return res.status(400).json({ success: false, error: 'Connection data is required.' });
+    const created = flowStore.addConnection(req.params.id, connection);
+    return res.json({ success: true, connection: created });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to add connection.' });
+  }
+});
+
+app.delete('/api/flow/projects/:id/connections/:connId', (req, res) => {
+  try {
+    const ok = flowStore.deleteConnection(req.params.id, req.params.connId);
+    return res.json({ success: ok });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete connection.' });
+  }
+});
+
+app.post('/api/flow/projects/:id/nodes/:nodeId/comments', (req, res) => {
+  try {
+    const { comment } = req.body;
+    if (!comment) return res.status(400).json({ success: false, error: 'Comment data is required.' });
+    const added = flowStore.addComment(req.params.id, req.params.nodeId, comment);
+    return res.json({ success: true, comment: added });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to add comment.' });
+  }
+});
+
 // Setup Vite middleware in dev or static files in production
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
@@ -2636,6 +2838,9 @@ async function startServer() {
   const server = app.listen(port, () => {
     console.log(`PulseNote AI server listening on port ${port} [mode: ${isProd ? 'production' : 'development'}]`);
   });
+
+  // Initialize Google Flow Real-Time WebSocket Server
+  initFlowWebSocketServer(server);
 
   // Keep-Alive and extended timeout threshold to prevent premature connection drops for long audio streams
   server.keepAliveTimeout = 120000; // 120 seconds

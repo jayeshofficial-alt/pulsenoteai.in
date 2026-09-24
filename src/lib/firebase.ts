@@ -24,6 +24,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+export { onAuthStateChanged, type FirebaseUser };
 
 // If custom firestoreDatabaseId is provided
 export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
