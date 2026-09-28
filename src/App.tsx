@@ -890,6 +890,24 @@ export function App() {
     }
   };
 
+  // Handle Animate Image into Video (Google Veo 3.1)
+  const handleAnimateImage = (imageUrl: string, title?: string) => {
+    const promptText = title ? `Animate ${title} with cinematic camera motion and dynamic lighting` : 'Animate this photo into a cinematic video scene';
+    handleGenerateOnCanvas(promptText, 'video', {
+      aspectRatio: '16:9',
+      attachedFile: {
+        id: `att_${Date.now()}`,
+        name: `${(title || 'animated_photo').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 24)}.jpg`,
+        size: 1024 * 64,
+        type: 'image/jpeg',
+        category: 'image',
+        data: imageUrl,
+        previewUrl: imageUrl,
+      },
+    });
+    addToast('info', 'Submitting photo to Google Veo 3.1 (veo-3.1-fast-generate-preview)...');
+  };
+
   // Create new Canvas Project
   const handleCreateProject = async (name: string) => {
     try {
@@ -988,6 +1006,7 @@ export function App() {
         onOpenVersions={setActiveVersionNode}
         onOpenComments={setActiveCommentNode}
         onCursorMove={handleCursorMove}
+        onAnimateImage={handleAnimateImage}
         onShowToast={addToast}
       />
 

@@ -34,6 +34,7 @@ interface FlowCanvasProps {
   onOpenVersions: (node: FlowNode) => void;
   onOpenComments: (node: FlowNode) => void;
   onCursorMove: (x: number, y: number) => void;
+  onAnimateImage?: (imageUrl: string, title: string) => void;
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
@@ -50,6 +51,7 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
   onOpenVersions,
   onOpenComments,
   onCursorMove,
+  onAnimateImage,
   onShowToast,
 }) => {
   // Viewport camera state (pan X, pan Y, zoom)
@@ -81,21 +83,32 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
     [viewport]
   );
 
-  // Handle Mouse Wheel Zoom
+  // Handle Mouse Wheel: Smooth Vertical/Horizontal Scroll & Ctrl-Key Zoom
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-    const newZoom = Math.min(Math.max(viewport.zoom * zoomFactor, 0.25), 2.5);
+    // If Ctrl / Meta is pressed (or pinch gesture), perform zooming
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      const newZoom = Math.min(Math.max(viewport.zoom * zoomFactor, 0.25), 2.5);
 
-    const rect = canvasRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-    const mouseScreenX = e.clientX - rect.left;
-    const mouseScreenY = e.clientY - rect.top;
+      const rect = canvasRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+      const mouseScreenX = e.clientX - rect.left;
+      const mouseScreenY = e.clientY - rect.top;
 
-    // Zoom towards mouse cursor point
-    const newX = mouseScreenX - (mouseScreenX - viewport.x) * (newZoom / viewport.zoom);
-    const newY = mouseScreenY - (mouseScreenY - viewport.y) * (newZoom / viewport.zoom);
+      // Zoom towards mouse cursor point
+      const newX = mouseScreenX - (mouseScreenX - viewport.x) * (newZoom / viewport.zoom);
+      const newY = mouseScreenY - (mouseScreenY - viewport.y) * (newZoom / viewport.zoom);
 
-    setViewport({ x: newX, y: newY, zoom: newZoom });
+      setViewport({ x: newX, y: newY, zoom: newZoom });
+      return;
+    }
+
+    // Otherwise, perform standard smooth vertical and horizontal panning/scrolling
+    setViewport((prev) => ({
+      ...prev,
+      x: prev.x - e.deltaX,
+      y: prev.y - e.deltaY,
+    }));
   };
 
   // Canvas Pan Start
@@ -345,6 +358,7 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
             onDuplicate={onDuplicateNode}
             onOpenVersions={onOpenVersions}
             onOpenComments={onOpenComments}
+            onAnimateImage={onAnimateImage}
             onShowToast={onShowToast}
           />
         ))}

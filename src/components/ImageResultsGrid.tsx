@@ -10,6 +10,7 @@ import {
   Globe, 
   Sparkles,
   Download,
+  Film,
   Image as ImageIcon
 } from 'lucide-react';
 import { ImageSearchResult } from '../types';
@@ -18,12 +19,14 @@ import { MediaExportDropdown } from './MediaExportDropdown';
 interface ImageResultsGridProps {
   results: ImageSearchResult[];
   queryTitle: string;
+  onAnimateImage?: (imageUrl: string, title: string) => void;
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
 export const ImageResultsGrid: React.FC<ImageResultsGridProps> = ({
   results,
   queryTitle,
+  onAnimateImage,
   onShowToast,
 }) => {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -221,7 +224,20 @@ export const ImageResultsGrid: React.FC<ImageResultsGridProps> = ({
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {onAnimateImage && (
+                  <button
+                    onClick={() => {
+                      onAnimateImage(activeModalImage.url, `Animate "${activeModalImage.title}" with cinematic motion and dynamic lighting`);
+                      setSelectedIdx(null);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 border border-pink-500/40 text-xs font-semibold cursor-pointer transition-colors shadow-sm"
+                  >
+                    <Film className="w-3.5 h-3.5 text-pink-400" />
+                    <span>Animate into Video (Veo 3.1)</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => handleCopy(activeModalImage.url)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer transition-colors"

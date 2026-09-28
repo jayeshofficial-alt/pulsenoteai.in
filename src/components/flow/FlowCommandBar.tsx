@@ -330,41 +330,64 @@ export const FlowCommandBar: React.FC<FlowCommandBarProps> = ({
 
         {/* Visual Preview Pill for Attached File */}
         {attachedFile && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-950/50 border border-indigo-500/40 text-xs text-slate-200 animate-in fade-in slide-in-from-top-1">
-            {attachedFile.category === 'image' && attachedFile.previewUrl ? (
-              <img
-                src={attachedFile.previewUrl}
-                alt={attachedFile.name}
-                className="w-7 h-7 rounded-lg object-cover border border-indigo-400/50 shrink-0"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shrink-0">
-                {React.createElement(getFileCategoryIcon(attachedFile), { className: 'w-3.5 h-3.5' })}
-              </div>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-indigo-950/60 border border-indigo-500/40 text-xs text-slate-200 animate-in fade-in slide-in-from-top-1">
+            <div className="flex items-center gap-2 min-w-0">
+              {attachedFile.category === 'image' && attachedFile.previewUrl ? (
+                <img
+                  src={attachedFile.previewUrl}
+                  alt={attachedFile.name}
+                  className="w-8 h-8 rounded-lg object-cover border border-indigo-400/50 shrink-0 shadow"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shrink-0">
+                  {React.createElement(getFileCategoryIcon(attachedFile), { className: 'w-4 h-4' })}
+                </div>
+              )}
 
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-slate-100 truncate text-[11px] max-w-[240px] sm:max-w-[340px]">
-                  {attachedFile.name}
-                </span>
-                <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  {attachedFile.category}
-                </span>
-              </div>
-              <div className="text-[10px] font-mono text-slate-400">
-                {(attachedFile.size / 1024).toFixed(1)} KB • Multi-Modal Ingestion Ready
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-100 truncate text-[11px] max-w-[200px] sm:max-w-[280px]">
+                    {attachedFile.name}
+                  </span>
+                  <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    {attachedFile.category}
+                  </span>
+                </div>
+                <div className="text-[10px] font-mono text-slate-400">
+                  {(attachedFile.size / 1024).toFixed(1)} KB • Multi-Modal Ready
+                </div>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setFile(null)}
-              title="Remove attached file"
-              className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Animate Photo into Video Quick Button */}
+              {attachedFile.category === 'image' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedType('video');
+                    setAspectRatio('16:9');
+                    if (!prompt.trim()) {
+                      setPrompt('Animate this photo with cinematic camera motion and dynamic lighting');
+                    }
+                    onShowToast?.('info', 'Set mode to Veo 3.1: Animate Image into Video (16:9)');
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-300 hover:text-pink-200 text-[11px] font-medium transition-all cursor-pointer shadow-sm"
+                >
+                  <Film className="w-3.5 h-3.5 text-pink-400" />
+                  <span>Animate into Video (Veo 3.1)</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setFile(null)}
+                title="Remove attached file"
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
 

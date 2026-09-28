@@ -44,6 +44,7 @@ interface FlowNodeCardProps {
   onDuplicate: (nodeId: string) => void;
   onOpenVersions: (node: FlowNode) => void;
   onOpenComments: (node: FlowNode) => void;
+  onAnimateImage?: (imageUrl: string, title: string) => void;
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
@@ -118,6 +119,7 @@ export const FlowNodeCard: React.FC<FlowNodeCardProps> = ({
   onDuplicate,
   onOpenVersions,
   onOpenComments,
+  onAnimateImage,
   onShowToast,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -281,7 +283,10 @@ export const FlowNodeCard: React.FC<FlowNodeCardProps> = ({
       </div>
 
       {/* Card Main Body Content */}
-      <div className="p-3.5 space-y-3 max-h-[460px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
+      <div 
+        onWheel={(e) => e.stopPropagation()}
+        className="p-3.5 space-y-3 max-h-[460px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700"
+      >
         {/* Attached Reference File Banner / Preview */}
         {node.attachment && (
           <div className="p-2.5 rounded-xl bg-slate-950/80 border border-indigo-500/30 space-y-2">
@@ -414,24 +419,84 @@ export const FlowNodeCard: React.FC<FlowNodeCardProps> = ({
               </div>
             )}
 
-            {/* Prompt & Style Metadata */}
+            {/* Prompt & Style Metadata and Animate Button */}
             {node.imageParams && (
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
-                <span>Style: {node.imageParams.style || 'Photorealistic 8K'}</span>
-                <span>AR: {node.imageParams.aspectRatio || '16:9'}</span>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
+                  <span>Style: {node.imageParams.style || 'Photorealistic 8K'}</span>
+                  <span>AR: {node.imageParams.aspectRatio || '16:9'}</span>
+                </div>
+
+                {node.imageParams.previewUrl && onAnimateImage && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAnimateImage(node.imageParams!.previewUrl!, `Animate "${node.title}" with cinematic camera pan and dynamic lighting`);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/40 text-pink-300 hover:text-pink-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-pink-500/10"
+                  >
+                    <Film className="w-3.5 h-3.5 text-pink-400" />
+                    <span>Animate into Video (Veo 3.1)</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* 3. Video Type Node (Veo 2 Storyboard & Motion) */}
+        {/* 3. Video Type Node (Veo 3.1 Cinematic Sequence & Audio) */}
         {node.type === 'video' && node.videoParams && (
           <div className="space-y-2.5">
+            {/* Visual Video Player / Poster */}
+            {node.videoParams.videoUrl ? (
+              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-pink-900/60 shadow-lg">
+                <video
+                  src={node.videoParams.videoUrl}
+                  controls
+                  poster={node.videoParams.previewPosterUrl}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            ) : node.videoParams.previewPosterUrl ? (
+              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-slate-950 border border-pink-900/60 shadow-lg group/vid">
+                <img
+                  src={node.videoParams.previewPosterUrl}
+                  alt={node.title}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-slate-950/40 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-full bg-pink-500/80 backdrop-blur-md flex items-center justify-center text-white shadow-xl">
+                    <Play className="w-5 h-5 ml-0.5 fill-white" />
+                  </div>
+                </div>
+                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[10px] font-mono text-pink-300 bg-slate-900/80 px-2 py-0.5 rounded border border-pink-500/40">
+                  <span>Veo 3.1 720p / 1080p</span>
+                  <span>{node.videoParams.aspectRatio || '16:9'} • {node.videoParams.targetDuration || '00:08'}</span>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Embedded Audio Track Pill */}
+            {(node.videoParams.audioTrackUrl || node.videoParams.audioPrompt) && (
+              <div className="p-2 rounded-xl bg-slate-950/80 border border-pink-500/30 flex items-center justify-between text-[10px] font-mono">
+                <div className="flex items-center gap-1.5 text-pink-300">
+                  <Music className="w-3.5 h-3.5 text-pink-400" />
+                  <span className="truncate max-w-[240px]">
+                    {node.videoParams.audioPrompt || 'Synthesized Soundtrack & Voiceover'}
+                  </span>
+                </div>
+                {node.videoParams.audioTrackUrl && (
+                  <audio src={node.videoParams.audioTrackUrl} controls className="h-6 w-28" />
+                )}
+              </div>
+            )}
+
             {/* Storyboard Scenes Grid */}
             {node.videoParams.scenes && node.videoParams.scenes.length > 0 && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[10px] text-pink-300 font-mono">
-                  <span>Veo 2 Storyboard Sequence</span>
+                  <span>Veo 3.1 Storyboard Sequence</span>
                   <span>{node.videoParams.targetDuration || '12s'}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -486,9 +551,9 @@ export const FlowNodeCard: React.FC<FlowNodeCardProps> = ({
         <div className="flex items-center gap-1.5">
           <MediaExportDropdown
             mediaType={node.type === 'video' ? 'video' : 'image'}
-            mediaUrl={node.imageParams?.previewUrl || ''}
+            mediaUrl={node.type === 'video' ? (node.videoParams?.videoUrl || node.videoParams?.previewPosterUrl || '') : (node.imageParams?.previewUrl || '')}
             title={node.title}
-            aspectRatio={node.imageParams?.aspectRatio || '16:9'}
+            aspectRatio={(node.type === 'video' ? node.videoParams?.aspectRatio : node.imageParams?.aspectRatio) || '16:9'}
             onShowToast={onShowToast}
           />
         </div>

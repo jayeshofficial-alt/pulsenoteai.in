@@ -142,6 +142,8 @@ export interface VideoGenerationParams {
   scenes: VideoStoryboardScene[];
   modelPromptVeoSora: string;
   previewPosterUrl?: string;
+  videoUrl?: string;
+  audioTrackUrl?: string;
 }
 
 export interface TransformedReport {

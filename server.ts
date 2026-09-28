@@ -170,6 +170,99 @@ app.get('/api/media/status/:id', (req, res) => {
   });
 });
 
+// Video stream/proxy endpoint to stream generated video files with range requests & CORS
+app.get('/api/video/proxy', async (req, res) => {
+  try {
+    const { uri } = req.query;
+    if (!uri || typeof uri !== 'string') {
+      return res.status(400).send('Missing video uri');
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    const fetchUrl = uri.includes('generativelanguage.googleapis.com') && !uri.includes('key=')
+      ? `${uri}?key=${apiKey}`
+      : uri;
+
+    const response = await fetch(fetchUrl, {
+      headers: {
+        'x-goog-api-key': apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send('Failed to fetch video');
+    }
+
+    const contentType = response.headers.get('content-type') || 'video/mp4';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (response.body) {
+      // @ts-ignore
+      const reader = response.body.getReader ? response.body.getReader() : null;
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      } else {
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+      }
+    } else {
+      res.status(500).send('No video stream available');
+    }
+  } catch (err: any) {
+    res.status(500).send(`Video proxy error: ${err.message}`);
+  }
+});
+
+// Video direct download endpoint with custom container format (MP4, WebM, MOV, MPEG)
+app.get('/api/video/download', async (req, res) => {
+  try {
+    const { uri, filename = 'pulse_note_video', format = 'mp4' } = req.query;
+    const safeName = String(filename).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const validFormats = ['mp4', 'webm', 'mov', 'mpeg', 'avi'];
+    const safeFormat = validFormats.includes(String(format).toLowerCase()) ? String(format).toLowerCase() : 'mp4';
+
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${safeFormat}"`);
+    
+    let mimeType = 'video/mp4';
+    if (safeFormat === 'webm') mimeType = 'video/webm';
+    else if (safeFormat === 'mov') mimeType = 'video/quicktime';
+    else if (safeFormat === 'mpeg') mimeType = 'video/mpeg';
+    
+    res.setHeader('Content-Type', mimeType);
+
+    if (!uri || typeof uri !== 'string' || uri === 'undefined') {
+      return res.status(404).send('No video stream available for download');
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    const fetchUrl = uri.includes('generativelanguage.googleapis.com') && !uri.includes('key=')
+      ? `${uri}?key=${apiKey}`
+      : uri;
+
+    const response = await fetch(fetchUrl, {
+      headers: {
+        'x-goog-api-key': apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send('Failed to fetch video for download');
+    }
+
+    const buffer = await response.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (err: any) {
+    res.status(500).send(`Video download error: ${err.message}`);
+  }
+});
+
 // Multi-turn Gemini Chatbot with Role Selection and Model Routing
 // Models: gemini-3.1-pro-preview (complex tasks), gemini-3.5-flash (general tasks), gemini-3.1-flash-lite (fast tasks)
 app.post('/api/chat', async (req, res) => {
@@ -367,17 +460,77 @@ app.post('/api/transform/stream', async (req, res) => {
       return;
     }
 
-    // 2. Check Explicit Image / Video Intent
+    // 2. Check Explicit Video / Image Intent & Photo Animation with Strict Priority
     const trimmedInput = rawText.trim();
-    const isExplicitImage = creativeMode === 'image' || 
+    const hasImageAttachment = !!(attachedFile?.data && attachedFile?.type?.startsWith('image/')) || !!req.body.sourceImageUrl;
+    const isPhotoAnimation = hasImageAttachment && (
+      creativeMode === 'video' ||
+      /\b(animate|video|motion|bring to life|generate video|make video|live photo|turn into video)\b/i.test(trimmedInput) ||
+      trimmedInput.length === 0
+    );
+
+    const isExplicitVideo = creativeMode === 'video' || isPhotoAnimation ||
+      /^(generate|create|render|make|synthesize|video of|animation of|animate)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene|photo|image)\b/i.test(trimmedInput) ||
+      /\b(video of|cinematic scene of|animation of|movie clip of|storyboard of|animate this image|animate this photo|animate image|animate photo)\b/i.test(trimmedInput);
+
+    const isExplicitImage = !isExplicitVideo && (creativeMode === 'image' || 
       /^(generate|create|render|draw|make|synthesize|photo of|image of|picture of)\b/i.test(trimmedInput) ||
-      /\b(photo of|render of|image of|picture of|illustration of|portrait of)\b/i.test(trimmedInput);
+      /\b(photo of|render of|image of|picture of|illustration of|portrait of)\b/i.test(trimmedInput));
 
-    const isExplicitVideo = creativeMode === 'video' || 
-      /^(generate|create|render|make|synthesize|video of|animation of)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene)\b/i.test(trimmedInput) ||
-      /\b(video of|cinematic scene of|animation of)\b/i.test(trimmedInput);
+    if (isExplicitVideo) {
+      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
+      const aspectRatio = arMatch ? arMatch[1] : (req.body.aspectRatio === '9:16' ? '9:16' : '16:9');
+      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16)/gi, '').trim();
 
-    if (isExplicitImage && !isExplicitVideo) {
+      // Extract optional audio/music/voiceover instruction
+      const audioMatch = trimmedInput.match(/\b(with|audio:|soundtrack:|music:|voiceover:|sfx:)\s+([^,.;]+)/i);
+      const audioPrompt = audioMatch ? audioMatch[2].trim() : 'Atmospheric ambient synthesis with low sub-bass drone and sound effects';
+
+      const sourceImageUrl = (attachedFile?.data && attachedFile?.type?.startsWith('image/')) ? attachedFile.data : req.body.sourceImageUrl;
+
+      const mediaJob = mediaQueue.enqueueJob({
+        userId: req.body.userId || 'usr_guest',
+        mediaType: 'video',
+        prompt: cleanPrompt || (isPhotoAnimation ? 'Animate this photo with cinematic motion, subtle depth pan, and vivid lighting' : 'Cinematic sequence'),
+        sourceImageUrl,
+        aspectRatio,
+        style: 'Photorealistic 8K Cinematic',
+        audioPrompt,
+      });
+
+      const previewPosterUrl = sourceImageUrl || generateGenerativeImageSvg(
+        cleanPrompt || 'Animated Video Sequence',
+        'Veo 8K Video Frame',
+        ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
+        aspectRatio
+      );
+
+      res.write(`data: ${JSON.stringify({
+        type: 'media_ready',
+        mediaType: 'video',
+        title: `Video: ${(cleanPrompt || (isPhotoAnimation ? 'Animated Photo Sequence' : 'Cinematic Video')).slice(0, 42)}`,
+        executiveSummary: isPhotoAnimation 
+          ? `Animating uploaded photo using Google Veo 3.1 (veo-3.1-fast-generate-preview) in ${aspectRatio} aspect ratio.`
+          : `Generated Veo Cinematic Sequence for: "${cleanPrompt.slice(0, 80)}"`,
+        jobId: mediaJob.id,
+        videoParams: {
+          title: `Cinematic Sequence: ${(cleanPrompt || 'Animated Photo').slice(0, 36)}`,
+          targetDuration: '00:08',
+          aspectRatio,
+          cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
+          visualStyle: 'Photorealistic 8K Cinematic',
+          lighting: 'Golden hour volumetric illumination',
+          audioPrompt,
+          previewPosterUrl,
+          modelPromptVeoSora: cleanPrompt || 'Animate photo with cinematic motion',
+        },
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      })}\n\n`);
+      res.end();
+      return;
+    }
+
+    if (isExplicitImage) {
       const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i);
       const aspectRatio = arMatch ? arMatch[1] : '16:9';
       const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/gi, '').trim();
@@ -407,48 +560,6 @@ app.post('/api/transform/stream', async (req, res) => {
           aspectRatio,
           previewUrl: activePreviewUrl,
           results: liveResults,
-        },
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-      })}\n\n`);
-      res.end();
-      return;
-    }
-
-    if (isExplicitVideo) {
-      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
-      const aspectRatio = arMatch ? arMatch[1] : '16:9';
-      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16)/gi, '').trim();
-
-      const mediaJob = mediaQueue.enqueueJob({
-        userId: req.body.userId || 'usr_guest',
-        mediaType: 'video',
-        prompt: cleanPrompt,
-        aspectRatio,
-        style: 'Photorealistic 8K Cinematic',
-      });
-
-      const previewPosterUrl = generateGenerativeImageSvg(
-        cleanPrompt,
-        'Veo 8K Video Frame',
-        ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
-        aspectRatio
-      );
-
-      res.write(`data: ${JSON.stringify({
-        type: 'media_ready',
-        mediaType: 'video',
-        title: `Video: ${cleanPrompt.slice(0, 42)}`,
-        executiveSummary: `Generated Veo Cinematic Sequence for: "${cleanPrompt.slice(0, 80)}"`,
-        jobId: mediaJob.id,
-        videoParams: {
-          title: `Cinematic Sequence: ${cleanPrompt.slice(0, 36)}`,
-          targetDuration: '00:08',
-          aspectRatio,
-          cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
-          visualStyle: 'Photorealistic 8K Cinematic',
-          lighting: 'Golden hour volumetric illumination',
-          previewPosterUrl,
-          modelPromptVeoSora: cleanPrompt,
         },
         complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
       })}\n\n`);
@@ -626,13 +737,20 @@ app.post('/api/transform', async (req, res) => {
     // (Eliminating Text Bloat, Markdown Walls, and Spec Sheets on Media Queries)
     // =========================================================================
     const trimmedInput = rawText.trim();
-    const isExplicitImage = creativeMode === 'image' || 
-      /^(generate|create|render|draw|make|synthesize|photo of|image of|picture of)\b/i.test(trimmedInput) ||
-      /\b(photo of|render of|image of|picture of|illustration of|portrait of)\b/i.test(trimmedInput);
+    const hasImageAttachment = !!(attachedFile?.data && attachedFile?.type?.startsWith('image/')) || !!req.body.sourceImageUrl;
+    const isPhotoAnimation = hasImageAttachment && (
+      creativeMode === 'video' ||
+      /\b(animate|video|motion|bring to life|generate video|make video|live photo|turn into video)\b/i.test(trimmedInput) ||
+      trimmedInput.length === 0
+    );
 
-    const isExplicitVideo = creativeMode === 'video' || 
-      /^(generate|create|render|make|synthesize|video of|animation of)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene)\b/i.test(trimmedInput) ||
-      /\b(video of|cinematic scene of|animation of)\b/i.test(trimmedInput);
+    const isExplicitVideo = creativeMode === 'video' || isPhotoAnimation ||
+      /^(generate|create|render|make|synthesize|video of|animation of|animate)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene|photo|image)\b/i.test(trimmedInput) ||
+      /\b(video of|cinematic scene of|animation of|movie clip of|storyboard of|animate this image|animate this photo|animate image|animate photo)\b/i.test(trimmedInput);
+
+    const isExplicitImage = !isExplicitVideo && (creativeMode === 'image' || 
+      /^(generate|create|render|draw|make|synthesize|photo of|image of|picture of)\b/i.test(trimmedInput) ||
+      /\b(photo of|render of|image of|picture of|illustration of|portrait of)\b/i.test(trimmedInput));
 
     // Helper to sanitize prompt prefixes and extract pure subject
     const extractCleanPrompt = (input: string) => {
@@ -645,7 +763,73 @@ app.post('/api/transform', async (req, res) => {
       return cleaned.length > 0 ? cleaned : input.replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/gi, '').trim();
     };
 
-    if (isExplicitImage && !isExplicitVideo) {
+    if (isExplicitVideo) {
+      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
+      const aspectRatio = arMatch ? arMatch[1] : (req.body.aspectRatio === '9:16' ? '9:16' : '16:9');
+      const cleanPrompt = extractCleanPrompt(trimmedInput);
+
+      // Extract audio request/voiceover/sfx parameters
+      const audioMatch = trimmedInput.match(/\b(with|audio:|soundtrack:|music:|voiceover:|sfx:)\s+([^,.;]+)/i);
+      const audioPrompt = audioMatch ? audioMatch[2].trim() : 'Atmospheric ambient synthesis with low sub-bass drone and sound effects';
+
+      const sourceImageUrl = (attachedFile?.data && attachedFile?.type?.startsWith('image/')) ? attachedFile.data : req.body.sourceImageUrl;
+
+      try {
+        const mediaJob = mediaQueue.enqueueJob({
+          userId: req.body.userId || 'usr_guest',
+          mediaType: 'video',
+          prompt: cleanPrompt || (isPhotoAnimation ? 'Animate this photo with cinematic motion, subtle depth pan, and vivid lighting' : 'Cinematic sequence'),
+          sourceImageUrl,
+          aspectRatio,
+          style: 'Photorealistic 8K Cinematic',
+          audioPrompt,
+        });
+
+        const previewPosterUrl = sourceImageUrl || generateGenerativeImageSvg(
+          cleanPrompt || 'Animated Video Sequence',
+          'Veo 8K Video Frame',
+          ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
+          aspectRatio
+        );
+
+        return res.json({
+          success: true,
+          mediaType: 'video',
+          title: `Video: ${(cleanPrompt || (isPhotoAnimation ? 'Animated Photo Sequence' : 'Cinematic Video')).slice(0, 42)}`,
+          executiveSummary: isPhotoAnimation
+            ? `Animating uploaded photo using Google Veo 3.1 (veo-3.1-fast-generate-preview) in ${aspectRatio} aspect ratio.`
+            : `Generated Veo Cinematic Sequence for: "${cleanPrompt.slice(0, 80)}"`,
+          responseMode: 'productivity',
+          jobId: mediaJob.id,
+          queuePosition: mediaJob.queuePosition,
+          estimatedCountdownSeconds: mediaJob.totalDurationSeconds,
+          videoParams: {
+            title: `Cinematic Sequence: ${(cleanPrompt || 'Animated Photo').slice(0, 36)}`,
+            targetDuration: '00:08',
+            aspectRatio,
+            cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
+            visualStyle: 'Photorealistic 8K Cinematic',
+            lighting: 'Golden hour volumetric illumination',
+            audioPrompt,
+            previewPosterUrl,
+            modelPromptVeoSora: cleanPrompt || 'Animate photo with cinematic motion',
+          },
+          markdownReport: '',
+          sections: [],
+          actionItems: [],
+          detectedEntities: [],
+          keyTakeaways: [],
+          complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+        });
+      } catch (err: any) {
+        return res.status(503).json({
+          success: false,
+          error: 'Media generation busy. Please retry.',
+        });
+      }
+    }
+
+    if (isExplicitImage) {
       const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i);
       const aspectRatio = arMatch ? arMatch[1] : '16:9';
       const cleanPrompt = extractCleanPrompt(trimmedInput);
@@ -689,62 +873,6 @@ app.post('/api/transform', async (req, res) => {
             aspectRatio,
             previewUrl: activePreviewUrl,
             results: liveResults,
-          },
-          markdownReport: '',
-          sections: [],
-          actionItems: [],
-          detectedEntities: [],
-          keyTakeaways: [],
-          complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-        });
-      } catch (err: any) {
-        return res.status(503).json({
-          success: false,
-          error: 'Media generation busy. Please retry.',
-        });
-      }
-    }
-
-    if (isExplicitVideo) {
-      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
-      const aspectRatio = arMatch ? arMatch[1] : '16:9';
-      const cleanPrompt = extractCleanPrompt(trimmedInput);
-
-      try {
-        const mediaJob = mediaQueue.enqueueJob({
-          userId: req.body.userId || 'usr_guest',
-          mediaType: 'video',
-          prompt: cleanPrompt,
-          aspectRatio,
-          style: 'Photorealistic 8K Cinematic',
-        });
-
-        const previewPosterUrl = generateGenerativeImageSvg(
-          cleanPrompt,
-          'Veo 8K Video Frame',
-          ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
-          aspectRatio
-        );
-
-        return res.json({
-          success: true,
-          mediaType: 'video',
-          title: `Video: ${cleanPrompt.slice(0, 42)}`,
-          executiveSummary: `Generated Veo Cinematic Sequence for: "${cleanPrompt.slice(0, 80)}"`,
-          responseMode: 'productivity',
-          jobId: mediaJob.id,
-          queuePosition: mediaJob.queuePosition,
-          estimatedCountdownSeconds: mediaJob.totalDurationSeconds,
-          videoParams: {
-            title: `Cinematic Sequence: ${cleanPrompt.slice(0, 36)}`,
-            targetDuration: '00:08',
-            aspectRatio,
-            cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
-            visualStyle: 'Photorealistic 8K Cinematic',
-            lighting: 'Golden hour volumetric illumination',
-            audioPrompt: 'Atmospheric ambient synthesis with low sub-bass drone',
-            previewPosterUrl,
-            modelPromptVeoSora: cleanPrompt,
           },
           markdownReport: '',
           sections: [],
