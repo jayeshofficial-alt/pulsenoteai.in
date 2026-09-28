@@ -233,7 +233,7 @@ class MediaFIFOQueue {
     }
   }
 
-  // Google Imagen 3 / gemini-3.1-flash-image-preview Image Generation & Editing
+  // Google Imagen 3 / gemini-3.1-flash-image Image Generation & Editing
   private async generateImageWorker(job: MediaJob): Promise<void> {
     const validAspectRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
     let formattedAspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9' = '16:9';
@@ -242,37 +242,57 @@ class MediaFIFOQueue {
     }
 
     let imageBase64: string | null = null;
-    let modelUsed = 'imagen-3.0-generate-002';
+    let modelUsed = 'gemini-3.1-flash-image';
 
-    // 1. Try Imagen 3 Image Generation
+    // 1. Try Gemini 3.1 Flash Image Generation
     try {
-      const imagenResponse = await ai.models.generateImages({
-        model: 'imagen-3.0-generate-002',
-        prompt: job.prompt,
+      const imageResponse = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-image',
+        contents: {
+          parts: [{ text: `${job.prompt}. Aesthetic style: ${job.style}` }],
+        },
         config: {
-          numberOfImages: 1,
-          outputMimeType: 'image/jpeg',
-          aspectRatio: formattedAspectRatio,
+          imageConfig: {
+            aspectRatio: formattedAspectRatio,
+            imageSize: '1K',
+          },
         },
       });
 
-      if (imagenResponse?.generatedImages?.[0]?.image?.imageBytes) {
-        imageBase64 = `data:image/jpeg;base64,${imagenResponse.generatedImages[0].image.imageBytes}`;
+      if (imageResponse?.candidates?.[0]?.content?.parts) {
+        for (const part of imageResponse.candidates[0].content.parts) {
+          if (part.inlineData?.data) {
+            const mime = part.inlineData.mimeType || 'image/png';
+            imageBase64 = `data:${mime};base64,${part.inlineData.data}`;
+            break;
+          }
+        }
       }
-    } catch (imagenErr: any) {
-      console.warn(`[IMAGE_GEN_FALLBACK] Imagen 3 model returned: ${imagenErr?.message || imagenErr}`);
+    } catch (imageErr: any) {
+      console.warn(`[IMAGE_GEN_FALLBACK] gemini-3.1-flash-image returned: ${imageErr?.message || imageErr}`);
     }
 
-    // 2. Try gemini-3.1-flash-image-preview for image prompt synthesis / edit preview
+    // 2. Try gemini-3.1-flash-lite-image as secondary
     if (!imageBase64) {
       try {
-        modelUsed = 'gemini-3.1-flash-image-preview';
-        await ai.models.generateContent({
-          model: 'gemini-3.1-flash-image-preview',
-          contents: `Create high-definition visual concept rendering specifications for: ${job.prompt}. Style: ${job.style}`,
+        modelUsed = 'gemini-3.1-flash-lite-image';
+        const liteResponse = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite-image',
+          contents: {
+            parts: [{ text: job.prompt }],
+          },
         });
+        if (liteResponse?.candidates?.[0]?.content?.parts) {
+          for (const part of liteResponse.candidates[0].content.parts) {
+            if (part.inlineData?.data) {
+              const mime = part.inlineData.mimeType || 'image/png';
+              imageBase64 = `data:${mime};base64,${part.inlineData.data}`;
+              break;
+            }
+          }
+        }
       } catch (e) {
-        // Fall back to SVG renderer
+        // Fall back to image search / SVG
       }
     }
 
@@ -308,20 +328,21 @@ class MediaFIFOQueue {
     };
   }
 
-  // Google Veo 3 Video Generation: veo-3.1-fast-generate-preview (text or image-to-video)
+  // Google Veo 3.1 Video Generation: veo-3.1-lite-generate-preview (text or image-to-video)
   private async generateVideoWorker(job: MediaJob): Promise<void> {
     let videoUri: string | null = null;
-    let modelUsed = 'veo-3.1-fast-generate-preview';
+    let modelUsed = 'veo-3.1-lite-generate-preview';
 
     const validVideoAspectRatios = ['16:9', '9:16'];
     const formattedAspectRatio: '16:9' | '9:16' = job.aspectRatio === '9:16' ? '9:16' : '16:9';
 
     try {
-      console.log(`[VEO_CALL] Calling veo-3.1-fast-generate-preview (ar: ${formattedAspectRatio}) for: "${job.prompt.slice(0, 40)}"`);
+      console.log(`[VEO_CALL] Calling veo-3.1-lite-generate-preview (ar: ${formattedAspectRatio}) for: "${job.prompt.slice(0, 40)}"`);
       
       const config: any = {
+        numberOfVideos: 1,
+        resolution: '720p',
         aspectRatio: formattedAspectRatio,
-        durationSeconds: 5,
       };
 
       // Support image-to-video if sourceImageUrl is provided
@@ -330,7 +351,7 @@ class MediaFIFOQueue {
         const matches = job.sourceImageUrl.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
         if (matches) {
           operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
+            model: 'veo-3.1-lite-generate-preview',
             prompt: job.prompt,
             image: {
               imageBytes: matches[2],
@@ -340,14 +361,14 @@ class MediaFIFOQueue {
           });
         } else {
           operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
+            model: 'veo-3.1-lite-generate-preview',
             prompt: job.prompt,
             config,
           });
         }
       } else {
         operation = await ai.models.generateVideos({
-          model: 'veo-3.1-fast-generate-preview',
+          model: 'veo-3.1-lite-generate-preview',
           prompt: job.prompt,
           config,
         });

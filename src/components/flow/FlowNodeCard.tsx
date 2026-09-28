@@ -49,7 +49,7 @@ interface FlowNodeCardProps {
 
 const TYPE_CONFIG: Record<FlowNodeType, { label: string; icon: any; color: string; bgBadge: string; border: string; glow: string }> = {
   research: {
-    label: 'Deep Research • Gemini 1.5 Pro',
+    label: 'Deep Research • Gemini 3.1 Pro',
     icon: Search,
     color: 'text-cyan-400',
     bgBadge: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30',
@@ -57,7 +57,7 @@ const TYPE_CONFIG: Record<FlowNodeType, { label: string; icon: any; color: strin
     glow: 'shadow-[0_0_25px_rgba(6,182,212,0.15)]',
   },
   image: {
-    label: 'Imagen 3 Studio • 8K Render',
+    label: 'Imagen 3 / Flash Image • 8K Render',
     icon: ImageIcon,
     color: 'text-purple-400',
     bgBadge: 'bg-purple-500/10 text-purple-300 border-purple-500/30',
@@ -65,7 +65,7 @@ const TYPE_CONFIG: Record<FlowNodeType, { label: string; icon: any; color: strin
     glow: 'shadow-[0_0_25px_rgba(168,85,247,0.15)]',
   },
   video: {
-    label: 'Veo 2 • Cinematic Storyboard',
+    label: 'Veo 3.1 Cinema • Storyboard',
     icon: VideoIcon,
     color: 'text-pink-400',
     bgBadge: 'bg-pink-500/10 text-pink-300 border-pink-500/30',
@@ -73,7 +73,7 @@ const TYPE_CONFIG: Record<FlowNodeType, { label: string; icon: any; color: strin
     glow: 'shadow-[0_0_25px_rgba(236,72,153,0.15)]',
   },
   code: {
-    label: 'Logic & Code Canvas',
+    label: 'Logic & Code Canvas • Gemini 3.1 Pro',
     icon: CodeIcon,
     color: 'text-emerald-400',
     bgBadge: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',

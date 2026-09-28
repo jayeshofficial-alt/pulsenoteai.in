@@ -710,7 +710,7 @@ export function App() {
       const creativeMode = mode === 'image' ? 'image' : mode === 'video' ? 'video' : undefined;
       const formatLens: FormatLensId = mode === 'code' ? 'code_generation' : 'deep_research';
 
-      const response = await fetch('/api/transform', {
+      const response = await fetch('/api/transform/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -734,16 +734,74 @@ export function App() {
         }),
       });
 
-      const data = await response.json();
+      if (!response.body) {
+        throw new Error('Streaming connection failed');
+      }
 
-      if (data.isLimitReached) {
-        setIsPricingModalOpen(true);
-        // Remove generating placeholder
-        setCurrentProject((prev) => ({
-          ...prev,
-          nodes: (prev.nodes || []).filter((n) => n.id !== tempNodeId),
-        }));
-        return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamBuffer = '';
+      let accumulatedText = '';
+      let mediaPayload: any = null;
+      let isLimitHit = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        streamBuffer += decoder.decode(value, { stream: true });
+        const events = streamBuffer.split('\n\n');
+        streamBuffer = events.pop() || '';
+
+        for (const event of events) {
+          if (event.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(event.slice(6));
+              if (data.type === 'limit_reached') {
+                isLimitHit = true;
+                setIsPricingModalOpen(true);
+                setCurrentProject((prev) => ({
+                  ...prev,
+                  nodes: (prev.nodes || []).filter((n) => n.id !== tempNodeId),
+                }));
+                break;
+              } else if (data.type === 'media_ready') {
+                mediaPayload = data;
+              } else if (data.type === 'token') {
+                accumulatedText += data.text || '';
+                setCurrentProject((prev) => ({
+                  ...prev,
+                  nodes: (prev.nodes || []).map((n) => {
+                    if (n.id === tempNodeId) {
+                      return {
+                        ...n,
+                        status: 'generating',
+                        report: {
+                          id: `rep_${tempNodeId}`,
+                          timestamp: Date.now(),
+                          industry: 'general',
+                          rawInput: prompt,
+                          responseMode: mode === 'research' ? 'research' : 'productivity',
+                          title: prompt.slice(0, 42) || 'Gemini Intelligence',
+                          executiveSummary: accumulatedText.slice(0, 160),
+                          markdownReport: accumulatedText,
+                          sections: [],
+                          actionItems: [],
+                          detectedEntities: [],
+                          keyTakeaways: [],
+                        },
+                      };
+                    }
+                    return n;
+                  }),
+                }));
+              } else if (data.type === 'done') {
+                accumulatedText = data.fullText || accumulatedText;
+              }
+            } catch (parseErr) {}
+          }
+        }
+        if (isLimitHit) return;
       }
 
       // Increment daily prompt count if free tier
@@ -761,38 +819,38 @@ export function App() {
         });
       }
 
-      // Populate resolved Flow Card data
+      // Populate final completed Flow Card data
       const completedNode: FlowNode = {
         ...initialNode,
-        title: data.title || prompt.slice(0, 42) || attachedFile?.name || 'Flow Card',
+        title: mediaPayload?.title || prompt.slice(0, 42) || attachedFile?.name || 'Gemini Intelligence Flow Card',
         status: 'completed',
-        attachment: data.attachment || attachedFile,
-        report: data.markdownReport || data.executiveSummary ? {
+        attachment: attachedFile,
+        report: !mediaPayload && accumulatedText ? {
           id: `rep_${Date.now()}`,
           timestamp: Date.now(),
           industry: 'general',
           rawInput: prompt,
-          responseMode: data.responseMode || 'research',
-          title: data.title || 'Analysis',
-          executiveSummary: data.executiveSummary || '',
-          markdownReport: data.markdownReport || '',
-          sections: data.sections || [],
-          actionItems: data.actionItems || [],
-          detectedEntities: data.detectedEntities || [],
-          keyTakeaways: data.keyTakeaways || [],
+          responseMode: mode === 'research' ? 'research' : 'productivity',
+          title: prompt.slice(0, 42) || 'Gemini Intelligence Output',
+          executiveSummary: accumulatedText.slice(0, 160),
+          markdownReport: accumulatedText,
+          sections: [],
+          actionItems: [],
+          detectedEntities: [],
+          keyTakeaways: [],
         } : undefined,
-        imageResults: data.imageResults || data.imageParams?.results,
-        imageParams: data.imageParams ? {
-          ...data.imageParams,
+        imageResults: mediaPayload?.imageResults || mediaPayload?.imageParams?.results,
+        imageParams: mediaPayload?.imageParams ? {
+          ...mediaPayload.imageParams,
           aspectRatio,
         } : undefined,
-        videoParams: data.videoParams ? {
-          ...data.videoParams,
+        videoParams: mediaPayload?.videoParams ? {
+          ...mediaPayload.videoParams,
           aspectRatio,
         } : undefined,
         codeSnippet: mode === 'code' ? {
           language: 'typescript',
-          code: data.markdownReport || '// Synthesized architecture and logic',
+          code: accumulatedText || '// Synthesized architecture and logic',
         } : undefined,
         versions: [
           {

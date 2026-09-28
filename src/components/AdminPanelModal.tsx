@@ -31,7 +31,10 @@ import {
   Eye,
   Check,
   Building2,
-  FileText
+  FileText,
+  Trash2,
+  Shield,
+  SlidersHorizontal
 } from 'lucide-react';
 
 interface AdminPanelModalProps {
@@ -54,11 +57,23 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   // User Directory State
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [userSearch, setUserSearch] = useState('');
+  const [userFilterTier, setUserFilterTier] = useState<'all' | 'free' | 'pro' | 'admin'>('all');
   const [selectedUserForGrant, setSelectedUserForGrant] = useState<UserProfile | null>(null);
   const [grantAmount, setGrantAmount] = useState<number>(1);
   const [grantUnit, setGrantUnit] = useState<'days' | 'months' | 'years'>('months');
   const [resetPassUserId, setResetPassUserId] = useState<string | null>(null);
   const [newPassForUser, setNewPassForUser] = useState('');
+
+  // User Deletion State
+  const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+
+  // Subscription Override State
+  const [selectedUserForSubscription, setSelectedUserForSubscription] = useState<UserProfile | null>(null);
+  const [subOverrideTier, setSubOverrideTier] = useState<'free' | 'pro_monthly' | 'pro_annual' | 'admin_grant'>('pro_monthly');
+  const [subOverrideLifetime, setSubOverrideLifetime] = useState(false);
+  const [subOverrideExpiryDate, setSubOverrideExpiryDate] = useState('');
+  const [isUpdatingSubscription, setIsUpdatingSubscription] = useState(false);
 
   // Activity Logs State
   const [activityLogs, setActivityLogs] = useState<UserActivityLog[]>([]);
@@ -172,6 +187,74 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     }
   };
 
+  // Delete User Handler
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+    setIsDeletingUser(true);
+    try {
+      const res = await fetch(`/api/admin/users/${userToDelete.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+
+      setMsg({ type: 'success', text: `User ${userToDelete.name} (${userToDelete.email}) permanently deleted.` });
+      setUserToDelete(null);
+      loadInitialData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
+  // Open Subscription Override Modal
+  const openSubscriptionOverride = (u: UserProfile) => {
+    setSelectedUserForSubscription(u);
+    setSubOverrideTier(u.subscription?.tier as any || 'pro_monthly');
+    setSubOverrideLifetime(u.subscription?.isPro && !u.subscription?.expiresAt);
+    if (u.subscription?.expiresAt) {
+      setSubOverrideExpiryDate(new Date(u.subscription.expiresAt).toISOString().slice(0, 10));
+    } else {
+      const thirtyDays = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+      setSubOverrideExpiryDate(thirtyDays);
+    }
+  };
+
+  // Update User Subscription Handler
+  const handleUpdateSubscription = async () => {
+    if (!selectedUserForSubscription) return;
+    setIsUpdatingSubscription(true);
+    try {
+      const isPro = subOverrideLifetime ? true : subOverrideTier !== 'free';
+      let expiresAt: number | null = null;
+      if (!subOverrideLifetime && isPro && subOverrideExpiryDate) {
+        expiresAt = new Date(subOverrideExpiryDate).getTime() + 86399000;
+      }
+
+      const res = await fetch(`/api/admin/users/${selectedUserForSubscription.id}/subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier: subOverrideLifetime ? 'admin_grant' : subOverrideTier,
+          isPro,
+          expiresAt,
+          lifetime: subOverrideLifetime,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update subscription');
+
+      setMsg({ type: 'success', text: `Subscription updated for ${selectedUserForSubscription.name}!` });
+      setSelectedUserForSubscription(null);
+      loadInitialData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setIsUpdatingSubscription(false);
+    }
+  };
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -216,11 +299,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   if (!isOpen) return null;
 
-  const filteredUsers = users.filter((u) => 
-    u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-    u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-    u.mobile.includes(userSearch)
-  );
+  const filteredUsers = users.filter((u) => {
+    const matchesSearch = 
+      u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+      u.mobile.includes(userSearch);
+    if (!matchesSearch) return false;
+
+    if (userFilterTier === 'free') return !u.subscription?.isPro && u.role !== 'admin';
+    if (userFilterTier === 'pro') return u.subscription?.isPro && u.role !== 'admin';
+    if (userFilterTier === 'admin') return u.role === 'admin';
+    return true;
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-md animate-in fade-in overflow-y-auto">
@@ -353,7 +443,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           </div>
         )}
 
-        {/* TAB 1: USERS DIRECTORY & MANUAL GRANT */}
+        {/* TAB 1: USERS DIRECTORY & FULL ADMIN CONTROLS */}
         {activeTab === 'users' && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -368,8 +458,40 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 />
               </div>
 
-              <div className="text-xs text-slate-400">
-                Total Registered Clients: <strong className="text-white">{users.length}</strong>
+              {/* Filter Pills */}
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
+                <button
+                  onClick={() => setUserFilterTier('all')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    userFilterTier === 'all' ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All ({users.length})
+                </button>
+                <button
+                  onClick={() => setUserFilterTier('free')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    userFilterTier === 'free' ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Free ({users.filter((u) => !u.subscription?.isPro && u.role !== 'admin').length})
+                </button>
+                <button
+                  onClick={() => setUserFilterTier('pro')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    userFilterTier === 'pro' ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Pro ({users.filter((u) => u.subscription?.isPro && u.role !== 'admin').length})
+                </button>
+                <button
+                  onClick={() => setUserFilterTier('admin')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    userFilterTier === 'admin' ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Admins ({users.filter((u) => u.role === 'admin').length})
+                </button>
               </div>
             </div>
 
@@ -382,22 +504,24 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     <th className="p-3">Status / Activation</th>
                     <th className="p-3">Privacy Consent & Timestamp</th>
                     <th className="p-3">Subscription Status</th>
-                    <th className="p-3">Active Tenure</th>
-                    <th className="p-3 text-right">Actions</th>
+                    <th className="p-3">Active Tenure / Expiry</th>
+                    <th className="p-3 text-right">Admin Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-slate-200">
                   {filteredUsers.map((u, idx) => {
                     const isPro = u.subscription?.isPro;
                     const expiresAt = u.subscription?.expiresAt;
+                    const isSuperAdmin = u.role === 'admin' || u.email === 'jayeshofficial@gmail.com' || u.email === 'contact@pulsenoteai.in';
                     return (
                       <tr key={`admin-user-${u.id || 'usr'}-${idx}`} className="hover:bg-slate-900/40 transition-colors">
                         <td className="p-3">
                           <div className="font-bold text-white flex items-center gap-1.5">
                             {u.name}
-                            {u.role === 'admin' && (
-                              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono">
-                                ADMIN
+                            {isSuperAdmin && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold flex items-center gap-0.5 border border-amber-500/30">
+                                <Shield className="w-3 h-3" />
+                                SUPER ADMIN
                               </span>
                             )}
                           </div>
@@ -431,7 +555,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
                             isPro ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
                           }`}>
-                            {u.subscription?.tier}
+                            {u.subscription?.tier || (isPro ? 'Pro' : 'Free')}
                           </span>
                         </td>
 
@@ -440,30 +564,56 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             expiresAt ? (
                               `Until ${new Date(expiresAt).toLocaleDateString()}`
                             ) : (
-                              'Perpetual / Admin'
+                              <span className="text-emerald-400 font-semibold">Lifetime Unlimited</span>
                             )
                           ) : (
-                            'Free (3/day limit)'
+                            'Free (3 prompts/day)'
                           )}
                         </td>
 
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {/* Subscription Override Button */}
                             <button
-                              onClick={() => setSelectedUserForGrant(u)}
-                              title="Manual Premium Grant Tool"
-                              className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-[11px] font-bold flex items-center gap-1 transition-all"
+                              onClick={() => openSubscriptionOverride(u)}
+                              title="Override Subscription Tier & Expiration"
+                              className="px-2 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 text-[11px] font-bold flex items-center gap-1 transition-all"
                             >
-                              <Zap className="w-3 h-3" />
-                              Grant Pro
+                              <SlidersHorizontal className="w-3 h-3" />
+                              <span>Override Sub</span>
                             </button>
 
+                            {/* Quick Grant Pro Button */}
+                            <button
+                              onClick={() => setSelectedUserForGrant(u)}
+                              title="Quick Pro Grant Tool"
+                              className="px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 text-[11px] font-bold flex items-center gap-1 transition-all"
+                            >
+                              <Zap className="w-3 h-3" />
+                              <span>Grant</span>
+                            </button>
+
+                            {/* Reset Password Button */}
                             <button
                               onClick={() => setResetPassUserId(u.id)}
                               title="Reset Password Directly"
-                              className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
                             >
                               <Key className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Permanent User Deletion Button */}
+                            <button
+                              onClick={() => setUserToDelete(u)}
+                              disabled={isSuperAdmin}
+                              title={isSuperAdmin ? 'Cannot delete Super Admin account' : 'Permanently Delete User Account'}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isSuperAdmin 
+                                  ? 'bg-slate-900 text-slate-700 cursor-not-allowed' 
+                                  : 'bg-red-500/10 hover:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/20'
+                              }`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -473,6 +623,136 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Permanent User Deletion Confirmation Modal */}
+            {userToDelete && (
+              <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in">
+                <div className="w-full max-w-md bg-slate-900 border border-red-500/60 rounded-3xl p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h4 className="font-bold text-red-400 flex items-center gap-2 text-sm">
+                      <Trash2 className="w-4 h-4 text-red-400" />
+                      Permanent User Deletion
+                    </h4>
+                    <button
+                      onClick={() => setUserToDelete(null)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-red-950/20 border border-red-500/30 text-xs space-y-1">
+                    <div className="text-red-200 font-semibold">
+                      Are you sure you want to permanently delete this user account?
+                    </div>
+                    <div className="text-slate-300 pt-1">User: <strong className="text-white">{userToDelete.name}</strong></div>
+                    <div className="text-slate-400 font-mono text-[11px]">Email: {userToDelete.email}</div>
+                    <p className="text-[11px] text-red-400/90 pt-1">
+                      ⚠️ This will permanently erase their credentials, profile, activity records, and session data. This action cannot be undone.
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => setUserToDelete(null)}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteUser}
+                      disabled={isDeletingUser}
+                      className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-lg shadow-red-900/40"
+                    >
+                      {isDeletingUser ? 'Deleting...' : 'Confirm Delete'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Subscription Override Modal Dialog */}
+            {selectedUserForSubscription && (
+              <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in">
+                <div className="w-full max-w-md bg-slate-900 border border-indigo-500/50 rounded-3xl p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h4 className="font-bold text-white flex items-center gap-2 text-sm">
+                      <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
+                      Subscription Override Controls
+                    </h4>
+                    <button
+                      onClick={() => setSelectedUserForSubscription(null)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+                    <div>Managing User: <strong className="text-indigo-300">{selectedUserForSubscription.name}</strong></div>
+                    <div className="text-slate-400 font-mono text-[11px]">{selectedUserForSubscription.email}</div>
+                  </div>
+
+                  {/* Tier Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-300 block">Subscription Tier</label>
+                    <select
+                      value={subOverrideTier}
+                      onChange={(e) => setSubOverrideTier(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="free">Free Tier (3 Prompts / Day Limit)</option>
+                      <option value="pro_monthly">Pro Monthly (₹299/mo Unlimited)</option>
+                      <option value="pro_annual">Pro Annual (₹1,999/yr Unlimited)</option>
+                      <option value="admin_grant">Admin Granted Pro (Manual Access)</option>
+                    </select>
+                  </div>
+
+                  {/* Lifetime Unlimited Access Toggle */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-white block">Grant Lifetime Unlimited Access</span>
+                      <span className="text-[10px] text-slate-400">Never expires, unlimited daily generations</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={subOverrideLifetime}
+                      onChange={(e) => setSubOverrideLifetime(e.target.checked)}
+                      className="w-4 h-4 accent-indigo-500 rounded cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Custom Renewal / Expiration Date */}
+                  {!subOverrideLifetime && subOverrideTier !== 'free' && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-slate-300 block">Active Tenure Expiration Date</label>
+                      <input
+                        type="date"
+                        value={subOverrideExpiryDate}
+                        onChange={(e) => setSubOverrideExpiryDate(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => setSelectedUserForSubscription(null)}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleUpdateSubscription}
+                      disabled={isUpdatingSubscription}
+                      className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-lg shadow-indigo-900/40"
+                    >
+                      {isUpdatingSubscription ? 'Saving...' : 'Save Override'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Grant Premium Modal Dialog */}
             {selectedUserForGrant && (

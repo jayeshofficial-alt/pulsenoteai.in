@@ -720,6 +720,67 @@ class Store {
     return user;
   }
 
+  // Admin Permanent User Deletion (Guarded against deleting super admins)
+  public deleteUser(userId: string): { success: boolean; deletedUser: UserProfile } {
+    const userIndex = this.db.users.findIndex((u) => u.id === userId);
+    if (userIndex === -1) {
+      throw new Error('User not found.');
+    }
+
+    const targetUser = this.db.users[userIndex];
+    const emailLower = (targetUser.email || '').toLowerCase().trim();
+
+    // Guardrail: Never allow deletion of super admin accounts
+    if (this.isStrictAdminEmail(emailLower) || targetUser.role === 'admin') {
+      throw new Error('Cannot delete super-administrator accounts (jayeshofficial@gmail.com, contact@pulsenoteai.in).');
+    }
+
+    // Remove user
+    const [deletedUser] = this.db.users.splice(userIndex, 1);
+    delete this.db.userPasswords[userId];
+    delete this.db.passwordResetOtps[emailLower];
+
+    this.saveDatabase();
+    console.log(`[Store] Permanently deleted user: ${deletedUser.name} (${deletedUser.email})`);
+    return { success: true, deletedUser };
+  }
+
+  // Admin Manual Subscription Override (Free/Pro, custom renewal date, lifetime unlimited)
+  public updateUserSubscription(
+    userId: string,
+    options: {
+      tier: 'free' | 'pro_monthly' | 'pro_annual' | 'admin_grant';
+      isPro?: boolean;
+      expiresAt?: number | null;
+      lifetime?: boolean;
+    }
+  ): UserProfile {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found');
+
+    const now = Date.now();
+    const isLifetime = options.lifetime === true;
+    const isPro = isLifetime ? true : (options.isPro !== undefined ? options.isPro : options.tier !== 'free');
+    const tier = isLifetime ? 'admin_grant' : options.tier;
+    const expiresAt = isLifetime ? null : (options.expiresAt !== undefined ? options.expiresAt : (isPro ? (now + 30 * 86400000) : null));
+
+    user.subscription = {
+      tier: tier as any,
+      isPro,
+      startDate: user.subscription?.startDate || now,
+      expiresAt,
+      grantedByAdmin: isLifetime || tier === 'admin_grant',
+    };
+
+    if (isPro) {
+      user.dailyPromptCount = 0;
+    }
+
+    this.saveDatabase();
+    console.log(`[Store] Updated subscription for ${user.name} (${user.email}) -> isPro: ${isPro}, tier: ${tier}, expiresAt: ${expiresAt ? new Date(expiresAt).toISOString() : 'Lifetime'}`);
+    return user;
+  }
+
   public resetUserPasswordByAdmin(userId: string, newPass: string): void {
     const user = this.findUserById(userId);
     if (!user) throw new Error('User not found');

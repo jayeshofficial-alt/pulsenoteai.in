@@ -30,7 +30,7 @@ const ai = new GoogleGenAI({
   },
 });
 
-const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and video concepts should be reviewed and verified before commercial or professional use. The platform bears zero liability.*`;
+const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
 
 const UPGRADE_BLOCK_VERBATIM = `🛑 **Daily Free Limit Reached (3/3 Prompts Used)**
 Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
@@ -322,6 +322,244 @@ app.get('/api/live/config', (_req, res) => {
     audioSampleRate: 24000,
     supportedMimeTypes: ['audio/webm', 'audio/wav', 'audio/mp4'],
   });
+});
+
+// Real-Time Token Streaming Endpoint for Pulse Note AI (Gemini Parity)
+app.post('/api/transform/stream', async (req, res) => {
+  try {
+    const { 
+      rawText = '', 
+      targetIndustry = 'general', 
+      formatLens = 'general_assistant',
+      tone = 'standard', 
+      customContext = '',
+      responseMode = 'auto',
+      dailyPromptCount = 0,
+      isPro = false,
+      userEmail = '',
+      creativeMode,
+      attachedFile,
+    } = req.body;
+
+    if ((!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) && !attachedFile) {
+      return res.status(400).json({ error: 'Please provide raw notes, query, or attach a file to process.' });
+    }
+
+    const cleanEmail = (userEmail || '').trim().toLowerCase();
+    const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
+    const effectiveIsPro = isPro || isAdminUser;
+
+    // Set SSE Headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    // 1. Check Usage Limit Guardrail
+    if (!effectiveIsPro && dailyPromptCount >= 3) {
+      res.write(`data: ${JSON.stringify({
+        type: 'limit_reached',
+        isLimitReached: true,
+        upgradeMessage: UPGRADE_BLOCK_VERBATIM,
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // 2. Check Explicit Image / Video Intent
+    const trimmedInput = rawText.trim();
+    const isExplicitImage = creativeMode === 'image' || 
+      /^(generate|create|render|draw|make|synthesize|photo of|image of|picture of)\b/i.test(trimmedInput) ||
+      /\b(photo of|render of|image of|picture of|illustration of|portrait of)\b/i.test(trimmedInput);
+
+    const isExplicitVideo = creativeMode === 'video' || 
+      /^(generate|create|render|make|synthesize|video of|animation of)\s+(an?\s+)?(video|animation|clip|storyboard|motion graphic|b-roll|scene)\b/i.test(trimmedInput) ||
+      /\b(video of|cinematic scene of|animation of)\b/i.test(trimmedInput);
+
+    if (isExplicitImage && !isExplicitVideo) {
+      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/i);
+      const aspectRatio = arMatch ? arMatch[1] : '16:9';
+      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16|1:1|4:3|3:4)/gi, '').trim();
+
+      const mediaJob = mediaQueue.enqueueJob({
+        userId: req.body.userId || 'usr_guest',
+        mediaType: 'image',
+        prompt: cleanPrompt,
+        aspectRatio,
+        style: 'Photorealistic Hyper-Detailed 8K',
+      });
+
+      const liveResults = await searchLiveImages(cleanPrompt, 8).catch(() => []);
+      const proceduralFallbackUrl = generateGenerativeImageSvg(cleanPrompt, 'Photorealistic 8K', undefined, aspectRatio);
+      const activePreviewUrl = liveResults.length > 0 ? liveResults[0].url : proceduralFallbackUrl;
+
+      res.write(`data: ${JSON.stringify({
+        type: 'media_ready',
+        mediaType: 'image',
+        title: `Image: ${cleanPrompt.slice(0, 42)}`,
+        executiveSummary: `Generated live visual asset search results for: "${cleanPrompt.slice(0, 80)}"`,
+        jobId: mediaJob.id,
+        imageResults: liveResults,
+        imageParams: {
+          prompt: cleanPrompt,
+          style: 'Photorealistic Hyper-Detailed 8K',
+          aspectRatio,
+          previewUrl: activePreviewUrl,
+          results: liveResults,
+        },
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      })}\n\n`);
+      res.end();
+      return;
+    }
+
+    if (isExplicitVideo) {
+      const arMatch = trimmedInput.match(/--ar\s+(16:9|9:16)/i);
+      const aspectRatio = arMatch ? arMatch[1] : '16:9';
+      const cleanPrompt = trimmedInput.replace(/--ar\s+(16:9|9:16)/gi, '').trim();
+
+      const mediaJob = mediaQueue.enqueueJob({
+        userId: req.body.userId || 'usr_guest',
+        mediaType: 'video',
+        prompt: cleanPrompt,
+        aspectRatio,
+        style: 'Photorealistic 8K Cinematic',
+      });
+
+      const previewPosterUrl = generateGenerativeImageSvg(
+        cleanPrompt,
+        'Veo 8K Video Frame',
+        ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
+        aspectRatio
+      );
+
+      res.write(`data: ${JSON.stringify({
+        type: 'media_ready',
+        mediaType: 'video',
+        title: `Video: ${cleanPrompt.slice(0, 42)}`,
+        executiveSummary: `Generated Veo Cinematic Sequence for: "${cleanPrompt.slice(0, 80)}"`,
+        jobId: mediaJob.id,
+        videoParams: {
+          title: `Cinematic Sequence: ${cleanPrompt.slice(0, 36)}`,
+          targetDuration: '00:08',
+          aspectRatio,
+          cameraMotion: 'Dynamic orbital sweep with steady tracking pan',
+          visualStyle: 'Photorealistic 8K Cinematic',
+          lighting: 'Golden hour volumetric illumination',
+          previewPosterUrl,
+          modelPromptVeoSora: cleanPrompt,
+        },
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // 3. Construct Gemini Streaming Instruction & Contents
+    const systemPrompt = `${SYSTEM_INSTRUCTION_BASE}
+
+Output format requirement:
+Provide a comprehensive, high-clarity response structured strictly as follows:
+### 1. Direct Summary
+[A concise, clear opening overview giving the core answer immediately]
+
+### 2. Structured Breakdown
+[Comprehensive explanation with clean bullet points, formatted code snippets in \`\`\`language blocks if technical, and markdown tables if comparative]
+
+### 3. Actionable Next Steps
+[Numbered, practical execution steps and recommendations]
+
+Conclude with the mandatory disclaimer:
+${MANDATORY_LEGAL_NOTICE}`;
+
+    const attachmentContext = attachedFile
+      ? `\n[Attached Asset Context]: User attached ${attachedFile.category} file named "${attachedFile.name}" (Type: ${attachedFile.type}, Size: ${(attachedFile.size / 1024).toFixed(1)} KB).\n`
+      : '';
+
+    const userPrompt = `${attachmentContext}User Query / Notes:
+${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : '')}`;
+
+    let geminiContents: any = userPrompt;
+    if (attachedFile?.data && attachedFile?.type) {
+      const cleanBase64 = attachedFile.data.includes('base64,')
+        ? attachedFile.data.split('base64,')[1]
+        : attachedFile.data;
+      
+      geminiContents = {
+        parts: [
+          {
+            inlineData: {
+              mimeType: attachedFile.type,
+              data: cleanBase64,
+            },
+          },
+          {
+            text: userPrompt,
+          },
+        ],
+      };
+    }
+
+    let modelToUse = formatLens === 'code_generation' ? 'gemini-3.1-pro-preview' : 'gemini-3.8-flash';
+    let responseStream;
+    try {
+      responseStream = await ai.models.generateContentStream({
+        model: modelToUse,
+        contents: geminiContents,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.2,
+        },
+      });
+    } catch (streamErr: any) {
+      // Fallback model
+      responseStream = await ai.models.generateContentStream({
+        model: 'gemini-3.1-flash-lite',
+        contents: geminiContents,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.2,
+        },
+      });
+    }
+
+    let fullAccumulated = '';
+    for await (const chunk of responseStream) {
+      const chunkText = chunk.text || '';
+      fullAccumulated += chunkText;
+      res.write(`data: ${JSON.stringify({ type: 'token', text: chunkText })}\n\n`);
+    }
+
+    // Extract sections for structured UI consumption
+    const summaryMatch = fullAccumulated.match(/### 1\. Direct Summary\s*([\s\S]*?)(?=### 2|$)/i);
+    const directSummary = summaryMatch ? summaryMatch[1].trim() : fullAccumulated.slice(0, 180) + '...';
+
+    res.write(`data: ${JSON.stringify({
+      type: 'done',
+      fullText: fullAccumulated,
+      title: rawText.slice(0, 42) || 'Gemini Intelligence Report',
+      executiveSummary: directSummary,
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+    })}\n\n`);
+    res.end();
+
+    // Log activity in background
+    try {
+      store.logUserActivity({
+        userId: req.body.userId || 'usr_guest',
+        userEmail: req.body.userEmail || 'client@pulsenote.ai',
+        userName: req.body.userName || 'Client User',
+        industry: targetIndustry,
+        rawInput: rawText.slice(0, 300),
+        solutionTitle: rawText.slice(0, 42) || 'Analysis',
+      });
+    } catch (e) {}
+  } catch (err: any) {
+    console.error('Streaming error in /api/transform/stream:', err);
+    res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream generation failed' })}\n\n`);
+    res.end();
+  }
 });
 
 // API endpoint to transform rough notes/transcripts
@@ -2326,6 +2564,42 @@ app.post('/api/admin/users/:userId/reset-password', (req, res) => {
     return res.json({ success: true, message: 'User password reset successfully.' });
   } catch (err: any) {
     return res.status(400).json({ error: err.message });
+  }
+});
+
+// Admin Permanent User Deletion with Safeguard
+app.delete('/api/admin/users/:userId', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const result = store.deleteUser(userId);
+    return res.json({
+      success: true,
+      message: `User ${result.deletedUser.name} (${result.deletedUser.email}) permanently deleted.`,
+      deletedUser: result.deletedUser,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Failed to delete user.' });
+  }
+});
+
+// Admin Subscription Override (Free/Pro switch, custom renewal date, lifetime unlimited)
+app.post('/api/admin/users/:userId/subscription', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { tier = 'pro_monthly', isPro, expiresAt, lifetime } = req.body;
+    const updatedUser = store.updateUserSubscription(userId, {
+      tier,
+      isPro,
+      expiresAt,
+      lifetime,
+    });
+    return res.json({
+      success: true,
+      message: `Subscription successfully updated for ${updatedUser.name}.`,
+      user: updatedUser,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Failed to update subscription.' });
   }
 });
 
