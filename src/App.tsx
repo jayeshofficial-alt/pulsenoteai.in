@@ -7,13 +7,26 @@ import {
   FlowCollaborator, 
   UserProfile, 
   UserUsageState, 
-  SubscriptionPlan,
-  TargetIndustry,
-  FormatLensId,
-  ResponseMode,
-  AttachedFile
+  SubscriptionPlan, 
+  AttachedFile 
 } from './types';
-import { UploadCloud, Sparkles, File, Film, FileText, Image as ImageIcon } from 'lucide-react';
+import { 
+  UploadCloud, 
+  Sparkles, 
+  Search, 
+  Code, 
+  Lightbulb, 
+  Image as ImageIcon, 
+  LayoutGrid, 
+  MessageSquare, 
+  Gem, 
+  Menu,
+  ChevronDown,
+  Settings
+} from 'lucide-react';
+import Sidebar from './components/Sidebar';
+import PromptBar from './components/PromptBar';
+import { ChatMessageBubble, ChatMessage } from './components/ChatMessageBubble';
 import { FlowCanvas } from './components/flow/FlowCanvas';
 import { FlowProjectHeader } from './components/flow/FlowProjectHeader';
 import { FlowCommandBar } from './components/flow/FlowCommandBar';
@@ -52,10 +65,42 @@ export function App() {
     }
   });
 
+  // Gemini Layout & Chat State
+  const [collapsed, setCollapsed] = useState(false);
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const stored = localStorage.getItem('pulsenote_current_chat');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [model, setModel] = useState<'2.5 Flash' | '2.5 Pro'>('2.5 Flash');
+  const [activeView, setActiveView] = useState<'chat' | 'canvas'>('chat');
+  const [isDeepResearch, setIsDeepResearch] = useState(false);
+
+  // Recent chats stored in localStorage
+  const [recentChats, setRecentChats] = useState<Array<{ id: string; title: string; timestamp: number }>>(() => {
+    try {
+      const stored = localStorage.getItem('pulsenote_recent_chats');
+      return stored
+        ? JSON.parse(stored)
+        : [
+            { id: 'rec-1', title: 'How to build Gemini clone', timestamp: Date.now() - 3600000 },
+            { id: 'rec-2', title: 'Premium plan logic', timestamp: Date.now() - 7200000 },
+          ];
+    } catch {
+      return [];
+    }
+  });
+  const [currentChatId, setCurrentChatId] = useState<string>('rec-current');
+
   // Staged File Attachment for Prompt Input & Drag-and-Drop Pipeline
   const [stagedAttachment, setStagedAttachment] = useState<AttachedFile | null>(null);
   const [isGlobalDragOver, setIsGlobalDragOver] = useState(false);
   const dragCounterRef = useRef(0);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // User Usage State & Daily Monetization Tracking (3 Free Prompts / Day)
   const [usageState, setUsageState] = useState<UserUsageState>(() => {
@@ -160,12 +205,10 @@ export function App() {
       console.warn('Legal check notice:', e);
     }
 
-    // If stored user exists, refresh authoritative role
     if (currentUser?.email) {
       syncAuthoritativeProfile(currentUser.email, currentUser.name, currentUser.avatarUrl);
     }
 
-    // Listen to Firebase auth state changes
     const unsubscribe = onAuthStateChanged(auth, (fbUser: any) => {
       if (fbUser && fbUser.email) {
         syncAuthoritativeProfile(
@@ -176,632 +219,297 @@ export function App() {
       }
     });
 
-    // Load initial project list from backend
     fetch('/api/flow/projects')
-      .then((res) => res.json())
+      .then((r) => r.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.projects) && data.projects.length > 0) {
+        if (data.success && data.projects?.length > 0) {
           setProjects(data.projects);
           setCurrentProject(data.projects[0]);
         }
       })
-      .catch((e) => console.warn('Fetch projects notice:', e));
+      .catch(() => {});
 
     return () => unsubscribe();
   }, []);
 
-  // Update usage state when currentUser changes
+  // Save current messages to localStorage
   useEffect(() => {
-    if (currentUser) {
-      const isAdmin = currentUser.role === 'admin';
-      const isPro = isAdmin || currentUser.subscription?.isPro;
-      if (isPro) {
-        setUsageState((prev) => ({
-          ...prev,
-          isPro: true,
-          activePlan: isAdmin ? 'admin_grant' : (currentUser.subscription?.tier || 'pro_monthly'),
-        }));
-      }
-    }
-  }, [currentUser]);
-
-  // Handle Log Out
-  const handleLogout = async () => {
     try {
-      await logOut();
-    } catch (e) {
-      console.warn('Firebase logout notice:', e);
-    }
-    localStorage.removeItem('pulsenote_user_profile');
-    localStorage.removeItem('pulsenote_auth_token');
-    setCurrentUser(null);
-    setUsageState((prev) => {
-      const reset: UserUsageState = {
-        ...prev,
-        isPro: false,
-        activePlan: 'free',
-      };
-      try {
-        localStorage.setItem('pulsenote_user_usage', JSON.stringify(reset));
-      } catch {}
-      return reset;
-    });
-    addToast('info', 'Logged out successfully.');
-  };
+      localStorage.setItem('pulsenote_current_chat', JSON.stringify(messages));
+    } catch {}
+  }, [messages]);
 
-  // 2. Real-Time WebSocket Connection for Google Flow
+  // Scroll to bottom when new messages arrive
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const userName = currentUser?.name || 'Lead Architect';
-    const userEmail = currentUser?.email || 'architect@pulsenoteai.in';
-    const userId = currentUser?.id || `usr_${Date.now()}`;
-    const userColor = currentUser?.role === 'admin' ? '#ec4899' : '#6366f1';
+    if (activeView === 'chat' && chatBottomRef.current) {
+      chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isGenerating, activeView]);
 
-    const wsUrl = `${protocol}//${host}/ws/flow?projectId=${encodeURIComponent(
-      currentProject.id
-    )}&userName=${encodeURIComponent(userName)}&userEmail=${encodeURIComponent(
-      userEmail
-    )}&userId=${encodeURIComponent(userId)}&userColor=${encodeURIComponent(userColor)}`;
+  const isAdmin = currentUser?.role === 'admin';
+  const effectiveIsPro = usageState.isPro || isAdmin;
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+  // Model switch with Premium logic check
+  const handleModelChange = (newModel: '2.5 Flash' | '2.5 Pro') => {
+    if (newModel === '2.5 Pro' && !effectiveIsPro) {
+      addToast('info', 'Upgrade to Premium to use 2.5 Pro.');
+      setIsPricingModalOpen(true);
+      return;
+    }
+    setModel(newModel);
+  };
 
-    ws.onopen = () => {
-      console.log('[FLOW_WS] Connected to live project canvas room:', currentProject.id);
-    };
-
-    ws.onmessage = (event) => {
+  // Start a new chat
+  const handleNewChat = () => {
+    if (messages.length > 0) {
+      const firstUserMsg = messages.find((m) => m.role === 'user');
+      const title = firstUserMsg ? firstUserMsg.content.slice(0, 32) : 'Untitled Chat';
+      const newEntry = { id: `chat_${Date.now()}`, title, timestamp: Date.now() };
+      const updatedRecent = [newEntry, ...recentChats.filter((c) => c.title !== title)].slice(0, 15);
+      setRecentChats(updatedRecent);
       try {
-        const msg = JSON.parse(event.data);
-        switch (msg.type) {
-          case 'init': {
-            if (msg.project) {
-              setCurrentProject(msg.project);
-              const uniqueCollabs: FlowCollaborator[] = [];
-              const seenIds = new Set<string>();
-              for (const c of msg.project.collaborators || []) {
-                if (c && c.id && !seenIds.has(c.id)) {
-                  seenIds.add(c.id);
-                  uniqueCollabs.push(c);
-                }
-              }
-              setCollaborators(uniqueCollabs);
-            }
-            break;
-          }
-          case 'user_joined': {
-            if (msg.collaborator) {
-              setCollaborators((prev) => {
-                const filtered = prev.filter((c) => c.id !== msg.collaborator.id);
-                return [...filtered, msg.collaborator];
-              });
-              addToast('info', `${msg.collaborator.name} joined the Flow canvas`);
-            }
-            break;
-          }
-          case 'user_left': {
-            if (msg.userId) {
-              setCollaborators((prev) => prev.filter((c) => c.id !== msg.userId));
-            }
-            break;
-          }
-          case 'cursor_move': {
-            if (msg.userId && msg.cursor) {
-              setCollaborators((prev) =>
-                prev.map((c) => (c.id === msg.userId ? { ...c, cursor: msg.cursor } : c))
-              );
-            }
-            break;
-          }
-          case 'node_created': {
-            if (msg.node) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                nodes: [...(prev.nodes || []).filter((n) => n.id !== msg.node.id), msg.node],
-              }));
-            }
-            break;
-          }
-          case 'node_updated': {
-            if (msg.node) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                nodes: (prev.nodes || []).map((n) => (n.id === msg.node.id ? { ...n, ...msg.node } : n)),
-              }));
-            }
-            break;
-          }
-          case 'node_moved': {
-            if (msg.nodeId) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                nodes: (prev.nodes || []).map((n) =>
-                  n.id === msg.nodeId ? { ...n, x: msg.x, y: msg.y } : n
-                ),
-              }));
-            }
-            break;
-          }
-          case 'node_deleted': {
-            if (msg.nodeId) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                nodes: (prev.nodes || []).filter((n) => n.id !== msg.nodeId),
-                connections: (prev.connections || []).filter(
-                  (conn) => conn.sourceNodeId !== msg.nodeId && conn.targetNodeId !== msg.nodeId
-                ),
-              }));
-            }
-            break;
-          }
-          case 'connection_created': {
-            if (msg.connection) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                connections: [...(prev.connections || []), msg.connection],
-              }));
-            }
-            break;
-          }
-          case 'connection_deleted': {
-            if (msg.connectionId) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                connections: (prev.connections || []).filter((c) => c.id !== msg.connectionId),
-              }));
-            }
-            break;
-          }
-          case 'comment_added': {
-            if (msg.nodeId && msg.comment) {
-              setCurrentProject((prev) => ({
-                ...prev,
-                nodes: (prev.nodes || []).map((n) =>
-                  n.id === msg.nodeId
-                    ? { ...n, comments: [...(n.comments || []), msg.comment] }
-                    : n
-                ),
-              }));
-            }
-            break;
-          }
-          default:
-            break;
-        }
-      } catch (err) {
-        console.error('Error handling WebSocket message:', err);
-      }
-    };
+        localStorage.setItem('pulsenote_recent_chats', JSON.stringify(updatedRecent));
+      } catch {}
+    }
+    setMessages([]);
+    setInput('');
+    setStagedAttachment(null);
+    setCurrentChatId(`chat_${Date.now()}`);
+    setActiveView('chat');
+  };
 
-    ws.onerror = (e) => {
-      console.warn('[FLOW_WS] WebSocket notice:', e);
-    };
-
-    return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-    };
-  }, [currentProject.id, currentUser?.id]);
-
-  // Broadcast cursor movement
-  const handleCursorMove = (x: number, y: number) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'cursor_move',
-          projectId: currentProject.id,
-          cursor: { x, y },
-        })
-      );
+  // Delete a recent chat
+  const handleDeleteChat = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = recentChats.filter((c) => c.id !== id);
+    setRecentChats(updated);
+    try {
+      localStorage.setItem('pulsenote_recent_chats', JSON.stringify(updated));
+    } catch {}
+    if (currentChatId === id) {
+      setMessages([]);
     }
   };
 
-  // Broadcast node move
-  const handleUpdateNodePos = (nodeId: string, x: number, y: number) => {
-    setCurrentProject((prev) => ({
-      ...prev,
-      nodes: (prev.nodes || []).map((n) => (n.id === nodeId ? { ...n, x, y } : n)),
-    }));
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'node_moved',
-          projectId: currentProject.id,
-          nodeId,
-          x,
-          y,
-        })
-      );
+  // Main Send Action (PulseNote AI Gemini Chat with Streaming & Multi-Modal Routing)
+  const handleSend = async () => {
+    // KEEP PREMIUM LOGIC INTACT
+    if (!effectiveIsPro && model === '2.5 Pro') {
+      addToast('info', 'Upgrade to Premium to use 2.5 Pro.');
+      setIsPricingModalOpen(true);
+      return;
     }
-  };
 
-  // Node Deletion
-  const handleDeleteNode = async (nodeId: string) => {
-    setCurrentProject((prev) => ({
-      ...prev,
-      nodes: (prev.nodes || []).filter((n) => n.id !== nodeId),
-      connections: (prev.connections || []).filter(
-        (c) => c.sourceNodeId !== nodeId && c.targetNodeId !== nodeId
-      ),
-    }));
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'node_deleted',
-          projectId: currentProject.id,
-          nodeId,
-        })
-      );
+    if (!effectiveIsPro && usageState.dailyPromptCount >= 3) {
+      addToast('error', 'Daily free limit reached (3/3 prompts used). Upgrade to Premium for unlimited queries.');
+      setIsPricingModalOpen(true);
+      return;
     }
-    addToast('info', 'Node deleted from canvas');
-  };
 
-  // Duplicate Node
-  const handleDuplicateNode = (nodeId: string) => {
-    const target = currentProject.nodes?.find((n) => n.id === nodeId);
-    if (!target) return;
+    const trimmedInput = input.trim();
+    if (!trimmedInput && !stagedAttachment) return;
 
-    const newNode: FlowNode = {
-      ...target,
-      id: `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      title: `${target.title} (Copy)`,
-      x: target.x + 40,
-      y: target.y + 40,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      comments: [],
-    };
+    const currentAttachment = stagedAttachment;
+    const userPrompt = trimmedInput || (currentAttachment ? `Analyze ${currentAttachment.name}` : '');
 
-    setCurrentProject((prev) => ({
-      ...prev,
-      nodes: [...(prev.nodes || []), newNode],
-    }));
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'node_created',
-          projectId: currentProject.id,
-          node: newNode,
-        })
-      );
-    }
-    addToast('success', 'Duplicated Flow Card');
-  };
-
-  // Create Connection between Nodes
-  const handleCreateConnection = (sourceNodeId: string, targetNodeId: string) => {
-    if (sourceNodeId === targetNodeId) return;
-
-    const newConnection: FlowConnection = {
-      id: `conn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      sourceNodeId,
-      targetNodeId,
-      label: 'Flow Vector',
-      createdAt: Date.now(),
-      style: 'bezier',
-    };
-
-    setCurrentProject((prev) => ({
-      ...prev,
-      connections: [...(prev.connections || []), newConnection],
-    }));
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'connection_created',
-          projectId: currentProject.id,
-          connection: newConnection,
-        })
-      );
-    }
-    addToast('success', 'Connected Flow Nodes');
-  };
-
-  // Delete Connection
-  const handleDeleteConnection = (connectionId: string) => {
-    setCurrentProject((prev) => ({
-      ...prev,
-      connections: (prev.connections || []).filter((c) => c.id !== connectionId),
-    }));
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'connection_deleted',
-          projectId: currentProject.id,
-          connectionId,
-        })
-      );
-    }
-  };
-
-  // Restore Node Version Snapshot
-  const handleRestoreVersion = (nodeId: string, version: any) => {
-    setCurrentProject((prev) => ({
-      ...prev,
-      nodes: (prev.nodes || []).map((n) => {
-        if (n.id === nodeId) {
-          return {
-            ...n,
-            title: version.title,
-            report: version.report || n.report,
-            imageParams: version.imageParams || n.imageParams,
-            videoParams: version.videoParams || n.videoParams,
-            codeSnippet: version.codeSnippet || n.codeSnippet,
-            updatedAt: Date.now(),
-          };
-        }
-        return n;
-      }),
-    }));
-    setActiveVersionNode(null);
-    addToast('success', `Restored snapshot "${version.title}"`);
-  };
-
-  // Add Comment
-  const handleAddComment = (nodeId: string, text: string) => {
-    const newComment = {
-      id: `com_${Date.now()}`,
-      authorName: currentUser?.name || 'Lead Architect',
-      authorAvatar: currentUser?.avatarUrl,
-      text,
+    const userMessage: ChatMessage = {
+      id: `msg_u_${Date.now()}`,
+      role: 'user',
+      content: userPrompt,
       timestamp: Date.now(),
     };
 
-    setCurrentProject((prev) => ({
-      ...prev,
-      nodes: (prev.nodes || []).map((n) =>
-        n.id === nodeId ? { ...n, comments: [...(n.comments || []), newComment] } : n
-      ),
-    }));
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'comment_added',
-          projectId: currentProject.id,
-          nodeId,
-          comment: newComment,
-        })
-      );
-    }
-  };
-
-  // Handle Drag-and-Drop Ingestion on Global Window & Canvas
-  const processDroppedFile = (file: File) => {
-    const isVideo = file.type.startsWith('video/');
-    const isImage = file.type.startsWith('image/');
-    const maxSizeBytes = isVideo ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
-    const maxSizeLabel = isVideo ? '100MB' : '20MB';
-
-    if (file.size > maxSizeBytes) {
-      addToast(
-        'error',
-        `File size exceeds limit (${(file.size / (1024 * 1024)).toFixed(1)}MB). Max allowed for ${isVideo ? 'video' : 'images/documents'} is ${maxSizeLabel}.`
-      );
-      return;
-    }
-
-    let category: 'image' | 'video' | 'document' | 'other' = 'other';
-    if (isImage) category = 'image';
-    else if (isVideo) category = 'video';
-    else if (
-      file.type.includes('pdf') ||
-      file.type.includes('text') ||
-      file.type.includes('document') ||
-      file.name.match(/\.(pdf|txt|docx|doc|csv|json|md)$/i)
-    ) {
-      category = 'document';
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = e.target?.result as string;
-      const previewUrl = category === 'image' || category === 'video' ? data : undefined;
-      const newAttachment: AttachedFile = {
-        id: `att_${Date.now()}`,
-        name: file.name,
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        category,
-        previewUrl,
-        data,
-      };
-      setStagedAttachment(newAttachment);
-      addToast('success', `Attached "${file.name}" to prompt workspace`);
+    const assistantMsgId = `msg_a_${Date.now()}`;
+    const initialAssistantMessage: ChatMessage = {
+      id: assistantMsgId,
+      role: 'model',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: true,
     };
-    reader.onerror = () => {
-      addToast('error', 'Failed to read dropped file. Please try again.');
-    };
-    reader.readAsDataURL(file);
-  };
 
-  const handleGlobalDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current += 1;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsGlobalDragOver(true);
-    }
-  };
-
-  const handleGlobalDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleGlobalDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current -= 1;
-    if (dragCounterRef.current <= 0) {
-      dragCounterRef.current = 0;
-      setIsGlobalDragOver(false);
-    }
-  };
-
-  const handleGlobalDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current = 0;
-    setIsGlobalDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      processDroppedFile(e.dataTransfer.files[0]);
-    }
-  };
-
-  // Generate new Google Flow Card on Infinite Canvas
-  const handleGenerateOnCanvas = async (
-    prompt: string,
-    mode: FlowNodeType,
-    options?: { aspectRatio?: string; attachedFile?: AttachedFile }
-  ) => {
-    const aspectRatio = options?.aspectRatio || '16:9';
-    const attachedFile = options?.attachedFile;
-    const isAdmin = currentUser?.role === 'admin';
-    const effectiveIsPro = usageState.isPro || isAdmin;
-
-    // Check freemium guardrails (3/day) for non-pro / non-admin users
-    if (!effectiveIsPro && usageState.dailyPromptCount >= 3) {
-      setIsPricingModalOpen(true);
-      addToast('error', 'Daily free limit reached (3/3 prompts). Upgrade to Pro for unlimited generation.');
-      return;
-    }
-
+    setMessages((prev) => [...prev, userMessage, initialAssistantMessage]);
+    setInput('');
+    setStagedAttachment(null);
     setIsGenerating(true);
 
-    // Calculate dynamic node spawn coordinate on canvas near current center
-    const existingCount = currentProject.nodes?.length || 0;
-    const spawnX = 120 + (existingCount % 4) * 440;
-    const spawnY = 120 + Math.floor(existingCount / 4) * 360;
+    // Save prompt title to recent if first message
+    if (messages.length === 0) {
+      const newRecent = [
+        { id: currentChatId, title: userPrompt.slice(0, 36), timestamp: Date.now() },
+        ...recentChats,
+      ].slice(0, 15);
+      setRecentChats(newRecent);
+      try {
+        localStorage.setItem('pulsenote_recent_chats', JSON.stringify(newRecent));
+      } catch {}
+    }
 
-    const tempNodeId = `node_${Date.now()}`;
-    const initialNode: FlowNode = {
-      id: tempNodeId,
-      type: mode,
-      title: `${(prompt || attachedFile?.name || 'Multi-modal Card').slice(0, 36)}...`,
-      prompt: prompt || (attachedFile ? `Attached: ${attachedFile.name}` : ''),
-      x: spawnX,
-      y: spawnY,
-      width: mode === 'research' || mode === 'video' ? 520 : 460,
-      status: 'generating',
-      attachment: attachedFile,
-      ownerId: currentUser?.id || 'usr_lead',
-      ownerName: currentUser?.name || 'Lead Architect',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      versions: [],
-      comments: [],
-    };
+    // Check if media generation (video/image) or deep research is requested
+    const isVideoIntent =
+      /\b(generate video|animate|veo|cinematic scene|video of|animation of|make video)\b/i.test(userPrompt) ||
+      (currentAttachment?.category === 'image' && /\b(animate|video|motion|bring to life)\b/i.test(userPrompt));
 
-    // Optimistically place node on canvas
-    setCurrentProject((prev) => ({
-      ...prev,
-      nodes: [...(prev.nodes || []), initialNode],
-    }));
+    const isImageIntent =
+      !isVideoIntent && /\b(generate image|draw|create image|picture of|photo of|illustration of)\b/i.test(userPrompt);
 
     try {
-      const creativeMode = mode === 'image' ? 'image' : mode === 'video' ? 'video' : undefined;
-      const formatLens: FormatLensId = mode === 'code' ? 'code_generation' : 'deep_research';
+      // Route media generation and deep research through transform stream
+      if (isVideoIntent || isImageIntent || isDeepResearch) {
+        const creativeMode = isVideoIntent ? 'video' : isImageIntent ? 'image' : undefined;
+        const response = await fetch('/api/transform/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rawText: userPrompt,
+            creativeMode,
+            responseMode: isDeepResearch ? 'research' : 'productivity',
+            isPro: effectiveIsPro,
+            dailyPromptCount: usageState.dailyPromptCount,
+            userEmail: currentUser?.email || '',
+            attachedFile: currentAttachment ? {
+              id: currentAttachment.id,
+              name: currentAttachment.name,
+              size: currentAttachment.size,
+              type: currentAttachment.type,
+              category: currentAttachment.category,
+              data: currentAttachment.data,
+              previewUrl: currentAttachment.previewUrl,
+            } : undefined,
+          }),
+        });
 
-      const response = await fetch('/api/transform/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rawText: prompt,
-          targetIndustry: 'general',
-          formatLens,
-          responseMode: mode === 'research' ? 'research' : 'productivity',
-          dailyPromptCount: usageState.dailyPromptCount,
-          isPro: effectiveIsPro,
-          userEmail: currentUser?.email || '',
-          creativeMode,
-          attachedFile: attachedFile ? {
-            id: attachedFile.id,
-            name: attachedFile.name,
-            size: attachedFile.size,
-            type: attachedFile.type,
-            category: attachedFile.category,
-            data: attachedFile.data,
-            previewUrl: attachedFile.previewUrl,
-          } : undefined,
-        }),
-      });
+        if (!response.body) throw new Error('Stream connection failed');
 
-      if (!response.body) {
-        throw new Error('Streaming connection failed');
-      }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let streamBuffer = '';
+        let accumulated = '';
+        let mediaPayload: any = null;
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let streamBuffer = '';
-      let accumulatedText = '';
-      let mediaPayload: any = null;
-      let isLimitHit = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const events = streamBuffer.split('\n\n');
+          streamBuffer = events.pop() || '';
 
-        streamBuffer += decoder.decode(value, { stream: true });
-        const events = streamBuffer.split('\n\n');
-        streamBuffer = events.pop() || '';
-
-        for (const event of events) {
-          if (event.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(event.slice(6));
-              if (data.type === 'limit_reached') {
-                isLimitHit = true;
-                setIsPricingModalOpen(true);
-                setCurrentProject((prev) => ({
-                  ...prev,
-                  nodes: (prev.nodes || []).filter((n) => n.id !== tempNodeId),
-                }));
-                break;
-              } else if (data.type === 'media_ready') {
-                mediaPayload = data;
-              } else if (data.type === 'token') {
-                accumulatedText += data.text || '';
-                setCurrentProject((prev) => ({
-                  ...prev,
-                  nodes: (prev.nodes || []).map((n) => {
-                    if (n.id === tempNodeId) {
-                      return {
-                        ...n,
-                        status: 'generating',
-                        report: {
-                          id: `rep_${tempNodeId}`,
-                          timestamp: Date.now(),
-                          industry: 'general',
-                          rawInput: prompt,
-                          responseMode: mode === 'research' ? 'research' : 'productivity',
-                          title: prompt.slice(0, 42) || 'Gemini Intelligence',
-                          executiveSummary: accumulatedText.slice(0, 160),
-                          markdownReport: accumulatedText,
-                          sections: [],
-                          actionItems: [],
-                          detectedEntities: [],
-                          keyTakeaways: [],
-                        },
-                      };
-                    }
-                    return n;
-                  }),
-                }));
-              } else if (data.type === 'done') {
-                accumulatedText = data.fullText || accumulatedText;
-              }
-            } catch (parseErr) {}
+          for (const ev of events) {
+            if (ev.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(ev.slice(6));
+                if (data.type === 'limit_reached') {
+                  setIsPricingModalOpen(true);
+                  break;
+                } else if (data.type === 'media_ready') {
+                  mediaPayload = data;
+                } else if (data.type === 'token') {
+                  accumulated += data.text || '';
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: true } : m
+                    )
+                  );
+                } else if (data.type === 'done') {
+                  accumulated = data.fullText || accumulated;
+                }
+              } catch {}
+            }
           }
         }
-        if (isLimitHit) return;
+
+        // Finalize completed message
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  content: mediaPayload?.executiveSummary || accumulated || 'Generation complete.',
+                  isStreaming: false,
+                  mediaType: mediaPayload?.mediaType,
+                  videoParams: mediaPayload?.videoParams,
+                  imageResults: mediaPayload?.imageResults,
+                }
+              : m
+          )
+        );
+      } else {
+        // Standard conversational multi-turn chat stream via /api/chat
+        const conversationHistory = [...messages, userMessage].map((m) => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          content: m.content,
+        }));
+
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          body: JSON.stringify({
+            messages: conversationHistory,
+            model,
+            stream: true,
+            isPro: effectiveIsPro,
+            dailyPromptCount: usageState.dailyPromptCount,
+            userEmail: currentUser?.email || '',
+          }),
+        });
+
+        if (response.headers.get('content-type')?.includes('text/event-stream') && response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let streamBuffer = '';
+          let accumulated = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            streamBuffer += decoder.decode(value, { stream: true });
+            const events = streamBuffer.split('\n\n');
+            streamBuffer = events.pop() || '';
+
+            for (const ev of events) {
+              if (ev.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(ev.slice(6));
+                  if (data.type === 'token') {
+                    accumulated += data.text || '';
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: true } : m
+                      )
+                    );
+                  } else if (data.type === 'done') {
+                    accumulated = data.fullText || data.reply || accumulated;
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: false } : m
+            )
+          );
+        } else {
+          // JSON fallback
+          const data = await response.json();
+          if (data.isLimitReached) {
+            setIsPricingModalOpen(true);
+            setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
+            return;
+          }
+          const replyText = data.reply || data.text || 'I have analyzed your prompt.';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: replyText, isStreaming: false } : m
+            )
+          );
+        }
       }
 
       // Increment daily prompt count if free tier
@@ -818,233 +526,448 @@ export function App() {
           return updated;
         });
       }
-
-      // Populate final completed Flow Card data
-      const completedNode: FlowNode = {
-        ...initialNode,
-        title: mediaPayload?.title || prompt.slice(0, 42) || attachedFile?.name || 'Gemini Intelligence Flow Card',
-        status: 'completed',
-        attachment: attachedFile,
-        report: !mediaPayload && accumulatedText ? {
-          id: `rep_${Date.now()}`,
-          timestamp: Date.now(),
-          industry: 'general',
-          rawInput: prompt,
-          responseMode: mode === 'research' ? 'research' : 'productivity',
-          title: prompt.slice(0, 42) || 'Gemini Intelligence Output',
-          executiveSummary: accumulatedText.slice(0, 160),
-          markdownReport: accumulatedText,
-          sections: [],
-          actionItems: [],
-          detectedEntities: [],
-          keyTakeaways: [],
-        } : undefined,
-        imageResults: mediaPayload?.imageResults || mediaPayload?.imageParams?.results,
-        imageParams: mediaPayload?.imageParams ? {
-          ...mediaPayload.imageParams,
-          aspectRatio,
-        } : undefined,
-        videoParams: mediaPayload?.videoParams ? {
-          ...mediaPayload.videoParams,
-          aspectRatio,
-        } : undefined,
-        codeSnippet: mode === 'code' ? {
-          language: 'typescript',
-          code: accumulatedText || '// Synthesized architecture and logic',
-        } : undefined,
-        versions: [
-          {
-            id: `v_init_${Date.now()}`,
-            timestamp: Date.now(),
-            title: 'Initial Flow Synthesis',
-            authorName: currentUser?.name || 'Lead Architect',
-          },
-        ],
-      };
-
-      setCurrentProject((prev) => ({
-        ...prev,
-        nodes: (prev.nodes || []).map((n) => (n.id === tempNodeId ? completedNode : n)),
-      }));
-
-      // Broadcast new node to collaborators
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'node_created',
-            projectId: currentProject.id,
-            node: completedNode,
-          })
-        );
-      }
-
-      addToast('success', `Generated ${mode.toUpperCase()} Flow Card`);
     } catch (err: any) {
-      addToast('error', 'Generation encountered an error. Please retry.');
-      setCurrentProject((prev) => ({
-        ...prev,
-        nodes: (prev.nodes || []).filter((n) => n.id !== tempNodeId),
-      }));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? { ...m, content: 'PulseNote encountered an issue generating a response. Please try again.', isStreaming: false }
+            : m
+        )
+      );
+      addToast('error', 'Generation notice: please retry.');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Handle Animate Image into Video (Google Veo 3.1)
+  // Handle Photo Animation into Veo 3.1 Video
   const handleAnimateImage = (imageUrl: string, title?: string) => {
-    const promptText = title ? `Animate ${title} with cinematic camera motion and dynamic lighting` : 'Animate this photo into a cinematic video scene';
-    handleGenerateOnCanvas(promptText, 'video', {
-      aspectRatio: '16:9',
-      attachedFile: {
-        id: `att_${Date.now()}`,
-        name: `${(title || 'animated_photo').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 24)}.jpg`,
-        size: 1024 * 64,
-        type: 'image/jpeg',
-        category: 'image',
-        data: imageUrl,
-        previewUrl: imageUrl,
-      },
+    setInput(`Animate "${title || 'image'}" with cinematic motion and dynamic lighting`);
+    setStagedAttachment({
+      id: `att_${Date.now()}`,
+      name: `${(title || 'photo').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20)}.jpg`,
+      size: 1024 * 60,
+      type: 'image/jpeg',
+      category: 'image',
+      data: imageUrl,
+      previewUrl: imageUrl,
     });
-    addToast('info', 'Submitting photo to Google Veo 3.1 (veo-3.1-fast-generate-preview)...');
+    addToast('info', 'Loaded photo into Veo 3.1 video animation pipeline');
   };
 
-  // Create new Canvas Project
-  const handleCreateProject = async (name: string) => {
-    try {
-      const res = await fetch('/api/flow/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          ownerId: currentUser?.id || 'usr_guest',
-          ownerName: currentUser?.name || 'Flow Architect',
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.project) {
-        setProjects((prev) => [data.project, ...prev]);
-        setCurrentProject(data.project);
-        addToast('success', `Created Project: ${data.project.name}`);
-      }
-    } catch (e: any) {
-      addToast('error', 'Failed to create project');
+  // Quick Action Card click handler
+  const handleQuickAction = (actionTitle: string) => {
+    if (actionTitle === 'Create image') {
+      setInput('Create a photorealistic 8K image of a serene futuristic laboratory with holographic glass interfaces');
+    } else if (actionTitle === 'Deep Research') {
+      setIsDeepResearch(true);
+      setInput('Conduct deep research on quantum computing hardware architectures and commercial scalability in 2026');
+    } else if (actionTitle === 'Write code') {
+      setInput('Write a high-performance TypeScript WebSocket state synchronization manager for multi-user collaboration');
+    } else if (actionTitle === 'Brainstorm') {
+      setInput('Brainstorm 5 innovative viral AI micro-SaaS product concepts with immediate monetization potential');
     }
   };
 
-  const isAdmin = currentUser?.role === 'admin';
-  const effectiveIsPro = usageState.isPro || isAdmin;
+  // Global Drag & Drop Attachment Handling
+  const handleGlobalDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsGlobalDragOver(true);
+    }
+  };
+
+  const handleGlobalDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleGlobalDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current <= 0) {
+      setIsGlobalDragOver(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleGlobalDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsGlobalDragOver(false);
+    dragCounterRef.current = 0;
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      const isVideo = file.type.startsWith('video/');
+      const isImage = file.type.startsWith('image/');
+      const maxSizeBytes = isVideo ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+
+      if (file.size > maxSizeBytes) {
+        addToast(
+          'error',
+          `File size exceeds limit (${(file.size / (1024 * 1024)).toFixed(1)}MB). Max allowed is ${
+            isVideo ? '100MB' : '20MB'
+          }.`
+        );
+        return;
+      }
+
+      let category: 'image' | 'video' | 'document' | 'other' = 'other';
+      if (isImage) category = 'image';
+      else if (isVideo) category = 'video';
+      else if (file.name.match(/\.(pdf|txt|docx|doc|csv|json|md)$/i)) category = 'document';
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const data = event.target?.result as string;
+        setStagedAttachment({
+          id: `att_${Date.now()}`,
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          category,
+          previewUrl: category === 'image' || category === 'video' ? data : undefined,
+          data,
+        });
+        addToast('success', `Attached "${file.name}"`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Canvas Actions
+  const handleUpdateNodePos = (nodeId: string, x: number, y: number) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).map((n) => (n.id === nodeId ? { ...n, x, y } : n)),
+    }));
+  };
+
+  const handleDeleteNode = (nodeId: string) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).filter((n) => n.id !== nodeId),
+      connections: (prev.connections || []).filter((c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId),
+    }));
+  };
+
+  const handleDuplicateNode = (nodeId: string) => {
+    const node = currentProject.nodes?.find((n) => n.id === nodeId);
+    if (!node) return;
+    const newNode: FlowNode = {
+      ...node,
+      id: `node_${Date.now()}`,
+      title: `${node.title} (Copy)`,
+      x: node.x + 40,
+      y: node.y + 40,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), newNode],
+    }));
+  };
+
+  const handleCreateConnection = (fromId: string, toId: string) => {
+    const newConn: FlowConnection = {
+      id: `conn_${Date.now()}`,
+      fromNodeId: fromId,
+      toNodeId: toId,
+      label: 'Generative Pipeline',
+    };
+    setCurrentProject((prev) => ({
+      ...prev,
+      connections: [...(prev.connections || []), newConn],
+    }));
+  };
+
+  const handleDeleteConnection = (connId: string) => {
+    setCurrentProject((prev) => ({
+      ...prev,
+      connections: (prev.connections || []).filter((c) => c.id !== connId),
+    }));
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logOut();
+      setCurrentUser(null);
+      localStorage.removeItem('pulsenote_user_profile');
+      localStorage.removeItem('pulsenote_auth_token');
+      addToast('info', 'Logged out successfully');
+    } catch {}
+  };
 
   return (
-    <div 
-      className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans"
+    <div
+      className="flex h-screen w-screen overflow-hidden bg-[#131314] text-[#e3e3e3] font-sans antialiased relative"
       onDragEnter={handleGlobalDragEnter}
       onDragOver={handleGlobalDragOver}
       onDragLeave={handleGlobalDragLeave}
       onDrop={handleGlobalDrop}
     >
-      {/* Global Drag-and-Drop Attachment Overlay */}
+      {/* Global Drag Overlay */}
       {isGlobalDragOver && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-8 pointer-events-none animate-in fade-in duration-200">
-          <div className="max-w-md w-full p-8 rounded-3xl bg-slate-900/95 border-2 border-dashed border-indigo-500 shadow-2xl flex flex-col items-center text-center space-y-4 ring-8 ring-indigo-500/10">
-            <div className="p-4 rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 animate-bounce">
-              <UploadCloud className="w-10 h-10" />
+        <div className="fixed inset-0 z-50 bg-[#131314]/90 backdrop-blur-md flex flex-col items-center justify-center p-8 pointer-events-none animate-in fade-in duration-200">
+          <div className="max-w-md w-full p-8 rounded-3xl bg-[#1e1f20] border-2 border-dashed border-[#4e8cff] shadow-2xl flex flex-col items-center text-center space-y-4">
+            <div className="p-4 rounded-2xl bg-[#4e8cff]/20 text-[#4e8cff] animate-bounce">
+              <UploadCloud size={40} />
             </div>
             <div>
               <h3 className="text-lg font-bold text-white mb-1">
-                Drop files here to attach to Pulse Note AI
+                Drop files here to attach to PulseNote AI
               </h3>
-              <p className="text-xs text-slate-400">
-                Supports images (.png, .jpg, .webp), videos (.mp4, .webm), PDFs, code & documents (up to 100MB)
+              <p className="text-xs text-[#9aa0a6]">
+                Supports images (.png, .jpg), videos (.mp4), PDFs & documents (up to 100MB)
               </p>
-            </div>
-            <div className="flex items-center gap-2 pt-2">
-              <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">
-                Max 20MB Docs/Images
-              </span>
-              <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">
-                Max 100MB Videos
-              </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* 1. Google Flow Top Project Header */}
-      <FlowProjectHeader
-        currentProject={currentProject}
-        projects={projects}
-        collaborators={collaborators}
-        currentUser={currentUser}
-        isPro={effectiveIsPro}
-        onSelectProject={(projId) => {
-          const p = projects.find((x) => x.id === projId);
-          if (p) setCurrentProject(p);
+      {/* 1. Collapsible Left Sidebar */}
+      <Sidebar
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        recentChats={recentChats}
+        currentChatId={currentChatId}
+        onSelectChat={(id) => {
+          setCurrentChatId(id);
+          setActiveView('chat');
         }}
-        onCreateProject={handleCreateProject}
-        onOpenUpgradeModal={() => setIsPricingModalOpen(true)}
-        onOpenAuthModal={(tab = 'login') => {
-          setAuthModalTab(tab);
-          setIsAuthModalOpen(true);
+        onNewChat={handleNewChat}
+        onDeleteChat={handleDeleteChat}
+        onOpenUpgrade={() => setIsPricingModalOpen(true)}
+        onOpenSettings={() => {
+          if (isAdmin) setIsAdminPanelOpen(true);
+          else setIsClientBillingOpen(true);
         }}
-        onOpenAdminDashboard={() => setIsAdminPanelOpen(true)}
-        onOpenBillingModal={() => setIsClientBillingOpen(true)}
-        onLogout={handleLogout}
-        onShowToast={addToast}
+        activeView={activeView}
+        onToggleView={setActiveView}
       />
 
-      {/* 2. Google Flow Infinite Canvas */}
-      <FlowCanvas
-        project={currentProject}
-        collaborators={collaborators}
-        onUpdateNodePos={handleUpdateNodePos}
-        onSelectNode={setSelectedNodeId}
-        selectedNodeId={selectedNodeId}
-        onDeleteNode={handleDeleteNode}
-        onDuplicateNode={handleDuplicateNode}
-        onCreateConnection={handleCreateConnection}
-        onDeleteConnection={handleDeleteConnection}
-        onOpenVersions={setActiveVersionNode}
-        onOpenComments={setActiveCommentNode}
-        onCursorMove={handleCursorMove}
-        onAnimateImage={handleAnimateImage}
-        onShowToast={addToast}
-      />
+      {/* 2. Main Center Body */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden bg-[#131314] relative">
+        {/* Top Header */}
+        <header className="flex justify-between items-center px-4 py-3 border-b border-[#3c4043]/30 bg-[#131314] z-20 shrink-0">
+          <div className="flex items-center gap-3">
+            {collapsed && (
+              <button
+                type="button"
+                onClick={() => setCollapsed(false)}
+                className="p-2 hover:bg-[#2d2e30] rounded-full text-[#c4c7c5] hover:text-white transition-colors cursor-pointer"
+                title="Expand sidebar"
+              >
+                <Menu size={18} />
+              </button>
+            )}
+            <h1 className="text-xl font-medium tracking-tight text-[#e3e3e3]">PulseNote AI</h1>
+          </div>
 
-      {/* 3. Floating Bottom Command Generator Deck (Google Flow Prompt Engine) */}
-      <FlowCommandBar
-        onGenerate={handleGenerateOnCanvas}
-        isGenerating={isGenerating}
-        dailyPromptsRemaining={effectiveIsPro ? 999 : Math.max(0, 3 - usageState.dailyPromptCount)}
-        isPro={effectiveIsPro}
-        onOpenUpgradeModal={() => setIsPricingModalOpen(true)}
-        attachedFile={stagedAttachment}
-        onSetAttachedFile={setStagedAttachment}
-        onShowToast={addToast}
-      />
+          <div className="flex items-center gap-3">
+            {/* View Switch Pill */}
+            <div className="hidden sm:flex bg-[#1e1f20] p-0.5 rounded-full border border-[#3c4043]/40 text-xs">
+              <button
+                type="button"
+                onClick={() => setActiveView('chat')}
+                className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
+                  activeView === 'chat'
+                    ? 'bg-[#2d2e30] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView('canvas')}
+                className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
+                  activeView === 'canvas'
+                    ? 'bg-[#2d2e30] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Canvas
+              </button>
+            </div>
 
-      {/* 4. Version History Modal */}
-      {activeVersionNode && (
-        <FlowNodeVersionModal
-          node={activeVersionNode}
-          onClose={() => setActiveVersionNode(null)}
-          onRestoreVersion={handleRestoreVersion}
-        />
-      )}
+            {/* Model Selector Dropdown with Pro Gating */}
+            <select
+              value={model}
+              onChange={(e) => handleModelChange(e.target.value as any)}
+              className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] rounded-full px-4 py-1.5 text-sm text-[#e3e3e3] outline-none cursor-pointer transition-colors"
+            >
+              <option value="2.5 Flash">2.5 Flash</option>
+              <option value="2.5 Pro">2.5 Pro</option>
+            </select>
 
-      {/* 5. Live Comment Drawer */}
-      {activeCommentNode && (
-        <FlowNodeCommentDrawer
-          node={activeCommentNode}
-          onClose={() => setActiveCommentNode(null)}
-          onAddComment={handleAddComment}
-          currentUser={{
-            name: currentUser?.name || 'Lead Architect',
-            email: currentUser?.email || 'architect@pulsenoteai.in',
-          }}
-        />
-      )}
+            {/* Profile Avatar / Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUser) setIsClientBillingOpen(true);
+                else setIsAuthModalOpen(true);
+              }}
+              className="relative p-0.5 rounded-full hover:ring-2 hover:ring-[#4e8cff] transition-all cursor-pointer"
+              title={currentUser ? `${currentUser.name} (${currentUser.email})` : 'Sign In'}
+            >
+              {currentUser?.avatarUrl ? (
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.name}
+                  className="w-8 h-8 rounded-full object-cover"
+                />
+              ) : (
+                <img
+                  src="https://i.pravatar.cc/100"
+                  alt="profile"
+                  className="w-8 h-8 rounded-full object-cover border border-[#3c4043]"
+                />
+              )}
+              {effectiveIsPro && (
+                <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#4e8cff] border-2 border-[#131314]" />
+              )}
+            </button>
+          </div>
+        </header>
 
-      {/* 6. Pricing & Pro Upgrade Modal (₹499 UPI wagh.jayesh@oksbi) */}
+        {/* 3. View Switch: Gemini Chat vs Infinite Flow Canvas */}
+        {activeView === 'chat' ? (
+          <div className="flex-1 flex flex-col overflow-y-auto px-4 sm:px-6 py-4 scrollbar-thin">
+            {messages.length === 0 ? (
+              /* Gemini Welcome Empty State */
+              <div className="max-w-[800px] w-full mx-auto mt-[8vh] flex-1 flex flex-col justify-start">
+                <h1 className="text-4xl md:text-5xl font-medium mb-8 tracking-tight">
+                  <span className="bg-gradient-to-r from-[#4e8cff] via-[#b066ff] to-[#ff5757] bg-clip-text text-transparent">
+                    Hello, {currentUser?.name ? currentUser.name.split(' ')[0] : 'User'}
+                  </span>
+                </h1>
+
+                {/* 4 Gemini Suggestion Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                  <div
+                    onClick={() => handleQuickAction('Create image')}
+                    className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
+                  >
+                    <span className="text-sm font-medium text-[#e3e3e3]">Create image</span>
+                    <div className="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center self-end">
+                      <ImageIcon size={18} />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => handleQuickAction('Deep Research')}
+                    className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
+                  >
+                    <span className="text-sm font-medium text-[#e3e3e3]">Deep Research</span>
+                    <div className="w-8 h-8 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center self-end">
+                      <Search size={18} />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => handleQuickAction('Write code')}
+                    className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
+                  >
+                    <span className="text-sm font-medium text-[#e3e3e3]">Write code</span>
+                    <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center self-end">
+                      <Code size={18} />
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => handleQuickAction('Brainstorm')}
+                    className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
+                  >
+                    <span className="text-sm font-medium text-[#e3e3e3]">Brainstorm</span>
+                    <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center self-end">
+                      <Lightbulb size={18} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Chat Conversation Messages */
+              <div className="max-w-[800px] w-full mx-auto space-y-6 flex-1 py-4">
+                {messages.map((m) => (
+                  <ChatMessageBubble
+                    key={m.id}
+                    message={m}
+                    onAnimateImage={handleAnimateImage}
+                    onShowToast={addToast}
+                  />
+                ))}
+                <div ref={chatBottomRef} />
+              </div>
+            )}
+
+            {/* Sticky PromptBar at Bottom */}
+            <div className="max-w-[800px] w-full mx-auto mt-auto pt-4 sticky bottom-4 z-20">
+              <PromptBar
+                input={input}
+                setInput={setInput}
+                onSend={handleSend}
+                isGenerating={isGenerating}
+                attachedFile={stagedAttachment}
+                onSetAttachedFile={setStagedAttachment}
+                isDeepResearch={isDeepResearch}
+                onToggleDeepResearch={() => setIsDeepResearch(!isDeepResearch)}
+                onToggleCanvas={() => setActiveView('canvas')}
+                onStartVoice={() => addToast('info', 'Voice speech input active. Speak into your microphone.')}
+                onShowToast={addToast}
+              />
+              <p className="text-[11px] text-center text-[#9aa0a6] mt-2.5">
+                PulseNote AI can make mistakes, so double-check it
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* Infinite Flow Canvas View */
+          <div className="flex-1 relative w-full h-full overflow-hidden">
+            <FlowCanvas
+              project={currentProject}
+              collaborators={collaborators}
+              onUpdateNodePos={handleUpdateNodePos}
+              onSelectNode={setSelectedNodeId}
+              selectedNodeId={selectedNodeId}
+              onDeleteNode={handleDeleteNode}
+              onDuplicateNode={handleDuplicateNode}
+              onCreateConnection={handleCreateConnection}
+              onDeleteConnection={handleDeleteConnection}
+              onOpenVersions={setActiveVersionNode}
+              onOpenComments={setActiveCommentNode}
+              onCursorMove={() => {}}
+              onAnimateImage={handleAnimateImage}
+              onShowToast={addToast}
+            />
+
+            <FlowCommandBar
+              onGenerate={(p, type, opt) => {
+                setInput(p);
+                if (opt?.attachedFile) setStagedAttachment(opt.attachedFile);
+                setActiveView('chat');
+                setTimeout(() => handleSend(), 50);
+              }}
+              isGenerating={isGenerating}
+              dailyPromptsRemaining={effectiveIsPro ? 999 : Math.max(0, 3 - usageState.dailyPromptCount)}
+              isPro={effectiveIsPro}
+              onOpenUpgradeModal={() => setIsPricingModalOpen(true)}
+              attachedFile={stagedAttachment}
+              onSetAttachedFile={setStagedAttachment}
+              onShowToast={addToast}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 4. Modals */}
+      {/* Pricing / Premium Upgrade Modal */}
       <PricingModal
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
@@ -1059,35 +982,20 @@ export function App() {
             return updated;
           });
           setIsPricingModalOpen(false);
-          addToast('success', `Upgraded to PulseNote AI ${plan.toUpperCase()}! Unlimited canvas generation active.`);
+          addToast('success', `Upgraded to PulseNote AI ${plan.toUpperCase()}! Unlimited 2.5 Pro active.`);
         }}
       />
 
-      {/* 7. Legal Disclaimer Onboarding Modal */}
-      <OnboardingLegalModal
-        isOpen={isLegalModalOpen}
-        onAccept={() => {
-          try {
-            localStorage.setItem('pulsenote_legal_accepted_v1', 'true');
-          } catch {}
-          setHasAcceptedLegalOnboarding(true);
-          setIsLegalModalOpen(false);
-          addToast('success', 'Terms accepted. Welcome to Pulse Note AI Flow Engine.');
-        }}
-      />
-
-      {/* 8. Auth Modal */}
+      {/* Auth Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
         initialTab={authModalTab}
         onClose={() => setIsAuthModalOpen(false)}
-        onLoginSuccess={(user: UserProfile, token: string) => {
+        onLoginSuccess={(user: UserProfile) => {
           setCurrentUser(user);
           try {
             localStorage.setItem('pulsenote_user_profile', JSON.stringify(user));
-            localStorage.setItem('pulsenote_auth_token', token);
           } catch {}
-
           if (user.role === 'admin') {
             setUsageState((prev) => ({
               ...prev,
@@ -1095,7 +1003,7 @@ export function App() {
               activePlan: 'admin_grant',
               dailyPromptCount: 0,
             }));
-            addToast('success', `Welcome Super Admin, ${user.name}! Admin Dashboard & Unlimited Flow unlocked.`);
+            addToast('success', `Welcome Super Admin, ${user.name}!`);
           } else {
             addToast('success', `Welcome back, ${user.name}!`);
           }
@@ -1103,7 +1011,7 @@ export function App() {
         }}
       />
 
-      {/* 9. Super Admin Control Center Modal */}
+      {/* Admin Panel Modal */}
       {isAdminPanelOpen && (
         <AdminPanelModal
           isOpen={isAdminPanelOpen}
@@ -1112,7 +1020,7 @@ export function App() {
         />
       )}
 
-      {/* 10. Client Billing & Account Modal */}
+      {/* Client Billing Modal */}
       {isClientBillingOpen && (
         <ClientBillingModal
           isOpen={isClientBillingOpen}
@@ -1130,7 +1038,19 @@ export function App() {
         />
       )}
 
-      {/* 11. Global Toast Notifications */}
+      {/* Legal Onboarding Modal */}
+      <OnboardingLegalModal
+        isOpen={isLegalModalOpen}
+        onAccept={() => {
+          try {
+            localStorage.setItem('pulsenote_legal_accepted_v1', 'true');
+          } catch {}
+          setHasAcceptedLegalOnboarding(true);
+          setIsLegalModalOpen(false);
+        }}
+      />
+
+      {/* Global Toast Notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );

@@ -263,24 +263,56 @@ app.get('/api/video/download', async (req, res) => {
   }
 });
 
-// Multi-turn Gemini Chatbot with Role Selection and Model Routing
-// Models: gemini-3.1-pro-preview (complex tasks), gemini-3.5-flash (general tasks), gemini-3.1-flash-lite (fast tasks)
+// Multi-turn Gemini Chatbot with Role Selection, Model Routing, and Streaming
+// Models: gemini-3.1-pro-preview (complex / Pro), gemini-3.5-flash (general), gemini-3.1-flash-lite (fast)
 app.post('/api/chat', async (req, res) => {
   try {
-    const {
+    let {
+      message,
       messages = [],
       role = 'general',
-      taskComplexity = 'general', // 'complex' | 'general' | 'fast'
+      taskComplexity = 'general',
+      model,
       useMaps = false,
       dailyPromptCount = 0,
       isPro = false,
+      stream = false,
+      userEmail = '',
     } = req.body;
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'Messages array is required for multi-turn chat.' });
+    // Normalize single message format if provided
+    if (message && typeof message === 'string' && (!messages || messages.length === 0)) {
+      messages = [{ role: 'user', content: message }];
     }
 
-    if (!isPro && dailyPromptCount >= 3) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Message or messages array is required for chat.' });
+    }
+
+    const cleanEmail = (userEmail || '').trim().toLowerCase();
+    const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
+    const effectiveIsPro = isPro || isAdminUser;
+
+    // Model selection based on user request or task complexity
+    let modelName = 'gemini-3.5-flash';
+    const isProModelRequested = model === '2.5 Pro' || model === 'gemini-3.1-pro-preview' || taskComplexity === 'complex';
+
+    if (isProModelRequested) {
+      if (!effectiveIsPro) {
+        return res.status(403).json({
+          isLimitReached: true,
+          error: 'Upgrade to Premium to use 2.5 Pro.',
+          upgradeMessage: UPGRADE_BLOCK_VERBATIM,
+          settlementVpa: 'wagh.jayesh@oksbi',
+        });
+      }
+      modelName = 'gemini-3.1-pro-preview';
+    } else if (model === '2.5 Flash' || taskComplexity === 'fast') {
+      modelName = 'gemini-3.5-flash';
+    }
+
+    // Daily free limit check (3 prompts / day for free tier)
+    if (!effectiveIsPro && dailyPromptCount >= 3) {
       return res.status(403).json({
         isLimitReached: true,
         error: 'Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited chat.',
@@ -291,7 +323,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Role-specific System Instructions
     const roleInstructions: Record<string, string> = {
-      general: 'You are PulseNote AI, a high-performance executive intelligence and multi-modal assistant. Provide direct, highly actionable, structured, and insightful answers.',
+      general: 'You are PulseNote AI, a high-performance executive intelligence and multi-modal assistant styled like Gemini. Provide direct, structured, beautifully formatted markdown answers.',
       executive: 'You are the Executive Strategy Advisor. Focus on business decisions, OKRs, risk mitigation, financial ROI, and clear executive memos.',
       code_architect: 'You are the Principal Software Architect. Focus on clean code, optimal algorithms, system architecture diagrams, and production-grade TypeScript/Node/React.',
       deep_research: 'You are the Lead Research Analyst. Provide exhaustive, evidence-backed synthesis, citations, comparative matrices, and rigorous analysis.',
@@ -301,36 +333,75 @@ app.post('/api/chat', async (req, res) => {
 
     const systemInstruction = roleInstructions[role] || roleInstructions.general;
 
-    // Model selection based on task complexity
-    let modelName = 'gemini-3.5-flash';
-    if (taskComplexity === 'complex') {
-      modelName = 'gemini-3.1-pro-preview';
-    } else if (taskComplexity === 'fast') {
-      modelName = 'gemini-3.1-flash-lite';
-    }
-
     // Format conversation history into Gemini SDK contents
     const contents = messages.map((m: any) => ({
-      role: m.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: m.text || m.content || '' }],
+      role: (m.role === 'user' || m.sender === 'user') ? 'user' : 'model',
+      parts: [{ text: m.content || m.text || '' }],
     }));
+
+    const lastUserMsg = messages[messages.length - 1]?.content || messages[messages.length - 1]?.text || '';
+    const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
 
     const config: any = {
       systemInstruction,
       temperature: 0.3,
     };
 
-    // Enable Google Maps Grounding if requested or if prompt mentions locations/navigation
-    const lastUserMsg = messages[messages.length - 1]?.text || '';
-    const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
-
     if (hasLocationIntent) {
       modelName = 'gemini-3.5-flash';
       config.tools = [{ googleMaps: {} }];
     }
 
+    // Check if client requested SSE streaming
+    const isStreamRequested = stream || req.headers.accept?.includes('text/event-stream');
+
+    if (isStreamRequested) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+
+      try {
+        const responseStream = await ai.models.generateContentStream({
+          model: modelName,
+          contents,
+          config,
+        });
+
+        let fullAccumulated = '';
+        for await (const chunk of responseStream) {
+          const chunkText = chunk.text || '';
+          fullAccumulated += chunkText;
+          res.write(`data: ${JSON.stringify({ type: 'token', text: chunkText })}\n\n`);
+        }
+
+        res.write(`data: ${JSON.stringify({
+          type: 'done',
+          fullText: fullAccumulated,
+          reply: fullAccumulated,
+          modelUsed: modelName,
+          complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+        })}\n\n`);
+        res.end();
+        return;
+      } catch (streamErr: any) {
+        // Fallback to non-streaming response if stream fails
+        const fallbackRes = await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents,
+          config: { systemInstruction, temperature: 0.3 },
+        });
+        const fallbackText = fallbackRes?.text || 'Analysis complete.';
+        res.write(`data: ${JSON.stringify({ type: 'token', text: fallbackText })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', fullText: fallbackText, reply: fallbackText })}\n\n`);
+        res.end();
+        return;
+      }
+    }
+
+    // Non-streaming standard response
     let response;
-    const chatModelsToTry = [modelName, 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-pro-preview'];
+    const chatModelsToTry = [modelName, 'gemini-3.5-flash', 'gemini-3.1-flash-lite'];
     const triedSet = new Set<string>();
 
     for (const currentModel of chatModelsToTry) {
@@ -352,12 +423,11 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const replyText = response?.text || 'I have analyzed your request.';
-    
-    // Extract grounding metadata if available
     const groundingChunks = (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
     return res.json({
       text: replyText,
+      reply: replyText,
       modelUsed: modelName,
       groundingChunks,
       complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
