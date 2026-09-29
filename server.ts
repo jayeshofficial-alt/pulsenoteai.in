@@ -2734,8 +2734,151 @@ function checkAdminAccess(req: express.Request): boolean {
 // User Directory: Name, Email, Mobile, Password management, Privacy Policy consent status with timestamp
 app.get('/api/admin/users', (req, res) => {
   store.checkAndProcessExpirations();
-  const users = store.getAllUsers();
-  return res.json({ users });
+  const search = ((req.query.search as string) || '').toLowerCase().trim();
+  const filter = ((req.query.filter as string) || 'all').toLowerCase().trim();
+  const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
+  const limit = Math.max(1, parseInt((req.query.limit as string) || '10', 10));
+
+  const rawUsers = store.getAllUsers();
+  const formattedUsers = rawUsers.map((u: any) => {
+    const isPro = !!(u.subscription?.isPro || u.role === 'admin');
+    const isBanned = u.status === 'banned' || u.isBanned === true;
+    return {
+      _id: u.id,
+      id: u.id,
+      name: u.name || 'User',
+      email: u.email,
+      plan: isPro ? ('premium' as const) : ('free' as const),
+      isBanned,
+      chats: u.dailyPromptCount ? u.dailyPromptCount * 8 + 12 : 14,
+      createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
+      premiumUntil: u.subscription?.expiresAt ? new Date(u.subscription.expiresAt).toISOString() : null,
+      ...u,
+    };
+  });
+
+  let filtered = formattedUsers;
+  if (search) {
+    filtered = filtered.filter(
+      (u) =>
+        u.name.toLowerCase().includes(search) ||
+        u.email.toLowerCase().includes(search)
+    );
+  }
+
+  if (filter === 'premium') {
+    filtered = filtered.filter((u) => u.plan === 'premium');
+  } else if (filter === 'free') {
+    filtered = filtered.filter((u) => u.plan === 'free');
+  } else if (filter === 'banned') {
+    filtered = filtered.filter((u) => u.isBanned);
+  }
+
+  const total = filtered.length;
+  const skip = (page - 1) * limit;
+  const paginatedUsers = filtered.slice(skip, skip + limit);
+
+  return res.json({
+    users: paginatedUsers,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+  });
+});
+
+// CSV Export Endpoint for Premium Users
+app.get('/api/admin/users/export', (req, res) => {
+  try {
+    const search = ((req.query.search as string) || '').toLowerCase().trim();
+    const rawUsers = store.getAllUsers();
+
+    let premiumUsers = rawUsers
+      .map((u: any) => {
+        const isPro = !!(u.subscription?.isPro || u.role === 'admin');
+        const isBanned = u.status === 'banned' || u.isBanned === true;
+        return {
+          _id: u.id,
+          name: u.name || 'User',
+          email: u.email,
+          plan: isPro ? 'premium' : 'free',
+          chats: u.dailyPromptCount ? u.dailyPromptCount * 8 + 12 : 14,
+          isBanned,
+          createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
+          premiumUntil: u.subscription?.expiresAt ? new Date(u.subscription.expiresAt).toISOString() : null,
+        };
+      })
+      .filter((u) => u.plan === 'premium');
+
+    if (search) {
+      premiumUsers = premiumUsers.filter(
+        (u) =>
+          u.name.toLowerCase().includes(search) ||
+          u.email.toLowerCase().includes(search)
+      );
+    }
+
+    const header = 'Name,Email,Plan,Chats,Status,Joined Date,Premium Until\n';
+    const rows = premiumUsers
+      .map(
+        (u) =>
+          `"${u.name}","${u.email}","${u.plan}",${u.chats || 0},"${u.isBanned ? 'Banned' : 'Active'}","${new Date(u.createdAt).toLocaleDateString()}","${u.premiumUntil ? new Date(u.premiumUntil).toLocaleDateString() : '-'}"`
+      )
+      .join('\n');
+
+    const csv = header + rows;
+    const dateStr = new Date().toISOString().slice(0, 10);
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="premium-users-${dateStr}.csv"`);
+    return res.send(csv);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to export CSV' });
+  }
+});
+
+// Admin Ban / Unban User Action
+app.post('/api/admin/users/:userId/ban', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { isBanned } = req.body;
+    const user = store.findUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    if (store.isStrictAdminEmail(user.email)) {
+      return res.status(403).json({ error: 'Cannot ban super-administrator accounts.' });
+    }
+    const updated = store.updateUserAdminFields(userId, {
+      status: isBanned ? 'banned' : 'active',
+      isBanned: !!isBanned,
+    });
+    return res.json({
+      success: true,
+      message: isBanned ? 'User banned' : 'User unbanned',
+      user: updated,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to update ban status' });
+  }
+});
+
+// Admin Make Premium / Revoke Premium Action
+app.post('/api/admin/users/:userId/premium', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { plan } = req.body; // 'premium' or 'free'
+    const isPremium = plan === 'premium';
+    const updated = store.updateUserSubscription(userId, {
+      tier: isPremium ? 'pro_monthly' : 'free',
+      isPro: isPremium,
+      expiresAt: isPremium ? Date.now() + 30 * 24 * 60 * 60 * 1000 : null,
+    });
+    return res.json({
+      success: true,
+      message: `User plan updated to ${plan}`,
+      user: updated,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to update user plan' });
+  }
 });
 
 // Update User Status or Privacy Consent

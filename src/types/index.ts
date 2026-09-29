@@ -267,7 +267,7 @@ export interface PricingPlan {
 }
 
 export type UserRole = 'admin' | 'user' | 'client';
-export type UserStatus = 'pending_activation' | 'active' | 'suspended';
+export type UserStatus = 'pending_activation' | 'active' | 'suspended' | 'banned';
 
 export interface UserSubscriptionInfo {
   tier: 'free' | 'pro_monthly' | 'pro_annual' | 'admin_grant';
@@ -297,6 +297,10 @@ export interface UserProfile {
   dailyPromptCount: number;
   lastPromptDate: string;
   createdAt: number;
+  isBanned?: boolean;
+  plan?: 'free' | 'premium';
+  chats?: number;
+  premiumUntil?: string | number | null;
 }
 
 export interface PaymentRecord {
