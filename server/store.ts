@@ -54,6 +54,7 @@ const DEFAULT_SETTINGS: AppInterfaceSettings = {
 export const STRICT_ADMIN_EMAILS = [
   'jayeshofficial@gmail.com',
   'contact@pulsenoteai.in',
+  'wagh.jayesh@gmail.com',
 ];
 
 class Store {

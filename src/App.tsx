@@ -8,7 +8,8 @@ import {
   UserProfile, 
   UserUsageState, 
   SubscriptionPlan, 
-  AttachedFile 
+  AttachedFile,
+  TransformedReport
 } from './types';
 import { 
   UploadCloud, 
@@ -291,8 +292,46 @@ export function App() {
     }
   };
 
-  // Main Send Action (PulseNote AI Gemini Chat with Streaming & Multi-Modal Routing)
-  const handleSend = async () => {
+  // Helper to construct type-safe TransformedReport for FlowNodes
+  const createReportObject = (
+    title: string,
+    rawInput: string,
+    text: string,
+    mediaType: 'text' | 'image' | 'video' = 'text'
+  ): TransformedReport => ({
+    id: `rep_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    timestamp: Date.now(),
+    industry: 'general',
+    title: title || 'Intelligence Report',
+    rawInput: rawInput || '',
+    markdownReport: text,
+    mediaType,
+    executiveSummary: text.slice(0, 180) + '...',
+    sections: [
+      {
+        heading: 'Synthesis',
+        content: text,
+      },
+    ],
+    actionItems: [],
+    detectedEntities: [],
+    keyTakeaways: [],
+    complianceDisclaimer: '> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*',
+  });
+
+  // Main Send Action (PulseNote AI Gemini Chat with Streaming, Canvas Node Insertion & Multi-Modal Routing)
+  const handleSend = async (
+    overridePrompt?: string,
+    overrideAttachment?: AttachedFile | null,
+    overrideType?: FlowNodeType
+  ) => {
+    // Determine the raw prompt and attachment safely
+    const rawUserPrompt = overridePrompt !== undefined ? overridePrompt : input;
+    const currentAttachment = overrideAttachment !== undefined ? overrideAttachment : stagedAttachment;
+    const trimmedInput = (rawUserPrompt || '').trim();
+
+    if (!trimmedInput && !currentAttachment) return;
+
     // KEEP PREMIUM LOGIC INTACT
     if (!effectiveIsPro && model === '2.5 Pro') {
       addToast('info', 'Upgrade to Premium to use 2.5 Pro.');
@@ -306,20 +345,18 @@ export function App() {
       return;
     }
 
-    const trimmedInput = input.trim();
-    if (!trimmedInput && !stagedAttachment) return;
-
-    const currentAttachment = stagedAttachment;
     const userPrompt = trimmedInput || (currentAttachment ? `Analyze ${currentAttachment.name}` : '');
+    const userMessageId = `msg_u_${Date.now()}`;
+    const assistantMsgId = `msg_a_${Date.now()}`;
+    const canvasNodeId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
     const userMessage: ChatMessage = {
-      id: `msg_u_${Date.now()}`,
+      id: userMessageId,
       role: 'user',
       content: userPrompt,
       timestamp: Date.now(),
     };
 
-    const assistantMsgId = `msg_a_${Date.now()}`;
     const initialAssistantMessage: ChatMessage = {
       id: assistantMsgId,
       role: 'model',
@@ -328,7 +365,61 @@ export function App() {
       isStreaming: true,
     };
 
+    // Check if media generation (video/image) or deep research is requested
+    const isVideoIntent =
+      overrideType === 'video' ||
+      /\b(generate video|animate|veo|cinematic scene|video of|animation of|make video)\b/i.test(userPrompt) ||
+      (currentAttachment?.category === 'image' && /\b(animate|video|motion|bring to life)\b/i.test(userPrompt));
+
+    const isImageIntent =
+      !isVideoIntent &&
+      (overrideType === 'image' ||
+        /\b(generate image|draw|create image|picture of|photo of|illustration of)\b/i.test(userPrompt));
+
+    const isCodeIntent =
+      overrideType === 'code' ||
+      /\b(write code|create component|react|typescript|python|function|api route|algorithm)\b/i.test(userPrompt);
+
+    const calculatedNodeType: FlowNodeType = isVideoIntent
+      ? 'video'
+      : isImageIntent
+      ? 'image'
+      : isCodeIntent
+      ? 'code'
+      : isDeepResearch || overrideType === 'research'
+      ? 'research'
+      : 'research';
+
+    // Calculate canvas node position
+    const existingNodes = currentProject.nodes || [];
+    const nodeCount = existingNodes.length;
+    const nodeX = 80 + (nodeCount % 3) * 440;
+    const nodeY = 80 + Math.floor(nodeCount / 3) * 440;
+
+    const initialCanvasNode: FlowNode = {
+      id: canvasNodeId,
+      type: calculatedNodeType,
+      title: userPrompt.slice(0, 36) || 'Intelligence Analysis',
+      prompt: userPrompt,
+      x: nodeX,
+      y: nodeY,
+      status: 'generating',
+      progress: 25,
+      attachment: currentAttachment || undefined,
+      ownerName: currentUser?.name || 'PulseNote User',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      versions: [],
+      comments: [],
+    };
+
+    // Instant DOM Insertion into both Chat and Canvas
     setMessages((prev) => [...prev, userMessage, initialAssistantMessage]);
+    setCurrentProject((prev) => ({
+      ...prev,
+      nodes: [...(prev.nodes || []), initialCanvasNode],
+    }));
+
     setInput('');
     setStagedAttachment(null);
     setIsGenerating(true);
@@ -344,14 +435,6 @@ export function App() {
         localStorage.setItem('pulsenote_recent_chats', JSON.stringify(newRecent));
       } catch {}
     }
-
-    // Check if media generation (video/image) or deep research is requested
-    const isVideoIntent =
-      /\b(generate video|animate|veo|cinematic scene|video of|animation of|make video)\b/i.test(userPrompt) ||
-      (currentAttachment?.category === 'image' && /\b(animate|video|motion|bring to life)\b/i.test(userPrompt));
-
-    const isImageIntent =
-      !isVideoIntent && /\b(generate image|draw|create image|picture of|photo of|illustration of)\b/i.test(userPrompt);
 
     try {
       // Route media generation and deep research through transform stream
@@ -411,6 +494,19 @@ export function App() {
                       m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: true } : m
                     )
                   );
+                  setCurrentProject((prev) => ({
+                    ...prev,
+                    nodes: (prev.nodes || []).map((n) =>
+                      n.id === canvasNodeId
+                        ? {
+                            ...n,
+                            status: 'generating',
+                            progress: Math.min(95, (n.progress || 25) + 3),
+                            report: createReportObject(n.title, userPrompt, accumulated, 'text'),
+                          }
+                        : n
+                    ),
+                  }));
                 } else if (data.type === 'done') {
                   accumulated = data.fullText || accumulated;
                 }
@@ -419,13 +515,15 @@ export function App() {
           }
         }
 
-        // Finalize completed message
+        const finalOutputText = mediaPayload?.executiveSummary || accumulated || 'Generation complete.';
+
+        // Finalize completed message in Chat
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMsgId
               ? {
                   ...m,
-                  content: mediaPayload?.executiveSummary || accumulated || 'Generation complete.',
+                  content: finalOutputText,
                   isStreaming: false,
                   mediaType: mediaPayload?.mediaType,
                   videoParams: mediaPayload?.videoParams,
@@ -434,6 +532,30 @@ export function App() {
               : m
           )
         );
+
+        // Finalize completed node on Canvas
+        setCurrentProject((prev) => ({
+          ...prev,
+          nodes: (prev.nodes || []).map((n) =>
+            n.id === canvasNodeId
+              ? {
+                  ...n,
+                  status: 'completed',
+                  progress: 100,
+                  type: mediaPayload?.mediaType === 'video' ? 'video' : mediaPayload?.mediaType === 'image' ? 'image' : n.type,
+                  videoParams: mediaPayload?.videoParams,
+                  imageResults: mediaPayload?.imageResults,
+                  imageParams: mediaPayload?.imageParams,
+                  report: createReportObject(
+                    n.title,
+                    userPrompt,
+                    accumulated || finalOutputText,
+                    mediaPayload?.mediaType || 'text'
+                  ),
+                }
+              : n
+          ),
+        }));
       } else {
         // Standard conversational multi-turn chat stream via /api/chat
         const conversationHistory = [...messages, userMessage].map((m) => ({
@@ -482,6 +604,19 @@ export function App() {
                         m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: true } : m
                       )
                     );
+                    setCurrentProject((prev) => ({
+                      ...prev,
+                      nodes: (prev.nodes || []).map((n) =>
+                        n.id === canvasNodeId
+                          ? {
+                              ...n,
+                              status: 'generating',
+                              progress: Math.min(95, (n.progress || 25) + 3),
+                              report: createReportObject(n.title, userPrompt, accumulated, 'text'),
+                            }
+                          : n
+                      ),
+                    }));
                   } else if (data.type === 'done') {
                     accumulated = data.fullText || data.reply || accumulated;
                   }
@@ -495,12 +630,30 @@ export function App() {
               m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: false } : m
             )
           );
+
+          setCurrentProject((prev) => ({
+            ...prev,
+            nodes: (prev.nodes || []).map((n) =>
+              n.id === canvasNodeId
+                ? {
+                    ...n,
+                    status: 'completed',
+                    progress: 100,
+                    report: createReportObject(n.title, userPrompt, accumulated, 'text'),
+                  }
+                : n
+            ),
+          }));
         } else {
           // JSON fallback
           const data = await response.json();
           if (data.isLimitReached) {
             setIsPricingModalOpen(true);
             setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
+            setCurrentProject((prev) => ({
+              ...prev,
+              nodes: (prev.nodes || []).filter((n) => n.id !== canvasNodeId),
+            }));
             return;
           }
           const replyText = data.reply || data.text || 'I have analyzed your prompt.';
@@ -509,6 +662,20 @@ export function App() {
               m.id === assistantMsgId ? { ...m, content: replyText, isStreaming: false } : m
             )
           );
+
+          setCurrentProject((prev) => ({
+            ...prev,
+            nodes: (prev.nodes || []).map((n) =>
+              n.id === canvasNodeId
+                ? {
+                    ...n,
+                    status: 'completed',
+                    progress: 100,
+                    report: createReportObject(n.title, userPrompt, replyText, 'text'),
+                  }
+                : n
+            ),
+          }));
         }
       }
 
@@ -534,6 +701,14 @@ export function App() {
             : m
         )
       );
+      setCurrentProject((prev) => ({
+        ...prev,
+        nodes: (prev.nodes || []).map((n) =>
+          n.id === canvasNodeId
+            ? { ...n, status: 'error', progress: 0 }
+            : n
+        ),
+      }));
       addToast('error', 'Generation notice: please retry.');
     } finally {
       setIsGenerating(false);
@@ -542,8 +717,8 @@ export function App() {
 
   // Handle Photo Animation into Veo 3.1 Video
   const handleAnimateImage = (imageUrl: string, title?: string) => {
-    setInput(`Animate "${title || 'image'}" with cinematic motion and dynamic lighting`);
-    setStagedAttachment({
+    const promptText = `Animate "${title || 'image'}" with cinematic motion and dynamic lighting`;
+    const attachmentObj: AttachedFile = {
       id: `att_${Date.now()}`,
       name: `${(title || 'photo').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20)}.jpg`,
       size: 1024 * 60,
@@ -551,21 +726,32 @@ export function App() {
       category: 'image',
       data: imageUrl,
       previewUrl: imageUrl,
-    });
+    };
+    setInput(promptText);
+    setStagedAttachment(attachmentObj);
     addToast('info', 'Loaded photo into Veo 3.1 video animation pipeline');
+    handleSend(promptText, attachmentObj, 'video');
   };
 
   // Quick Action Card click handler
   const handleQuickAction = (actionTitle: string) => {
     if (actionTitle === 'Create image') {
-      setInput('Create a photorealistic 8K image of a serene futuristic laboratory with holographic glass interfaces');
+      const p = 'Create a photorealistic 8K image of a serene futuristic laboratory with holographic glass interfaces';
+      setInput(p);
+      handleSend(p, null, 'image');
     } else if (actionTitle === 'Deep Research') {
       setIsDeepResearch(true);
-      setInput('Conduct deep research on quantum computing hardware architectures and commercial scalability in 2026');
+      const p = 'Conduct deep research on quantum computing hardware architectures and commercial scalability in 2026';
+      setInput(p);
+      handleSend(p, null, 'research');
     } else if (actionTitle === 'Write code') {
-      setInput('Write a high-performance TypeScript WebSocket state synchronization manager for multi-user collaboration');
+      const p = 'Write a high-performance TypeScript WebSocket state synchronization manager for multi-user collaboration';
+      setInput(p);
+      handleSend(p, null, 'code');
     } else if (actionTitle === 'Brainstorm') {
-      setInput('Brainstorm 5 innovative viral AI micro-SaaS product concepts with immediate monetization potential');
+      const p = 'Brainstorm 5 innovative viral AI micro-SaaS product concepts with immediate monetization potential';
+      setInput(p);
+      handleSend(p, null, 'research');
     }
   };
 
@@ -949,10 +1135,8 @@ export function App() {
 
             <FlowCommandBar
               onGenerate={(p, type, opt) => {
-                setInput(p);
                 if (opt?.attachedFile) setStagedAttachment(opt.attachedFile);
-                setActiveView('chat');
-                setTimeout(() => handleSend(), 50);
+                handleSend(p, opt?.attachedFile, type);
               }}
               isGenerating={isGenerating}
               dailyPromptsRemaining={effectiveIsPro ? 999 : Math.max(0, 3 - usageState.dailyPromptCount)}

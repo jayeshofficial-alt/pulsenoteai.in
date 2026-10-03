@@ -194,9 +194,11 @@ app.get('/api/video/proxy', async (req, res) => {
     }
 
     const contentType = response.headers.get('content-type') || 'video/mp4';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
 
     if (response.body) {
       // @ts-ignore
@@ -205,18 +207,28 @@ app.get('/api/video/proxy', async (req, res) => {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          res.write(value);
+          if (!res.writableEnded) {
+            res.write(value);
+          }
         }
-        res.end();
+        if (!res.writableEnded) res.end();
       } else {
         const buffer = await response.arrayBuffer();
-        res.send(Buffer.from(buffer));
+        if (!res.headersSent) {
+          return res.send(Buffer.from(buffer));
+        }
       }
     } else {
-      res.status(500).send('No video stream available');
+      if (!res.headersSent) {
+        return res.status(500).send('No video stream available');
+      }
     }
   } catch (err: any) {
-    res.status(500).send(`Video proxy error: ${err.message}`);
+    if (!res.headersSent) {
+      return res.status(500).send(`Video proxy error: ${err.message}`);
+    } else if (!res.writableEnded) {
+      return res.end();
+    }
   }
 });
 
@@ -227,15 +239,6 @@ app.get('/api/video/download', async (req, res) => {
     const safeName = String(filename).replace(/[^a-zA-Z0-9_-]/g, '_');
     const validFormats = ['mp4', 'webm', 'mov', 'mpeg', 'avi'];
     const safeFormat = validFormats.includes(String(format).toLowerCase()) ? String(format).toLowerCase() : 'mp4';
-
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${safeFormat}"`);
-    
-    let mimeType = 'video/mp4';
-    if (safeFormat === 'webm') mimeType = 'video/webm';
-    else if (safeFormat === 'mov') mimeType = 'video/quicktime';
-    else if (safeFormat === 'mpeg') mimeType = 'video/mpeg';
-    
-    res.setHeader('Content-Type', mimeType);
 
     if (!uri || typeof uri !== 'string' || uri === 'undefined') {
       return res.status(404).send('No video stream available for download');
@@ -256,10 +259,24 @@ app.get('/api/video/download', async (req, res) => {
       return res.status(response.status).send('Failed to fetch video for download');
     }
 
+    let mimeType = 'video/mp4';
+    if (safeFormat === 'webm') mimeType = 'video/webm';
+    else if (safeFormat === 'mov') mimeType = 'video/quicktime';
+    else if (safeFormat === 'mpeg') mimeType = 'video/mpeg';
+
+    if (!res.headersSent) {
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${safeFormat}"`);
+      res.setHeader('Content-Type', mimeType);
+    }
+
     const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    return res.send(Buffer.from(buffer));
   } catch (err: any) {
-    res.status(500).send(`Video download error: ${err.message}`);
+    if (!res.headersSent) {
+      return res.status(500).send(`Video download error: ${err.message}`);
+    } else if (!res.writableEnded) {
+      return res.end();
+    }
   }
 });
 
@@ -333,6 +350,53 @@ app.post('/api/chat', async (req, res) => {
 
     const systemInstruction = roleInstructions[role] || roleInstructions.general;
 
+    // Check if CodeCraft model is requested (e.g. claude-opus-5.5)
+    if (model && (String(model).toLowerCase().includes('claude') || String(model).toLowerCase().includes('codecraft') || String(model).toLowerCase().includes('opus'))) {
+      const codecraftModel = String(model).toLowerCase().includes('claude') ? String(model) : 'claude-opus-5.5';
+      const apiKey = process.env.CODECRAFT_API_KEY || '';
+      const ccBase = (process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || 'https://codecraftapi.com/v1').replace(/\/+$/, '');
+      const ccUrl = `${ccBase}/chat/completions`;
+
+      try {
+        const ccResponse = await fetch(ccUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'x-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            model: codecraftModel,
+            messages: messages.map((m: any) => ({
+              role: (m.role === 'model' || m.role === 'assistant') ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+              content: m.content || m.text || '',
+            })),
+          }),
+        });
+
+        if (ccResponse.ok) {
+          const ccData = await ccResponse.json();
+          const replyText =
+            ccData.choices?.[0]?.message?.content ||
+            ccData.text ||
+            ccData.reply ||
+            JSON.stringify(ccData);
+
+          if (!res.headersSent) {
+            return res.json({
+              text: replyText,
+              reply: replyText,
+              modelUsed: codecraftModel,
+              groundingChunks: [],
+              complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+            });
+          }
+        }
+      } catch (ccErr) {
+        console.warn('CodeCraft completion fallback notice:', ccErr);
+      }
+    }
+
     // Format conversation history into Gemini SDK contents
     const contents = messages.map((m: any) => ({
       role: (m.role === 'user' || m.sender === 'user') ? 'user' : 'model',
@@ -356,10 +420,12 @@ app.post('/api/chat', async (req, res) => {
     const isStreamRequested = stream || req.headers.accept?.includes('text/event-stream');
 
     if (isStreamRequested) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.flushHeaders?.();
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders?.();
+      }
 
       try {
         const responseStream = await ai.models.generateContentStream({
@@ -372,29 +438,40 @@ app.post('/api/chat', async (req, res) => {
         for await (const chunk of responseStream) {
           const chunkText = chunk.text || '';
           fullAccumulated += chunkText;
-          res.write(`data: ${JSON.stringify({ type: 'token', text: chunkText })}\n\n`);
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'token', text: chunkText })}\n\n`);
+          }
         }
 
-        res.write(`data: ${JSON.stringify({
-          type: 'done',
-          fullText: fullAccumulated,
-          reply: fullAccumulated,
-          modelUsed: modelName,
-          complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-        })}\n\n`);
-        res.end();
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({
+            type: 'done',
+            fullText: fullAccumulated,
+            reply: fullAccumulated,
+            modelUsed: modelName,
+            complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+          })}\n\n`);
+          res.end();
+        }
         return;
       } catch (streamErr: any) {
-        // Fallback to non-streaming response if stream fails
-        const fallbackRes = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
-          contents,
-          config: { systemInstruction, temperature: 0.3 },
-        });
-        const fallbackText = fallbackRes?.text || 'Analysis complete.';
-        res.write(`data: ${JSON.stringify({ type: 'token', text: fallbackText })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', fullText: fallbackText, reply: fallbackText })}\n\n`);
-        res.end();
+        if (!res.writableEnded) {
+          try {
+            // Fallback to non-streaming response if stream fails
+            const fallbackRes = await ai.models.generateContent({
+              model: 'gemini-3.5-flash',
+              contents,
+              config: { systemInstruction, temperature: 0.3 },
+            });
+            const fallbackText = fallbackRes?.text || 'Analysis complete.';
+            res.write(`data: ${JSON.stringify({ type: 'token', text: fallbackText })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'done', fullText: fallbackText, reply: fallbackText })}\n\n`);
+            res.end();
+          } catch (fbErr: any) {
+            res.write(`data: ${JSON.stringify({ type: 'error', error: fbErr?.message || 'Chat generation failed' })}\n\n`);
+            res.end();
+          }
+        }
         return;
       }
     }
@@ -425,16 +502,122 @@ app.post('/api/chat', async (req, res) => {
     const replyText = response?.text || 'I have analyzed your request.';
     const groundingChunks = (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-    return res.json({
-      text: replyText,
-      reply: replyText,
-      modelUsed: modelName,
-      groundingChunks,
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    });
+    if (!res.headersSent) {
+      return res.json({
+        text: replyText,
+        reply: replyText,
+        modelUsed: modelName,
+        groundingChunks,
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      });
+    }
   } catch (err: any) {
     console.error('Chat endpoint error:', err);
-    return res.status(500).json({ error: err.message || 'Chat generation failed' });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || 'Chat generation failed' });
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Chat generation failed' })}\n\n`);
+      return res.end();
+    }
+  }
+});
+
+// Modular Gemini Chat Request Handler using @google/genai
+export async function handleChatRequest(userPrompt: string, customModel: string = 'gemini-2.5-flash') {
+  try {
+    const response = await ai.models.generateContent({
+      model: customModel,
+      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      },
+    });
+
+    return { success: true, text: response.text, reply: response.text };
+  } catch (error: any) {
+    console.error('Gemini API Error:', error);
+    return { success: false, error: error?.message || 'Chat generation failed' };
+  }
+}
+
+app.post('/api/gemini/generate', async (req, res) => {
+  const { prompt, message, model = 'gemini-2.5-flash' } = req.body;
+  const userPrompt = prompt || message;
+  if (!userPrompt) {
+    return res.status(400).json({ error: 'Prompt or message is required' });
+  }
+
+  const result = await handleChatRequest(userPrompt, model);
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+  return res.json({
+    ...result,
+    complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+  });
+});
+
+// ==========================================
+// CODECRAFT API INTEGRATION (https://codecraftapi.com/v1)
+// ==========================================
+const CODECRAFT_BASE_URL = process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || 'https://codecraftapi.com/v1';
+
+app.get('/api/codecraft/status', (_req, res) => {
+  return res.json({
+    status: 'online',
+    baseUrl: CODECRAFT_BASE_URL,
+    isKeyConfigured: Boolean(process.env.CODECRAFT_API_KEY),
+  });
+});
+
+app.all('/api/codecraft/*', async (req, res) => {
+  try {
+    const subPath = (req.params as any)[0] || '';
+    const targetUrl = `${CODECRAFT_BASE_URL.replace(/\/+$/, '')}/${subPath}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+    const apiKey = process.env.CODECRAFT_API_KEY || '';
+
+    const headers: Record<string, string> = {
+      'Content-Type': req.headers['content-type'] || 'application/json',
+      'Accept': req.headers['accept'] || 'application/json',
+    };
+
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+      headers['x-api-key'] = apiKey;
+    }
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers,
+    };
+
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body && Object.keys(req.body).length > 0) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(targetUrl, fetchOptions);
+    const contentType = response.headers.get('content-type') || 'application/json';
+
+    res.status(response.status);
+    res.setHeader('Content-Type', contentType);
+
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      return res.json(data);
+    } else {
+      const text = await response.text();
+      return res.send(text);
+    }
+  } catch (err: any) {
+    console.error('CodeCraft API proxy error:', err);
+    if (!res.headersSent) {
+      return res.status(502).json({
+        error: 'Failed to communicate with CodeCraft API',
+        details: err?.message || 'Unknown error',
+        targetBaseUrl: CODECRAFT_BASE_URL,
+      });
+    }
   }
 });
 
@@ -709,21 +892,25 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ''
     for await (const chunk of responseStream) {
       const chunkText = chunk.text || '';
       fullAccumulated += chunkText;
-      res.write(`data: ${JSON.stringify({ type: 'token', text: chunkText })}\n\n`);
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'token', text: chunkText })}\n\n`);
+      }
     }
 
     // Extract sections for structured UI consumption
     const summaryMatch = fullAccumulated.match(/### 1\. Direct Summary\s*([\s\S]*?)(?=### 2|$)/i);
     const directSummary = summaryMatch ? summaryMatch[1].trim() : fullAccumulated.slice(0, 180) + '...';
 
-    res.write(`data: ${JSON.stringify({
-      type: 'done',
-      fullText: fullAccumulated,
-      title: rawText.slice(0, 42) || 'Gemini Intelligence Report',
-      executiveSummary: directSummary,
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    })}\n\n`);
-    res.end();
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({
+        type: 'done',
+        fullText: fullAccumulated,
+        title: rawText.slice(0, 42) || 'Gemini Intelligence Report',
+        executiveSummary: directSummary,
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      })}\n\n`);
+      res.end();
+    }
 
     // Log activity in background
     try {
@@ -738,8 +925,12 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ''
     } catch (e) {}
   } catch (err: any) {
     console.error('Streaming error in /api/transform/stream:', err);
-    res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream generation failed' })}\n\n`);
-    res.end();
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || 'Stream generation failed' });
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream generation failed' })}\n\n`);
+      return res.end();
+    }
   }
 });
 
@@ -3435,6 +3626,17 @@ app.post('/api/flow/projects/:id/nodes/:nodeId/comments', (req, res) => {
 // Setup Vite middleware in dev or static files in production
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
+
+  // Global Error Handler Middleware guarding res.headersSent
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    console.error('Unhandled server error:', err);
+    return res.status(err?.status || 500).json({
+      error: err?.message || 'Internal server error',
+    });
+  });
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
