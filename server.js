@@ -1,5 +1,6 @@
 // server.ts
 import express from "express";
+import fs3 from "fs";
 import dotenv3 from "dotenv";
 import path3 from "path";
 import { fileURLToPath } from "url";
@@ -2160,6 +2161,157 @@ async function generate_video(prompt, out_path = "output.mp4") {
   }
 }
 
+// server/modePrompts.ts
+var MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI (pulsenoteai.in) is an assistive documentation tool. All AI-generated clinical notes, legal summaries, property inspection logs, and technical decisions must be verified by certified professionals prior to clinical or commercial execution.*`;
+var MODE_SYSTEM_PROMPTS = {
+  medical: `You are the specialized Clinical Documentation Specialist and Medical Intelligence Engine for Pulse Note AI (pulsenoteai.in).
+Your mandate: Transform unstructured patient narratives, doctor-patient dialogues, and clinical dictations into pristine, standard SOAP documentation.
+
+Structure your response strictly following the SOAP framework:
+### [S] Subjective
+- **Chief Complaint (CC):** Primary reason for visit with duration.
+- **History of Present Illness (HPI):** Onset, location, duration, character, aggravating/alleviating factors, radiation, temporal pattern, severity (OLDCARTS).
+- **Review of Systems (ROS):** Pertinent positives and negatives.
+- **Current Medications & Allergies:** Active prescriptions, dosages, OTC drugs, and known allergies.
+
+### [O] Objective
+- **Vital Signs:** BP, HR, RR, Temp, SpO2, BMI. Explicitly flag abnormal values (e.g., [ABNORMAL: BP > 130/80]).
+- **Physical Examination:** System-by-system findings (HEENT, Cardiovascular, Pulmonary, Abdomen, Musculoskeletal, Neurological, Skin).
+- **Point-of-Care & Laboratory Diagnostics:** POC blood glucose, HbA1c, rapid swabs, imaging or ECG results.
+
+### [A] Assessment
+- **Primary Diagnosis:** Formulate primary clinical impression with corresponding standard ICD-10 code (e.g., Type 2 Diabetes Mellitus [ICD-10: E11.9]).
+- **Differential Diagnoses:** Secondary considerations with clinical rationale.
+- **Clinical Reasoning:** Pathophysiologic synthesis explaining why the diagnosis is supported by findings.
+
+### [P] Plan
+- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency.
+- **Diagnostic Workup:** Ordered lab panels, imaging, or specialized screenings.
+- **Patient Education & Precautions:** Warning signs, red flags, lifestyle/dietary guidance.
+- **Follow-Up:** Concrete return timeframe (e.g., 2 weeks, 3 months, or PRN).
+
+Formatting Rules:
+- Enforce clinical accuracy, objective tone, and professional brevity.
+- Redact or generalize personal identifiers to maintain HIPAA privacy.
+- Conclude with the mandatory notice:
+${MANDATORY_LEGAL_NOTICE}`,
+  executive: `You are the Executive Strategy Advisor and C-Suite Intelligence Engine for Pulse Note AI (pulsenoteai.in).
+Your mandate: Synthesize high-stakes board deliberations, leadership syncs, and financial discussions into board-ready Executive Decision Memos and Risk Registers.
+
+Structure your response with high clarity:
+### 1. Executive Summary
+- 1\u20132 direct sentences detailing the core strategic resolution, capital implications, and bottom-line impact.
+
+### 2. Strategic Decisions & Approved Mandates
+- Bulleted register of concrete decisions made, funding allocated, and policy changes approved.
+
+### 3. Risk & Vulnerability Matrix
+- **High Impact / High Likelihood Risks:** Operational, market, and compliance exposures.
+- **Mitigation Protocols:** Immediate controls to de-risk each vulnerability.
+
+### 4. Financial & Margin Impact Analysis
+- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations.
+
+### 5. Action Register & Deliverables
+- Numbered table or list with: [Item] | [Accountable Executive Owner] | [Deadline] | [KPI / Success Metric].
+
+Formatting Rules:
+- Cut through corporate jargon; deliver sharp, decisive, high-signal intelligence.
+- Never waffle or output conversational filler.
+- Conclude with the mandatory notice:
+${MANDATORY_LEGAL_NOTICE}`,
+  software: `You are the Principal Software Architect and Engineering Operations Engine for Pulse Note AI (pulsenoteai.in).
+Your mandate: Convert rapid engineering standups, architectural debates, and incident reviews into standard Architecture Decision Records (ADRs) and Agile Sprint tickets.
+
+Structure your response technically:
+### 1. Context & Problem Statement
+- Technical requirement, business driver, and scalability/latency bottlenecks.
+
+### 2. Architecture Decision Record (ADR)
+- **Status:** Proposed / Accepted / Superseded
+- **Decision:** Stack selection, protocol choices (e.g., WebSockets vs HTTP polling), distributed system topology.
+- **Consequences & Trade-Offs:** Positive outcomes and accepted compromises.
+
+### 3. Technical Specifications & Interface Contracts
+- Data contracts (JSON schemas / TypeScript interfaces / API endpoints).
+- Concurrency, memory footprint, cache invalidation, and SLA targets.
+
+### 4. Blockers & Dependency Mitigations
+- Active architectural, security, or infra blockers with engineering solutions.
+
+### 5. Sprint Epics & Jira Stories
+- Formatted backlog items: Title, Description, Acceptance Criteria (Gherkin format Given/When/Then), and Story Points estimate.
+
+Formatting Rules:
+- Use clean Markdown and TypeScript code blocks where applicable.
+- Avoid vague advice; provide production-ready system design decisions.
+- Conclude with the mandatory notice:
+${MANDATORY_LEGAL_NOTICE}`,
+  real_estate: `You are the Senior Property Condition Assessor and Commercial Due Diligence Engine for Pulse Note AI (pulsenoteai.in).
+Your mandate: Transform contractor voice walkthroughs, structural observations, and property inspections into formal Property Condition Reports (PCR).
+
+Structure your response systematically:
+### 1. Asset & Elevation Overview
+- Property identifier, elevation/building quadrant, inspection date, weather, and structural baseline.
+
+### 2. Defect Register & Severity Grading
+Group observations by system: Foundation/Envelope, Roof/Drainage, Mechanical/HVAC, Electrical, Plumbing/Life-Safety.
+For each defect include:
+- **Severity Level:** [High / Immediate Life-Safety] | [Medium / Deferred Maintenance] | [Low / Aesthetic]
+- **Specific Observation:** Quantitative measurements (crack width in mm, square footage of membrane ponding).
+- **Root Cause:** Environmental or construction mechanism.
+- **Recommended Remediation:** Specific engineering or trade contractor scope of work.
+
+### 3. Capital Expenditure (CapEx) Scaffolding
+- Urgent repairs estimated cost range.
+- Deferred 1\u20133 year maintenance reserve budget.
+
+### 4. Lender & Insurance Readiness Checklist
+- Items requiring sign-off by licensed professional engineers or certified trades before underwriting.
+
+Formatting Rules:
+- Quantitative, precise, inspection-standard nomenclature.
+- Conclude with the mandatory notice:
+${MANDATORY_LEGAL_NOTICE}`,
+  general: `You are Pulse Note AI (pulsenoteai.in), an advanced executive and multimodal intelligence engine.
+Your mandate: Deliver authoritative, error-free, deeply structured solutions and research for any complex inquiry.
+
+Structure your response cleanly:
+### 1. Direct Executive Summary
+- 1\u20132 crisp sentences giving the core answer and conclusion upfront.
+
+### 2. Structured In-Depth Analysis
+- Core findings, data points, and technical tradeoffs organized with bold sub-headers and bullet points.
+
+### 3. Actionable Strategic Roadmap
+- Concrete, numbered steps for immediate implementation.
+
+### 4. Web-Grounded Insights & Industry Best Practices
+- Verification standards, real-world benchmarks, and critical caveats.
+
+Formatting Rules:
+- Maintain an authoritative, objective tone without unnecessary chatbot conversational pleasantries.
+- Conclude with the mandatory notice:
+${MANDATORY_LEGAL_NOTICE}`
+};
+function getSystemPromptForMode(mode) {
+  if (!mode) return MODE_SYSTEM_PROMPTS.general;
+  const normalized = mode.toLowerCase().trim();
+  if (normalized.includes("med") || normalized.includes("clinic") || normalized.includes("soap")) {
+    return MODE_SYSTEM_PROMPTS.medical;
+  }
+  if (normalized.includes("exec") || normalized.includes("memo") || normalized.includes("c-suite") || normalized.includes("board")) {
+    return MODE_SYSTEM_PROMPTS.executive;
+  }
+  if (normalized.includes("soft") || normalized.includes("tech") || normalized.includes("code") || normalized.includes("dev") || normalized.includes("sprint") || normalized.includes("arch")) {
+    return MODE_SYSTEM_PROMPTS.software;
+  }
+  if (normalized.includes("real") || normalized.includes("estate") || normalized.includes("inspect") || normalized.includes("prop")) {
+    return MODE_SYSTEM_PROMPTS.real_estate;
+  }
+  return MODE_SYSTEM_PROMPTS.general;
+}
+
 // server.ts
 dotenv3.config();
 dotenv3.config({ path: ".env.local" });
@@ -2249,7 +2401,7 @@ var ai2 = {
     })
   }
 };
-var MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
+var MANDATORY_LEGAL_NOTICE2 = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
 var UPGRADE_BLOCK_VERBATIM = `\u{1F6D1} **Daily Free Limit Reached (3/3 Prompts Used)**
 Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
 * **Pro Monthly:** \u20B9299/month (~$3.99)
@@ -2281,7 +2433,7 @@ In addition to text processing, the app and website (pulsenoteai.in) support med
 ### 5. Security & Mandatory Legal Disclaimer
 - **Strict Credential Privacy:** Never output or expose admin emails (jayeshofficial@gmail.com, contact@pulsenoteai.in), backend keys, or direct admin portal links.
 - **Mandatory Disclaimer:** Conclude every text output with this exact notice:
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
 var SYSTEM_PROMPT = `You are a helpful assistant that can CREATE images. When a user asks you to
 create, generate, draw, or design an image, produce the image directly. Do not
 redirect the user to external websites for images you can generate.
@@ -2380,7 +2532,7 @@ app.get("/api/media/status/:id", (req, res) => {
     totalDurationSeconds: job.totalDurationSeconds,
     result: job.result ? scrubAdminDetails(job.result) : void 0,
     error: job.error,
-    complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
   });
 });
 app.get("/api/video/proxy", async (req, res) => {
@@ -2478,6 +2630,10 @@ app.post("/api/chat", async (req, res) => {
       message,
       messages = [],
       role = "general",
+      mode,
+      industryMode,
+      industry,
+      lens,
       taskComplexity = "general",
       model,
       useMaps = false,
@@ -2494,6 +2650,13 @@ app.post("/api/chat", async (req, res) => {
     }
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "Message or messages array is required for chat." });
+    }
+    messages = messages.filter((m) => m && (m.content || m.text)).map((m) => ({
+      role: m.role === "model" || m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+      content: String(m.content || m.text || "").slice(0, 3e4)
+    }));
+    if (messages.length === 0) {
+      return res.status(400).json({ error: "Valid non-empty message content is required." });
     }
     const cleanEmail = (userEmail || "").trim().toLowerCase();
     const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
@@ -2523,15 +2686,8 @@ app.post("/api/chat", async (req, res) => {
         settlementVpa: "wagh.jayesh@oksbi"
       });
     }
-    const roleInstructions = {
-      general: "You are PulseNote AI, a high-performance executive intelligence and multi-modal assistant styled like Gemini. Provide direct, structured, beautifully formatted markdown answers.",
-      executive: "You are the Executive Strategy Advisor. Focus on business decisions, OKRs, risk mitigation, financial ROI, and clear executive memos.",
-      code_architect: "You are the Principal Software Architect. Focus on clean code, optimal algorithms, system architecture diagrams, and production-grade TypeScript/Node/React.",
-      deep_research: "You are the Lead Research Analyst. Provide exhaustive, evidence-backed synthesis, citations, comparative matrices, and rigorous analysis.",
-      creative_producer: "You are the Creative Media Producer. Specialize in crafting evocative visual prompts, cinematic video storyboards for Veo, and music themes for Lyria.",
-      medical_expert: "You are the Clinical Documentation Specialist. Formulate structured clinical notes, SOAP formats, and medical terminology accuracy."
-    };
-    const systemInstruction = roleInstructions[role] || roleInstructions.general;
+    const requestedMode = mode || industryMode || industry || lens || role || "general";
+    const systemInstruction = getSystemPromptForMode(requestedMode);
     const lastUserMsg = messages[messages.length - 1]?.content || messages[messages.length - 1]?.text || "";
     const isSearchGroundingRequested = Boolean(searchGrounding || useSearch || isDeepResearch || /search|grounding|latest info|current date|real-time/i.test(lastUserMsg));
     const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
@@ -2576,7 +2732,7 @@ app.post("/api/chat", async (req, res) => {
               reply: replyText2,
               modelUsed: codecraftModel,
               groundingChunks: [],
-              complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+              complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
             });
           }
         }
@@ -2618,7 +2774,7 @@ app.post("/api/chat", async (req, res) => {
             fullText: fullAccumulated,
             reply: fullAccumulated,
             modelUsed: modelName,
-            complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+            complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
           })}
 
 `);
@@ -2640,7 +2796,7 @@ app.post("/api/chat", async (req, res) => {
                 res.write(`data: ${JSON.stringify({ type: "token", text: orResult.reply })}
 
 `);
-                res.write(`data: ${JSON.stringify({ type: "done", fullText: orResult.reply, reply: orResult.reply, modelUsed: "meta-llama/llama-3.1-8b-instruct:free", complianceDisclaimer: MANDATORY_LEGAL_NOTICE })}
+                res.write(`data: ${JSON.stringify({ type: "done", fullText: orResult.reply, reply: orResult.reply, modelUsed: "meta-llama/llama-3.1-8b-instruct:free", complianceDisclaimer: MANDATORY_LEGAL_NOTICE2 })}
 
 `);
                 return res.end();
@@ -2714,7 +2870,7 @@ app.post("/api/chat", async (req, res) => {
         reply: replyText,
         modelUsed: modelName,
         groundingChunks,
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       });
     }
   } catch (err) {
@@ -2824,22 +2980,24 @@ app.post("/chat", async (req, res) => {
     }
   }
   try {
+    const requestedMode = req.body.mode || req.body.industryMode || req.body.industry || req.body.role || "general";
+    const activeInstruction = getSystemPromptForMode(requestedMode);
     let replyText = "";
     if (process.env.GEMINI_API_KEY) {
       try {
         const chat = await googleAi2.models.generateContent({
-          model: "gemini-2.0-flash",
+          model: "gemini-3.8-flash",
           contents: userMessage,
-          config: { systemInstruction: SYSTEM_PROMPT }
+          config: { systemInstruction: activeInstruction }
         });
         replyText = chat.text || "";
       } catch (gemErr) {
-        console.warn("Gemini 2.0 generateContent notice, trying flash fallback:", gemErr);
+        console.warn("Gemini generateContent notice, trying flash-lite fallback:", gemErr);
         try {
           const fbChat = await googleAi2.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-3.1-flash-lite",
             contents: userMessage,
-            config: { systemInstruction: SYSTEM_PROMPT }
+            config: { systemInstruction: activeInstruction }
           });
           replyText = fbChat.text || "";
         } catch (fbErr) {
@@ -2850,14 +3008,14 @@ app.post("/chat", async (req, res) => {
     if (!replyText) {
       const orRes = await callOpenRouterChat({
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: activeInstruction },
           { role: "user", content: userMessage }
         ],
         model: "openai/gpt-4o-mini"
       });
       replyText = orRes.reply || "Here is your response.";
     }
-    return res.json({ type: "text", text: replyText });
+    return res.json({ type: "text", text: replyText, mode: requestedMode });
   } catch (err) {
     console.error("/chat text generation error:", err);
     return res.status(500).json({ type: "text", text: "Failed to generate response. Please try again." });
@@ -2883,20 +3041,52 @@ app.post("/generate_video", async (req, res) => {
 });
 app.post("/api/generate-video", async (req, res) => {
   try {
-    const { prompt, out_path = "output.mp4" } = req.body;
+    const { prompt, out_path } = req.body;
     if (!prompt) {
-      return res.status(400).json({
-        status: "rejected",
-        message: "Please describe the scene in more detail."
-      });
+      return res.status(400).json({ error: "Prompt is required" });
     }
-    const result = await generate_video(prompt, out_path);
-    return res.json(result);
+    const precheckErr = precheck_prompt(prompt);
+    if (precheckErr) {
+      return res.status(400).json({ error: precheckErr });
+    }
+    const videoOutFile = out_path || path3.join("/tmp", `video-${Date.now()}.mp4`);
+    const result = await generate_video(prompt, videoOutFile);
+    if (result.status === "blocked" || result.status === "rejected") {
+      return res.status(500).json({ error: result.message || "Video generation was blocked by the safety filter." });
+    }
+    if (req.query.format === "json") {
+      return res.json(result);
+    }
+    const resolvedPath = path3.resolve(process.cwd(), result.file || videoOutFile);
+    if (fs3.existsSync(resolvedPath) && fs3.statSync(resolvedPath).size > 0) {
+      res.setHeader("Content-Type", "video/mp4");
+      return res.download(resolvedPath);
+    }
+    const publicPath = path3.resolve(process.cwd(), "public", path3.basename(result.file || videoOutFile));
+    if (fs3.existsSync(publicPath) && fs3.statSync(publicPath).size > 0) {
+      res.setHeader("Content-Type", "video/mp4");
+      return res.download(publicPath);
+    }
+    if (result.videoUrl) {
+      if (result.videoUrl.startsWith("http")) {
+        const streamRes = await fetch(result.videoUrl);
+        if (streamRes.ok) {
+          res.setHeader("Content-Type", "video/mp4");
+          const arrayBuf = await streamRes.arrayBuffer();
+          return res.send(Buffer.from(arrayBuf));
+        }
+      } else {
+        const localStatic = path3.resolve(process.cwd(), result.videoUrl.replace(/^\//, "public/"));
+        if (fs3.existsSync(localStatic)) {
+          res.setHeader("Content-Type", "video/mp4");
+          return res.download(localStatic);
+        }
+      }
+    }
+    return res.status(500).json({ error: "No video returned" });
   } catch (err) {
-    return res.status(500).json({
-      status: "blocked",
-      message: "This prompt was blocked by the safety filter. Please try a different scene."
-    });
+    console.error("/api/generate-video error:", err);
+    return res.status(500).json({ error: err.message || "Video generation failed" });
   }
 });
 app.post("/api/video/precheck", (req, res) => {
@@ -2908,9 +3098,26 @@ app.post("/api/video/precheck", (req, res) => {
     prompt
   });
 });
+var OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+async function askOpenRouter(messages, model = "openai/gpt-4o-mini") {
+  const apiKey = OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ model, messages })
+  });
+  if (!response.ok) {
+    throw new Error(`OpenRouter error ${response.status}: ${await response.text()}`);
+  }
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
 async function callOpenRouterChat({
   messages,
-  model = "meta-llama/llama-3.1-8b-instruct:free",
+  model = "openai/gpt-4o-mini",
   temperature = 0.7,
   max_tokens = 2048
 }) {
@@ -2953,7 +3160,7 @@ async function callOpenRouterChat({
 }
 app.post("/api/openrouter/chat", async (req, res) => {
   try {
-    const { message, messages, model = "meta-llama/llama-3.1-8b-instruct:free", temperature, max_tokens } = req.body;
+    const { message, messages, model = "openai/gpt-4o-mini", temperature, max_tokens } = req.body;
     const formattedMessages = messages || [{ role: "user", content: message || "" }];
     const result = await callOpenRouterChat({
       messages: formattedMessages,
@@ -2965,12 +3172,25 @@ app.post("/api/openrouter/chat", async (req, res) => {
       reply: result.reply,
       text: result.text,
       modelUsed: result.modelUsed,
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.error("OpenRouter endpoint error:", err);
     return res.status(500).json({ error: err.message || "OpenRouter chat completion failed" });
   }
+});
+app.get("/api/openrouter/key", (_req, res) => {
+  const key = process.env.OPENROUTER_API_KEY || "";
+  return res.json({
+    configured: Boolean(key),
+    apiKey: key
+  });
+});
+app.get("/openrouter", (_req, res) => {
+  res.sendFile(path3.join(__dirname, "public", "openrouter.html"));
+});
+app.get(["/generate-video", "/video"], (_req, res) => {
+  res.sendFile(path3.join(__dirname, "public", "generate-video.html"));
 });
 async function handleChatRequest(userPrompt, customModel = "gemini-2.5-flash") {
   try {
@@ -3000,7 +3220,7 @@ app.post("/api/gemini/generate", async (req, res) => {
   }
   return res.json({
     ...result,
-    complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
   });
 });
 async function summarizeText(prompt, model = "gemini-2.5-flash") {
@@ -3069,7 +3289,7 @@ var handleSummarizeRoute = async (req, res) => {
     const result = await summarizeText(inputPrompt, model);
     return res.json({
       ...result,
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.error("Summarize error:", err);
@@ -3127,7 +3347,7 @@ app.post("/api/gemini/image/generate", async (req, res) => {
         mimeType: "image/svg+xml",
         description: textDescription || prompt,
         modelUsed: model || "gemini-3.1-flash-image-preview",
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       });
     }
     return res.json({
@@ -3137,7 +3357,7 @@ app.post("/api/gemini/image/generate", async (req, res) => {
       mimeType,
       description: textDescription,
       modelUsed: model || "gemini-3.1-flash-image-preview",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.error("Image generation error:", err);
@@ -3150,7 +3370,7 @@ app.post("/api/gemini/image/generate", async (req, res) => {
       mimeType: "image/svg+xml",
       description: prompt,
       modelUsed: "gemini-3.1-flash-image-preview (fallback)",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   }
 });
@@ -3193,7 +3413,7 @@ app.post("/api/gemini/image/edit", async (req, res) => {
         mimeType,
         description: textDescription || `Image edited: ${prompt}`,
         modelUsed: model || "gemini-3.1-flash-image-preview",
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       });
     }
     return res.json({
@@ -3203,7 +3423,7 @@ app.post("/api/gemini/image/edit", async (req, res) => {
       mimeType: outMime,
       description: textDescription,
       modelUsed: model || "gemini-3.1-flash-image-preview",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.error("Image edit error:", err);
@@ -3233,7 +3453,7 @@ app.post("/api/gemini/video/generate", async (req, res) => {
       aspectRatio,
       status: "PROCESSING",
       message: "Veo video generation initialized. Use operationName to poll status.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.warn("Veo generateVideos API notice:", err?.message);
@@ -3246,7 +3466,7 @@ app.post("/api/gemini/video/generate", async (req, res) => {
       aspectRatio,
       status: "PROCESSING",
       message: "Veo video rendering queued.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   }
 });
@@ -3278,7 +3498,7 @@ app.post("/api/gemini/video/animate", async (req, res) => {
       aspectRatio,
       status: "PROCESSING",
       message: "Photo-to-video animation initiated with Veo.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.warn("Veo animate photo API notice:", err?.message);
@@ -3291,7 +3511,7 @@ app.post("/api/gemini/video/animate", async (req, res) => {
       aspectRatio,
       status: "PROCESSING",
       message: "Photo-to-video animation rendering queued.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   }
 });
@@ -3436,7 +3656,7 @@ app.post("/api/transform/stream", async (req, res) => {
         type: "limit_reached",
         isLimitReached: true,
         upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       })}
 
 `);
@@ -3487,7 +3707,7 @@ app.post("/api/transform/stream", async (req, res) => {
           previewPosterUrl,
           modelPromptVeoSora: cleanPrompt || "Animate photo with cinematic motion"
         },
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       })}
 
 `);
@@ -3522,7 +3742,7 @@ app.post("/api/transform/stream", async (req, res) => {
           previewUrl: activePreviewUrl,
           results: liveResults
         },
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       })}
 
 `);
@@ -3543,7 +3763,7 @@ Provide a comprehensive, high-clarity response structured strictly as follows:
 [Numbered, practical execution steps and recommendations]
 
 Conclude with the mandatory disclaimer:
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     const attachmentContext = attachedFile ? `
 [Attached Asset Context]: User attached ${attachedFile.category} file named "${attachedFile.name}" (Type: ${attachedFile.type}, Size: ${(attachedFile.size / 1024).toFixed(1)} KB).
 ` : "";
@@ -3605,7 +3825,7 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ""
         fullText: fullAccumulated,
         title: rawText.slice(0, 42) || "Gemini Intelligence Report",
         executiveSummary: directSummary,
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       })}
 
 `);
@@ -3684,7 +3904,7 @@ app.post("/api/transform", async (req, res) => {
           "Free tier allows 3 prompt transformations per 24 hours.",
           "Pro tier provides unlimited generation, priority queue, and direct export."
         ],
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       });
     }
     const trimmedInput = rawText.trim();
@@ -3744,7 +3964,7 @@ app.post("/api/transform", async (req, res) => {
           actionItems: [],
           detectedEntities: [],
           keyTakeaways: [],
-          complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+          complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
         });
       } catch (err) {
         return res.status(503).json({
@@ -3797,7 +4017,7 @@ app.post("/api/transform", async (req, res) => {
           actionItems: [],
           detectedEntities: [],
           keyTakeaways: [],
-          complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+          complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
         });
       } catch (err) {
         return res.status(503).json({
@@ -4131,12 +4351,12 @@ Return a valid JSON object matching this schema:
         previewUrl: attachedFile.previewUrl
       };
     }
-    parsedData.complianceDisclaimer = MANDATORY_LEGAL_NOTICE;
+    parsedData.complianceDisclaimer = MANDATORY_LEGAL_NOTICE2;
     if (parsedData.markdownReport && !parsedData.markdownReport.includes("[Legal & Professional Notice]")) {
       parsedData.markdownReport = `${parsedData.markdownReport.trim()}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     }
     const sanitizedOutput = scrubAdminDetails(parsedData);
     return res.json(sanitizedOutput);
@@ -4243,7 +4463,7 @@ ${sections2[1].content}
 ${actionItems2.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Owner: ${a.owner} | Due: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       mediaType: "image",
       isVague: false,
@@ -4277,7 +4497,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Optimized text-to-image prompt synthesized with optical camera and lighting tags.",
         "Structured parameters formatted for instant generative rendering."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   if (isVideoRequest) {
@@ -4383,7 +4603,7 @@ ${sections2[0].content}
 ${actionItems2.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Owner: ${a.owner} | Due: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       mediaType: "video",
       isVague: false,
@@ -4420,7 +4640,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Complete 3-shot storyboard breakdown with camera movement and duration.",
         "Direct prompt formatted for state-of-the-art video models."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   const isVague = wordCount < 10 || /^(stuff broke|need to fix|fix things|test|hello|broken|buggy|something happened)\.?$/i.test(clean);
@@ -4499,7 +4719,7 @@ ${sections2[1].content}
 ${actionItems2.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Owner: ${a.owner} | Due: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       mediaType: "text",
       isVague: true,
@@ -4526,7 +4746,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Input provided is concise; system generated a working draft to prevent progress blocking.",
         "Clarification questions formulated to enable targeted precision on next iteration."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   const deFillered = clean.replace(/\b(uh|um|like|you know|basically|so yeah|sort of|kinda|i mean|honestly)\b/gi, "").replace(/\s{2,}/g, " ").trim();
@@ -4648,7 +4868,7 @@ ${sections2[2].content}
 ${actionItems.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Owner: ${a.owner} | Due: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       isVague: false,
       clarificationRequest: "",
@@ -4668,7 +4888,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Pharmacotherapy regimen and step-up management recorded.",
         "Follow-up timeframe and emergency precautions established."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   if (targetIndustry === "real_estate") {
@@ -4748,7 +4968,7 @@ ${sections2[0].content}
 ${actionItems.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Assigned: ${a.owner} | Target: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       isVague: false,
       clarificationRequest: "",
@@ -4768,7 +4988,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Severity levels tagged for immediate remediation prioritization.",
         "Licensed specialist contractor sign-offs scheduled."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   if (targetIndustry === "software") {
@@ -4845,7 +5065,7 @@ ${sections2[0].content}
 ${actionItems.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Assignee: @${a.owner.toLowerCase().replace(/\s+/g, "")} | Target: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       isVague: false,
       clarificationRequest: "",
@@ -4865,7 +5085,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Blockers flagged with clear unblocking owners.",
         "Hotfix PRs and migrations assigned with strict delivery targets."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   if (targetIndustry === "general") {
@@ -4941,7 +5161,7 @@ ${sections2[2].content}
 ${actionItems.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Owner: ${a.owner} | Target: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
     return {
       mediaType: "text",
       isVague: false,
@@ -4962,7 +5182,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
         "Immediate direct action isolated and prioritized at the top.",
         "Numbered execution steps mapped to deliverables and timelines."
       ],
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     };
   }
   const executiveSummary = `Executive strategic resolution established with authorized operational directives, resource realignment, and phased risk oversight milestones.`;
@@ -5038,7 +5258,7 @@ ${actionableStrategicPlan}
 ${actionItems.map((a, idx) => `${idx + 1}. [ ] **${a.task}** | Owner: ${a.owner} | Target: ${a.deadline}`).join("\n")}
 
 ---
-${MANDATORY_LEGAL_NOTICE}`;
+${MANDATORY_LEGAL_NOTICE2}`;
   return {
     isVague: false,
     clarificationRequest: "",
@@ -5058,7 +5278,7 @@ ${MANDATORY_LEGAL_NOTICE}`;
       "Headcount and capital expenditure priorities established.",
       "Deliverables and risk mitigations tied directly to named owners."
     ],
-    complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
   };
 }
 app.get("/api/payment/config", (_req, res) => {
@@ -5981,6 +6201,7 @@ export {
   IMAGE_KEYWORDS,
   SYSTEM_PROMPT,
   VIDEO_KEYWORDS,
+  askOpenRouter,
   callOpenRouterChat,
   generate_video,
   googleAi2 as googleAi,
