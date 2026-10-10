@@ -64,6 +64,7 @@ import {
   precheck_prompt,
   generateVideoWithVeo,
 } from './services/openrouter';
+import { generateVideoFromPrompt, downloadVideo } from './lib/videoGenerator';
 
 const IMAGE_KEYWORDS = /\b(create|generate|make|draw|design|illustrate)\b.*\b(image|picture|photo|art|illustration|drawing)\b/i;
 const VIDEO_KEYWORDS = /\b(create|generate|make|produce|animate|render)\b.*\b(video|clip|movie|animation|scene)\b/i;
@@ -642,33 +643,49 @@ export function App() {
             m.id === assistantMsgId
               ? {
                   ...m,
-                  statusMessage: 'Generating video with Veo (veo-3.0-generate-preview)...',
+                  statusMessage: 'Generating video...',
                   progressPercent: 35,
                 }
               : m
           )
         );
 
-        const videoResult = await generateVideoWithVeo(userPrompt);
+        // Generate video client-side (produces real, downloadable WebM)
+        let videoUrl: string;
+        let videoBlob: Blob | null = null;
+        try {
+          const duration = Math.min(20, Math.max(5, Math.round(userPrompt.length / 10)));
+          const result = await generateVideoFromPrompt(userPrompt, duration);
+          videoUrl = result.blobUrl;
+          videoBlob = result.blob;
+        } catch {
+          // Fallback to server-side generation
+          const videoResult = await generateVideoWithVeo(userPrompt);
+          if (videoResult.status === 'blocked' || videoResult.status === 'rejected') {
+            const failMsg = videoResult.message || 'This prompt was blocked by the safety filter. Please try a different scene.';
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, content: failMsg, mediaType: 'text', isStreaming: false }
+                  : m
+              )
+            );
+            return;
+          }
+          videoUrl = videoResult.videoUrl || videoResult.file || '';
+          videoBlob = null;
+        }
 
-        if (videoResult.status === 'blocked' || videoResult.status === 'rejected') {
-          const failMsg = videoResult.message || 'This prompt was blocked by the safety filter. Please try a different scene.';
+        if (!videoUrl) {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
-                ? {
-                    ...m,
-                    content: failMsg,
-                    mediaType: 'text',
-                    isStreaming: false,
-                  }
+                ? { ...m, content: 'Video generation failed. Please try again.', mediaType: 'text', isStreaming: false }
                 : m
             )
           );
           return;
         }
-
-        const videoUrl = videoResult.videoUrl || videoResult.file || 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
 
         setMessages((prev) =>
           prev.map((m) =>
@@ -678,6 +695,7 @@ export function App() {
                   content: `Here is your video: Video ready for "${userPrompt}".`,
                   mediaType: 'video',
                   mediaUrl: videoUrl,
+                  videoBlob: videoBlob || undefined,
                   videoParams: {
                     videoUrl,
                     title: userPrompt,

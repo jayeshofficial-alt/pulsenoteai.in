@@ -66,7 +66,7 @@ export async function generateVideo(
   onProgress?.('Video ready for playback!', 100);
 
   return {
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     prompt,
     status: 'completed',
   };

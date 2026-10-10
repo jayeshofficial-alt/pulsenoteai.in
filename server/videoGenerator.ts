@@ -122,7 +122,7 @@ export async function generate_video(
 
     if (!operation) {
       // Create or copy a fallback high-fidelity sample video for development/testing
-      const sampleUrl = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+      const sampleUrl = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
       return {
         status: 'ok',
         file: out_path,
@@ -180,7 +180,7 @@ export async function generate_video(
 
     const webVideoUrl = fs.existsSync(publicOutPath)
       ? `/${filename}`
-      : downloadUri || 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+      : downloadUri || 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 
     return {
       status: 'ok',
