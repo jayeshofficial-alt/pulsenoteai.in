@@ -89,6 +89,7 @@ For text questions, answer clearly and helpfully.`;
  * Resolves the OpenRouter API key from:
  * 1. import.meta.env.VITE_OPENROUTER_API_KEY
  * 2. localStorage ('pulsenote_openrouter_api_key')
+ * 3. Server endpoint (/api/openrouter/key) — bridged from OPENROUTER_API_KEY env
  */
 export function getOpenRouterApiKey(): string {
   const envKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY;
@@ -104,6 +105,33 @@ export function getOpenRouterApiKey(): string {
   } catch {}
 
   return '';
+}
+
+/** Cached server-bridged key to avoid repeated fetches */
+let _serverKeyCache: string | null = null;
+
+/**
+ * Fetches the OpenRouter key from the server (OPENROUTER_API_KEY env var).
+ * Returns '' if not configured or on any error.
+ */
+export async function getServerOpenRouterKey(): Promise<string> {
+  if (_serverKeyCache) return _serverKeyCache;
+  try {
+    const res = await fetch('/api/openrouter/key');
+    if (!res.ok) return '';
+    const data = await res.json();
+    const key = data?.apiKey || '';
+    if (key && typeof key === 'string' && key.trim()) {
+      _serverKeyCache = key.trim();
+      return _serverKeyCache;
+    }
+  } catch {}
+  return '';
+}
+
+/** Clears the cached server key (used when user saves/removes their own key) */
+export function clearServerKeyCache(): void {
+  _serverKeyCache = null;
 }
 
 /**
@@ -127,7 +155,11 @@ export async function chatCompletion(
     signal?: AbortSignal;
   }
 ): Promise<string> {
-  const key = getOpenRouterApiKey();
+  // Resolve key: client-side first, then bridge from server env
+  let key = getOpenRouterApiKey();
+  if (!key) {
+    key = await getServerOpenRouterKey();
+  }
 
   // Normalize message roles (e.g. Gemini 'model' -> 'assistant')
   const normalizedMessages = messages.map((m) => ({
@@ -137,10 +169,7 @@ export async function chatCompletion(
 
   // No key at all — fail fast with a clear, actionable message
   if (!key) {
-    const hasServerFallback = await fetch('/api/openrouter/key').then(r => r.json()).then(d => Boolean(d?.configured)).catch(() => false);
-    if (!hasServerFallback) {
-      throw new Error('No AI API key configured. Click "API Key" in the header and enter your OpenRouter key, or set OPENROUTER_API_KEY in your deployment environment.');
-    }
+    throw new Error('No AI API key configured. Add OPENROUTER_API_KEY in your deployment secrets, or click "API Key" in the header to enter it.');
   }
 
   // Direct client-side call if key is available
@@ -233,7 +262,10 @@ export async function* streamChatCompletion(
   model: string = 'openai/gpt-4o-mini',
   signal?: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
-  const key = getOpenRouterApiKey();
+  let key = getOpenRouterApiKey();
+  if (!key) {
+    key = await getServerOpenRouterKey();
+  }
 
   const normalizedMessages = messages.map((m) => ({
     role: m.role === 'model' || m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
