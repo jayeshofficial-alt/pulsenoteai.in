@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Video Generator - Veo</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      width: 100%;
+      max-width: 580px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    p.desc {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    form {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    input {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: var(--primary);
+    }
+    button {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    button:hover {
+      background: var(--primary-hover);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    #status {
+      font-size: 14px;
+      min-height: 24px;
+      margin-bottom: 16px;
+      color: #38bdf8;
+      font-weight: 500;
+      word-break: break-word;
+    }
+    .status-error {
+      color: #f87171 !important;
+    }
+    .status-done {
+      color: #4ade80 !important;
+    }
+    .video-wrap {
+      width: 100%;
+      background: #020617;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border: 1px solid var(--border);
+    }
+    video {
+      width: 100%;
+      max-height: 340px;
+      display: block;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>🎬 AI Video Generator</h1>
+    <p class="desc">Enter a detailed prompt to generate an AI video clip with Google Veo.</p>
+
+    <form id="form">
+      <input id="prompt" placeholder="Describe your video" required />
+      <button type="submit" id="submitBtn">Generate</button>
+    </form>
+
+    <p id="status"></p>
+
+    <div class="video-wrap">
+      <video id="player" controls width="480"></video>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = document.getElementById("status");
+      const submitBtn = document.getElementById("submitBtn");
+      const promptInput = document.getElementById("prompt");
+      
+      status.className = "";
+      status.textContent = "Generating... this can take a few minutes.";
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        const res = await fetch("/api/generate-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: promptInput.value }),
+        });
+
+        if (!res.ok) {
+          status.className = "status-error";
+          try {
+            const errData = await res.json();
+            status.textContent = "Error: " + (errData.error || errData.message || "Request failed");
+          } catch {
+            status.textContent = "Error: Request failed with status " + res.status;
+          }
+          if (submitBtn) submitBtn.disabled = false;
+          return;
+        }
+
+        const blob = await res.blob();
+        document.getElementById("player").src = URL.createObjectURL(blob);
+        document.getElementById("player").play().catch(() => {});
+        status.className = "status-done";
+        status.textContent = "Done!";
+      } catch (networkErr) {
+        status.className = "status-error";
+        status.textContent = "Error: " + networkErr.message;
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  </script>
+
+</body>
+</html>

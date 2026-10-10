@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenRouter AI Assistant - Simple Web App</title>
+  <style>
+    :root {
+      --bg-primary: #0f172a;
+      --bg-surface: #1e293b;
+      --bg-card: #283548;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --border: #334155;
+      --user-bg: #1d4ed8;
+      --bot-bg: #1e293b;
+      --error-bg: #7f1d1d;
+      --error-border: #ef4444;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+    .container {
+      width: 100%;
+      max-width: 860px;
+      display: flex;
+      flex-direction: column;
+      height: 94vh;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      background: rgba(30, 41, 59, 0.95);
+    }
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-title h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: #1e3a8a;
+      color: #93c5fd;
+      border: 1px solid #3b82f6;
+      font-weight: 600;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .model-selector {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    select, input[type="text"] {
+      background: var(--bg-card);
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    select:focus, input[type="text"]:focus {
+      border-color: var(--primary);
+    }
+    .btn-clear {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-clear:hover {
+      background: #334155;
+      color: #ffffff;
+    }
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: #0b1120;
+    }
+    .empty-state {
+      margin: auto;
+      text-align: center;
+      color: var(--text-muted);
+      max-width: 440px;
+      line-height: 1.5;
+    }
+    .empty-state h3 {
+      color: #f1f5f9;
+      margin-bottom: 8px;
+      font-size: 1.1rem;
+    }
+    .user-message {
+      align-self: flex-end;
+      background: var(--user-bg);
+      color: #ffffff;
+      padding: 12px 16px;
+      border-radius: 14px 14px 2px 14px;
+      max-width: 80%;
+      word-break: break-word;
+      font-size: 0.95rem;
+      line-height: 1.45;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    }
+    .bot-message {
+      align-self: flex-start;
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      color: #e2e8f0;
+      padding: 12px 16px;
+      border-radius: 14px 14px 14px 2px;
+      max-width: 85%;
+      word-break: break-word;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    }
+    .bot-message p {
+      margin: 0;
+    }
+    .bot-message img {
+      margin-top: 8px;
+      max-width: 100%;
+      border-radius: 8px;
+      display: block;
+    }
+    .error-message {
+      align-self: stretch;
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: #fecaca;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .loading-indicator {
+      align-self: flex-start;
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      padding: 10px 16px;
+      border-radius: 14px;
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--text-muted);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    form.input-area {
+      padding: 14px 20px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    textarea {
+      flex: 1;
+      background: var(--bg-card);
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      resize: none;
+      height: 44px;
+      outline: none;
+      font-family: inherit;
+      line-height: 1.35;
+      transition: border-color 0.15s;
+    }
+    textarea:focus {
+      border-color: var(--primary);
+    }
+    button.send-btn {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 0 18px;
+      height: 44px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button.send-btn:hover {
+      background: var(--primary-hover);
+    }
+    button.send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-title">
+        <h1>OpenRouter Assistant</h1>
+        <span class="badge">OpenRouter API Only</span>
+      </div>
+      <div class="controls">
+        <div class="model-selector">
+          <label for="modelSelect">Model:</label>
+          <select id="modelSelect">
+            <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini (Default)</option>
+            <option value="openai/gpt-4o">openai/gpt-4o</option>
+            <option value="anthropic/claude-3.5-sonnet">anthropic/claude-3.5-sonnet</option>
+            <option value="meta-llama/llama-3.3-70b-instruct">meta-llama/llama-3.3-70b-instruct</option>
+            <option value="deepseek/deepseek-chat">deepseek/deepseek-chat</option>
+            <option value="mistralai/mistral-large-2407">mistralai/mistral-large-2407</option>
+            <option value="google/gemini-2.0-flash-001">google/gemini-2.0-flash-001 (via OpenRouter)</option>
+            <option value="custom">Custom Model ID...</option>
+          </select>
+          <input type="text" id="customModelInput" placeholder="vendor/model-name" style="display: none; width: 170px;">
+        </div>
+        <button id="clearChatBtn" class="btn-clear" type="button" title="Clear conversation history">Clear History</button>
+      </div>
+    </header>
+
+    <div id="chat">
+      <div class="empty-state" id="emptyState">
+        <h3>Direct OpenRouter Web App</h3>
+        <p>All prompts and completions are routed solely through <code>https://openrouter.ai/api/v1/chat/completions</code>. Full conversation history is retained in context.</p>
+      </div>
+    </div>
+
+    <form class="input-area" id="chatForm">
+      <textarea id="promptInput" placeholder="Type a message for OpenRouter..." rows="1" required></textarea>
+      <button class="send-btn" type="submit" id="sendBtn">Send</button>
+    </form>
+  </div>
+
+  <script>
+    // =========================================================================
+    // OPENROUTER API INTEGRATION
+    // - Endpoint: https://openrouter.ai/api/v1/chat/completions
+    // - Read API key from OPENROUTER_API_KEY (never hardcode or display the key)
+    // - Header Authorization: Bearer ${OPENROUTER_API_KEY} and Content-Type: application/json
+    // - Full conversation history in the request so replies have context
+    // - Show clear error messages on failure (display response.status and error body)
+    // =========================================================================
+
+    // Read API key from environment / runtime variable (never hardcoded or displayed)
+    let OPENROUTER_API_KEY =
+      (typeof process !== 'undefined' && process.env?.OPENROUTER_API_KEY) ||
+      window.OPENROUTER_API_KEY ||
+      '';
+
+    // Retrieve server-injected secret if available in backend
+    async function initApiKey() {
+      if (!OPENROUTER_API_KEY) {
+        try {
+          const res = await fetch('/api/openrouter/key');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.apiKey) {
+              OPENROUTER_API_KEY = data.apiKey;
+            }
+          }
+        } catch (e) {
+          // If standalone, key can also be set on window.OPENROUTER_API_KEY
+        }
+      }
+    }
+    initApiKey();
+
+    // Core function matching exact specification:
+    async function askOpenRouter(messages, model = "openai/gpt-4o-mini") {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ model, messages })
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenRouter error ${response.status}: ${await response.text()}`);
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content;
+    }
+
+    // Client-side rendering function matching client.js specification:
+    function renderMessage(data) {
+      const div = document.createElement("div");
+      div.className = "bot-message";
+      div.innerHTML = `<p>${escapeHtml(data.text || '')}</p>`;
+      if (data.type === "image" && data.imageUrl) {
+        div.innerHTML += `<img src="${data.imageUrl}" alt="Generated image" style="max-width:100%;border-radius:8px">`;
+      }
+      document.getElementById("chat").appendChild(div);
+      scrollToBottom();
+    }
+
+    function renderUserMessage(text) {
+      const div = document.createElement("div");
+      div.className = "user-message";
+      div.textContent = text;
+      document.getElementById("chat").appendChild(div);
+      scrollToBottom();
+    }
+
+    function renderErrorMessage(errorText) {
+      const div = document.createElement("div");
+      div.className = "error-message";
+      div.textContent = errorText;
+      document.getElementById("chat").appendChild(div);
+      scrollToBottom();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function scrollToBottom() {
+      const chatEl = document.getElementById("chat");
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    // Full conversation history retained across turns
+    const conversation = [];
+
+    // UI Elements
+    const chatContainer = document.getElementById("chat");
+    const emptyState = document.getElementById("emptyState");
+    const chatForm = document.getElementById("chatForm");
+    const promptInput = document.getElementById("promptInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const modelSelect = document.getElementById("modelSelect");
+    const customModelInput = document.getElementById("customModelInput");
+    const clearChatBtn = document.getElementById("clearChatBtn");
+
+    modelSelect.addEventListener("change", () => {
+      if (modelSelect.value === "custom") {
+        customModelInput.style.display = "inline-block";
+        customModelInput.focus();
+      } else {
+        customModelInput.style.display = "none";
+      }
+    });
+
+    clearChatBtn.addEventListener("click", () => {
+      conversation.length = 0;
+      chatContainer.innerHTML = '';
+      chatContainer.appendChild(emptyState);
+      emptyState.style.display = "block";
+    });
+
+    // Auto-resize input
+    promptInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        chatForm.requestSubmit();
+      }
+    });
+
+    chatForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const prompt = promptInput.value.trim();
+      if (!prompt) return;
+
+      const chosenModel = modelSelect.value === "custom" && customModelInput.value.trim()
+        ? customModelInput.value.trim()
+        : modelSelect.value;
+
+      // Hide empty state
+      if (emptyState) {
+        emptyState.style.display = "none";
+      }
+
+      // 1. Append user message to UI and full conversation history
+      renderUserMessage(prompt);
+      conversation.push({ role: "user", content: prompt });
+      promptInput.value = "";
+      sendBtn.disabled = true;
+
+      // 2. Add loading spinner
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "loading-indicator";
+      loadingDiv.id = "loadingIndicator";
+      loadingDiv.innerHTML = `<div class="spinner"></div><span>Waiting for ${chosenModel}...</span>`;
+      chatContainer.appendChild(loadingDiv);
+      scrollToBottom();
+
+      try {
+        // 3. Send each user prompt with full conversation history to OpenRouter
+        const botReply = await askOpenRouter(conversation, chosenModel);
+
+        // Remove loading
+        loadingDiv.remove();
+
+        // 4. Append assistant response to full conversation history
+        conversation.push({ role: "assistant", content: botReply });
+
+        // 5. Render message
+        renderMessage({ text: botReply, type: "text" });
+
+      } catch (err) {
+        // Remove loading
+        loadingDiv.remove();
+
+        // 6. Display clear error messages with response.status and error body
+        renderErrorMessage(err.message || String(err));
+      } finally {
+        sendBtn.disabled = false;
+        promptInput.focus();
+      }
+    });
+  </script>
+</body>
+</html>
