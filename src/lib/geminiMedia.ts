@@ -154,10 +154,10 @@ export async function animateImageToVideo(
  */
 export async function pollVideoStatus(operationName: string): Promise<{ done: boolean; videoUri?: string }> {
   const res = await fetch(`/api/gemini/video/status/${encodeURIComponent(operationName)}`);
-  if (!res.ok) return { done: true, videoUri: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' };
+  if (!res.ok) return { done: true, videoUri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4' };
   const data = await res.json();
   return {
     done: data.done ?? true,
-    videoUri: data.videoUri || 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    videoUri: data.videoUri || 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
   };
 }

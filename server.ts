@@ -102,7 +102,7 @@ const ai = {
         done: true,
         response: {
           generatedVideos: [
-            { video: { uri: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' } }
+            { video: { uri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4' } }
           ]
         }
       };
@@ -113,7 +113,7 @@ const ai = {
       done: true,
       response: {
         generatedVideos: [
-          { video: { uri: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' } },
+          { video: { uri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4' } },
         ],
       },
     }),
@@ -1460,7 +1460,7 @@ app.get('/api/gemini/video/status/:operationName', async (req, res) => {
       success: true,
       done: true,
       status: 'COMPLETED',
-      videoUri: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      videoUri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     });
   }
 });

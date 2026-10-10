@@ -23,6 +23,7 @@ export interface ChatMessage {
   timestamp: number;
   mediaType?: 'text' | 'image' | 'video' | 'animation';
   mediaUrl?: string;
+  videoBlob?: Blob;
   animationCode?: string;
   videoParams?: {
     videoUrl?: string;
@@ -78,15 +79,29 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     onShowToast?.('success', 'Image download started');
   };
 
-  const handleDownloadVideo = (url: string, filename: string = 'veo-video.mp4') => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    onShowToast?.('success', 'Video download started');
+  const handleDownloadVideo = (url: string, filename: string = 'veo-video.mp4', blob?: Blob) => {
+    try {
+      const link = document.createElement('a');
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        link.href = blobUrl;
+        link.download = filename.replace(/\.mp4$/i, '.webm');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+      } else {
+        link.href = url;
+        link.download = filename;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      onShowToast?.('success', 'Video download started');
+    } catch {
+      onShowToast?.('error', 'Video download failed');
+    }
   };
 
   // User Message
@@ -208,7 +223,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               <span className="truncate font-medium">Veo Video (16:9)</span>
               <button
                 type="button"
-                onClick={() => handleDownloadVideo(message.videoParams?.videoUrl || message.mediaUrl!, 'veo-generated-video.mp4')}
+                onClick={() => handleDownloadVideo(message.videoParams?.videoUrl || message.mediaUrl!, 'veo-generated-video.mp4', message.videoBlob)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition"
               >
                 <Download size={13} />

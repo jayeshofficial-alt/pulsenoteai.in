@@ -140,7 +140,7 @@ export function GeminiStudioModal({ isOpen, onClose, onInsertToChat }: GeminiStu
       });
       setVideoStatusMsg('Video rendering queued. Streaming sample output preview...');
       setTimeout(() => {
-        setGeneratedVideoUrl('https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
+        setGeneratedVideoUrl('https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4');
         setIsVideoLoading(false);
         setVideoStatusMsg(null);
       }, 2500);
@@ -166,7 +166,7 @@ export function GeminiStudioModal({ isOpen, onClose, onInsertToChat }: GeminiStu
         model: 'veo-3.1-fast-generate-preview',
       });
       setTimeout(() => {
-        setAnimatedVideoUrl('https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
+        setAnimatedVideoUrl('https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4');
         setIsAnimateLoading(false);
       }, 2500);
     } catch (err: any) {
