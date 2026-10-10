@@ -433,6 +433,18 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Valid non-empty message content is required.' });
     }
 
+    // Validate that an AI provider key is configured (Gemini primary, OpenRouter failover)
+    const hasGeminiKey = Boolean(
+      process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
+    );
+    const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
+    if (!hasGeminiKey && !hasOpenRouterKey) {
+      return res.status(503).json({
+        error: 'No AI provider key configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY in your environment.',
+        code: 'NO_PROVIDER_KEY',
+      });
+    }
+
     const cleanEmail = (userEmail || '').trim().toLowerCase();
     const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
     const effectiveIsPro = isPro || isAdminUser;

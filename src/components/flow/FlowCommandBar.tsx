@@ -69,7 +69,7 @@ export const FlowCommandBar: React.FC<FlowCommandBarProps> = ({
     {
       id: 'research',
       label: 'Gemini Deep Research',
-      sub: 'Gemini 3.1 Pro • Deep Search & Structured Synthesis',
+      sub: 'Gemini 2.5 Pro • Deep Search & Structured Synthesis',
       icon: Search,
       color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
     },
@@ -90,7 +90,7 @@ export const FlowCommandBar: React.FC<FlowCommandBarProps> = ({
     {
       id: 'code',
       label: 'Code & Systems',
-      sub: 'Gemini 3.1 Pro • Architecture, Algorithms & Logic',
+      sub: 'Gemini 2.5 Pro • Architecture, Algorithms & Logic',
       icon: CodeIcon,
       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
     },

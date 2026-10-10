@@ -50,7 +50,7 @@ interface FlowNodeCardProps {
 
 const TYPE_CONFIG: Record<FlowNodeType, { label: string; icon: any; color: string; bgBadge: string; border: string; glow: string }> = {
   research: {
-    label: 'Deep Research • Gemini 3.1 Pro',
+    label: 'Deep Research • Gemini 2.5 Pro',
     icon: Search,
     color: 'text-cyan-400',
     bgBadge: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30',
@@ -74,7 +74,7 @@ const TYPE_CONFIG: Record<FlowNodeType, { label: string; icon: any; color: strin
     glow: 'shadow-[0_0_25px_rgba(236,72,153,0.15)]',
   },
   code: {
-    label: 'Logic & Code Canvas • Gemini 3.1 Pro',
+    label: 'Logic & Code Canvas • Gemini 2.5 Pro',
     icon: CodeIcon,
     color: 'text-emerald-400',
     bgBadge: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',

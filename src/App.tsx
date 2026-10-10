@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import PromptBar, { GeminiToolMode } from './components/PromptBar';
+import { SettingsModal } from './components/SettingsModal';
 import { ChatMessageBubble, ChatMessage } from './components/ChatMessageBubble';
 import { FlowCanvas } from './components/flow/FlowCanvas';
 import { FlowProjectHeader } from './components/flow/FlowProjectHeader';
@@ -79,6 +80,7 @@ export function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isClientBillingOpen, setIsClientBillingOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGeminiStudioOpen, setIsGeminiStudioOpen] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [toolMode, setToolMode] = useState<GeminiToolMode>('chat');
@@ -425,9 +427,13 @@ export function App() {
     // Determine the raw prompt and attachment safely
     const rawUserPrompt = overridePrompt !== undefined ? overridePrompt : input;
     const currentAttachment = overrideAttachment !== undefined ? overrideAttachment : stagedAttachment;
-    const trimmedInput = (rawUserPrompt || '').trim();
+    // Type-safe trim: never call .trim() on a non-string (prevents "(a || '').trim is not a function" crash)
+    const trimmedInput = typeof rawUserPrompt === 'string' ? rawUserPrompt.trim() : '';
 
-    if (!trimmedInput && !currentAttachment) return;
+    if (!trimmedInput && !currentAttachment) {
+      addToast('error', 'Please enter a message before sending.');
+      return;
+    }
 
     // Daily & Pro Limits
     if (!effectiveIsPro && model === '2.5 Pro') {
@@ -1085,7 +1091,7 @@ export function App() {
         onOpenUpgrade={() => setIsPricingModalOpen(true)}
         onOpenSettings={() => {
           if (isAdmin) setIsAdminPanelOpen(true);
-          else setIsClientBillingOpen(true);
+          else setIsSettingsOpen(true);
         }}
         activeView={activeView}
         onToggleView={setActiveView}
@@ -1208,11 +1214,9 @@ export function App() {
                   className="w-8 h-8 rounded-full object-cover"
                 />
               ) : (
-                <img
-                  src="https://i.pravatar.cc/100"
-                  alt="profile"
-                  className="w-8 h-8 rounded-full object-cover border border-[#3c4043]"
-                />
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4e8cff] to-[#8b5cf6] flex items-center justify-center text-white text-xs font-bold border border-[#3c4043]">
+                  {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : <span className="text-[10px]">?</span>}
+                </div>
               )}
               {effectiveIsPro && (
                 <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#4e8cff] border-2 border-[#131314]" />
@@ -1432,6 +1436,16 @@ export function App() {
           }}
         />
       )}
+
+      {/* Settings & Help Modal (non-admin) */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        currentUser={currentUser}
+        usageState={usageState}
+        onOpenPricing={() => setIsPricingModalOpen(true)}
+        onOpenApiKey={() => setIsApiKeyModalOpen(true)}
+      />
 
       {/* Legal Onboarding Modal */}
       <OnboardingLegalModal

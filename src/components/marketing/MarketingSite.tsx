@@ -164,6 +164,8 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
   const [isSoapGenerating, setIsSoapGenerating] = useState(false);
   const [soapCopied, setSoapCopied] = useState(false);
   const [soapViewMode, setSoapViewMode] = useState<'structured' | 'raw_emr'>('structured');
+  const [soapLiveOutput, setSoapLiveOutput] = useState<string | null>(null);
+  const [soapError, setSoapError] = useState<string | null>(null);
 
   // FAQ interactive state
   const [faqCategory, setFaqCategory] = useState<'all' | 'clinical' | 'models' | 'security' | 'pricing'>('all');
@@ -190,12 +192,42 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
     setSoapInputText(CLINICAL_SOAP_PRESETS[index].transcript);
   };
 
-  // Simulate or execute instant SOAP transformation
-  const handleGenerateSoap = () => {
+  // Generate a live Clinical SOAP note from the textarea via the real /api/chat engine
+  const handleGenerateSoap = async () => {
+    const rawText = typeof soapInputText === 'string' ? soapInputText.trim() : '';
+    if (!rawText) {
+      setSoapError('Please enter a clinical dictation or transcript first.');
+      return;
+    }
     setIsSoapGenerating(true);
-    setTimeout(() => {
+    setSoapError(null);
+    setSoapLiveOutput(null);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: rawText,
+          role: 'medical',
+          industryMode: 'medical',
+          model: '2.5 Flash',
+          stream: false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `SOAP generation failed (${res.status})`);
+      }
+      const reply = data.reply || data.text || '';
+      if (!reply) {
+        throw new Error('Empty response from the clinical engine.');
+      }
+      setSoapLiveOutput(reply);
+    } catch (err: any) {
+      setSoapError(err?.message || 'Clinical SOAP generation failed. Please try again.');
+    } finally {
       setIsSoapGenerating(false);
-    }, 600);
+    }
   };
 
   const handleCopySoap = (text: string) => {
@@ -228,8 +260,10 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
     ]
   };
 
-  // Full EMR Raw string for copy/export
-  const rawEmrText = `=== PULSE NOTE AI CLINICAL SUMMARY ===
+  // Full EMR Raw string for copy/export — prefers the live API output
+  const rawEmrText = soapLiveOutput
+    ? `=== PULSE NOTE AI CLINICAL SUMMARY ===\nPATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}\nTIMESTAMP: ${new Date().toISOString()}\nCOMPLIANCE: HIPAA Edge-Sanitized (Zero Retention)\n\n${soapLiveOutput}\n=======================================`
+    : `=== PULSE NOTE AI CLINICAL SUMMARY ===
 PATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}
 TIMESTAMP: ${new Date().toISOString()}
 COMPLIANCE: HIPAA Edge-Sanitized (Zero Retention)
@@ -661,7 +695,24 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 </div>
               </div>
 
-              {soapViewMode === 'raw_emr' ? (
+              {soapError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+                  {soapError}
+                </div>
+              )}
+
+              {soapLiveOutput && !soapError ? (
+                /* Live AI-generated output */
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                  <div className="p-3 rounded-xl bg-[#10b981]/10 border border-[#10b981]/30 text-[11px] text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Live AI output generated from your dictation</span>
+                  </div>
+                  <pre className="p-4 rounded-xl bg-[#0a0a0a] text-xs font-mono text-[#a3e635] overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-[480px]">
+                    {soapLiveOutput}
+                  </pre>
+                </div>
+              ) : soapViewMode === 'raw_emr' ? (
                 /* Raw EMR Text Mode */
                 <pre className="p-4 rounded-xl bg-[#0a0a0a] text-xs font-mono text-[#a3e635] overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-[480px]">
                   {rawEmrText}
