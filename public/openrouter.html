@@ -302,46 +302,18 @@
   <script>
     // =========================================================================
     // OPENROUTER API INTEGRATION
-    // - Endpoint: https://openrouter.ai/api/v1/chat/completions
-    // - Read API key from OPENROUTER_API_KEY (never hardcode or display the key)
-    // - Header Authorization: Bearer ${OPENROUTER_API_KEY} and Content-Type: application/json
-    // - Full conversation history in the request so replies have context
-    // - Show clear error messages on failure (display response.status and error body)
+    // - Routed through the server proxy (/api/openrouter/chat) — the API key
+    //   stays server-side and is never exposed to the browser.
+    // - Full conversation history in the request so replies have context.
+    // - Show clear error messages on failure (display response.status and error body).
     // =========================================================================
 
-    // Read API key from environment / runtime variable (never hardcoded or displayed)
-    let OPENROUTER_API_KEY =
-      (typeof process !== 'undefined' && process.env?.OPENROUTER_API_KEY) ||
-      window.OPENROUTER_API_KEY ||
-      '';
-
-    // Retrieve server-injected secret if available in backend
-    async function initApiKey() {
-      if (!OPENROUTER_API_KEY) {
-        try {
-          const res = await fetch('/api/openrouter/key');
-          if (res.ok) {
-            const data = await res.json();
-            if (data.apiKey) {
-              OPENROUTER_API_KEY = data.apiKey;
-            }
-          }
-        } catch (e) {
-          // If standalone, key can also be set on window.OPENROUTER_API_KEY
-        }
-      }
-    }
-    initApiKey();
-
-    // Core function matching exact specification:
+    // Core function — routes through the server proxy (key stays server-side)
     async function askOpenRouter(messages, model = "openai/gpt-4o-mini") {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const response = await fetch("/api/openrouter/chat", {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ model, messages })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, model })
       });
 
       if (!response.ok) {
@@ -349,7 +321,9 @@
       }
 
       const data = await response.json();
-      return data.choices[0].message.content;
+      const text = data.reply || data.text || data.choices?.[0]?.message?.content || '';
+      if (!text) throw new Error('OpenRouter returned an empty response.');
+      return text;
     }
 
     // Client-side rendering function matching client.js specification:
