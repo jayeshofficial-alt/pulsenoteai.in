@@ -10,11 +10,13 @@ interface ApiKeyModalProps {
 
 export function ApiKeyModal({ isOpen, onClose, onSave }: ApiKeyModalProps) {
   const [apiKey, setApiKey] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setApiKey(getOpenRouterApiKey());
+      setGeminiKey(localStorage.getItem('pulsenote_gemini_api_key') || '');
       setSaved(false);
     }
   }, [isOpen]);
@@ -27,6 +29,11 @@ export function ApiKeyModal({ isOpen, onClose, onSave }: ApiKeyModalProps) {
         localStorage.setItem('pulsenote_openrouter_api_key', apiKey.trim());
       } else {
         localStorage.removeItem('pulsenote_openrouter_api_key');
+      }
+      if (geminiKey.trim()) {
+        localStorage.setItem('pulsenote_gemini_api_key', geminiKey.trim());
+      } else {
+        localStorage.removeItem('pulsenote_gemini_api_key');
       }
       setSaved(true);
       onSave?.(apiKey.trim());
@@ -74,6 +81,25 @@ export function ApiKeyModal({ isOpen, onClose, onSave }: ApiKeyModalProps) {
               placeholder="sk-or-v1-..."
               className="w-full bg-[#131314] border border-[#3c4043] focus:border-[#4e8cff] rounded-xl px-3.5 py-2.5 text-sm text-white outline-none font-mono placeholder:text-[#9aa0a6]"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              Gemini API Key <span className="text-[#9aa0a6] font-normal">(optional — primary engine)</span>
+            </label>
+            <input
+              type="password"
+              value={geminiKey}
+              onChange={(e) => setGeminiKey(e.target.value)}
+              placeholder="AIza..."
+              className="w-full bg-[#131314] border border-[#3c4043] focus:border-[#4e8cff] rounded-xl px-3.5 py-2.5 text-sm text-white outline-none font-mono placeholder:text-[#9aa0a6]"
+            />
+            <p className="mt-1 text-[10px] text-[#9aa0a6]">
+              Stored locally in your browser. Get a key at{' '}
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#4e8cff] hover:underline">
+                aistudio.google.com
+              </a>
+            </p>
           </div>
 
           <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-xl space-y-1 text-[11px] text-blue-200">

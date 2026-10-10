@@ -135,6 +135,14 @@ export async function chatCompletion(
     content: m.content,
   }));
 
+  // No key at all — fail fast with a clear, actionable message
+  if (!key) {
+    const hasServerFallback = await fetch('/api/openrouter/key').then(r => r.json()).then(d => Boolean(d?.configured)).catch(() => false);
+    if (!hasServerFallback) {
+      throw new Error('No AI API key configured. Click "API Key" in the header and enter your OpenRouter key, or set OPENROUTER_API_KEY in your deployment environment.');
+    }
+  }
+
   // Direct client-side call if key is available
   if (key) {
     const referer = typeof window !== 'undefined' && window.location?.origin
@@ -161,11 +169,14 @@ export async function chatCompletion(
     if (!res.ok) {
       let errDetail = '';
       try {
-        const errJson = await res.json();
-        errDetail = errJson.error?.message || errJson.message || JSON.stringify(errJson);
-      } catch {
-        errDetail = await res.text();
-      }
+        const errText = await res.text();
+        try {
+          const errJson = JSON.parse(errText);
+          errDetail = errJson.error?.message || errJson.message || errText;
+        } catch {
+          errDetail = errText;
+        }
+      } catch {}
       throw new Error(`OpenRouter API error (${res.status}): ${errDetail}`);
     }
 
@@ -193,11 +204,14 @@ export async function chatCompletion(
   if (!proxyRes.ok) {
     let errDetail = '';
     try {
-      const errJson = await proxyRes.json();
-      errDetail = errJson.error?.message || errJson.error || errJson.message || JSON.stringify(errJson);
-    } catch {
-      errDetail = await proxyRes.text();
-    }
+      const errText = await proxyRes.text();
+      try {
+        const errJson = JSON.parse(errText);
+        errDetail = errJson.error?.message || errJson.error || errJson.message || errText;
+      } catch {
+        errDetail = errText;
+      }
+    } catch {}
     throw new Error(
       `OpenRouter error (${proxyRes.status}): ${errDetail || 'Please configure VITE_OPENROUTER_API_KEY'}`
     );
@@ -247,16 +261,19 @@ export async function* streamChatCompletion(
       signal,
     });
 
-    if (!res.ok) {
-      let errDetail = '';
+  if (!res.ok) {
+    let errDetail = '';
+    try {
+      const errText = await res.text();
       try {
-        const errJson = await res.json();
-        errDetail = errJson.error?.message || errJson.message || JSON.stringify(errJson);
+        const errJson = JSON.parse(errText);
+        errDetail = errJson.error?.message || errJson.message || errText;
       } catch {
-        errDetail = await res.text();
+        errDetail = errText;
       }
-      throw new Error(`OpenRouter streaming error (${res.status}): ${errDetail}`);
-    }
+    } catch {}
+    throw new Error(`OpenRouter streaming error (${res.status}): ${errDetail}`);
+  }
 
     const reader = res.body?.getReader();
     if (!reader) throw new Error('ReadableStream not supported.');
