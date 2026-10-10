@@ -110,14 +110,25 @@ export function getOpenRouterApiKey(): string {
 /** Cached server-bridged key to avoid repeated fetches */
 let _serverKeyCache: string | null = null;
 
+/** Current admin email (set by the app on login/logout) */
+let _adminEmail: string | null = null;
+
+/** Sets the current admin email (called on login/logout) */
+export function setAdminEmail(email: string | null): void {
+  _adminEmail = email;
+  _serverKeyCache = null; // clear cache when user changes
+}
+
 /**
  * Fetches the OpenRouter key from the server (OPENROUTER_API_KEY env var).
- * Returns '' if not configured or on any error.
+ * Only works for admin users — server validates the email.
+ * Returns '' if not admin, not configured, or on any error.
  */
 export async function getServerOpenRouterKey(): Promise<string> {
   if (_serverKeyCache) return _serverKeyCache;
+  if (!_adminEmail || !isAdminEmail(_adminEmail)) return '';
   try {
-    const res = await fetch('/api/openrouter/key');
+    const res = await fetch(`/api/openrouter/key?email=${encodeURIComponent(_adminEmail)}`);
     if (!res.ok) return '';
     const data = await res.json();
     const key = data?.apiKey || '';
@@ -132,6 +143,13 @@ export async function getServerOpenRouterKey(): Promise<string> {
 /** Clears the cached server key (used when user saves/removes their own key) */
 export function clearServerKeyCache(): void {
   _serverKeyCache = null;
+}
+
+/** Returns true if the given email is a strict admin */
+export function isAdminEmail(email: string): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return clean === 'jayeshofficial@gmail.com' || clean === 'contact@pulsenoteai.in' || clean === 'wagh.jayesh@gmail.com';
 }
 
 /**
