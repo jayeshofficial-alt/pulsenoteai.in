@@ -472,18 +472,21 @@ export async function generateVideoWithVeo(
     });
 
     if (!res.ok) {
-      return {
-        status: 'blocked',
-        message: 'This prompt was blocked by the safety filter. Please try a different scene.',
-      };
+      // Server error — NOT a safety filter block
+      let errMsg = `Video service error (${res.status})`;
+      try {
+        const errData = await res.json();
+        errMsg = errData?.error || errData?.message || errMsg;
+      } catch {}
+      return { status: 'error', message: errMsg };
     }
 
     const data = await res.json();
-    return data;
+    if (data.status === 'blocked' || data.status === 'rejected') {
+      return { status: 'blocked', message: data.message || 'This prompt was blocked by the safety filter. Please try a different scene.' };
+    }
+    return { status: 'ok', message: data.message || 'Video ready.', videoUrl: data.videoUrl, file: data.file };
   } catch (err: any) {
-    return {
-      status: 'blocked',
-      message: 'This prompt was blocked by the safety filter. Please try a different scene.',
-    };
+    return { status: 'error', message: err?.message || 'Video generation service unavailable. Please try again.' };
   }
 }

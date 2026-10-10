@@ -672,6 +672,17 @@ export function App() {
             );
             return;
           }
+          if (videoResult.status === 'error') {
+            const errMsg = videoResult.message || 'Video generation service unavailable. Please try again.';
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, content: errMsg, mediaType: 'text', isStreaming: false }
+                  : m
+              )
+            );
+            return;
+          }
           videoUrl = videoResult.videoUrl || videoResult.file || '';
           videoBlob = null;
         }
