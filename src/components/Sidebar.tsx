@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Plus, Clock, Settings, Gem, LayoutGrid, MessageSquare, Trash2 } from 'lucide-react';
+import { Menu, Plus, Clock, Settings, Gem, LayoutGrid, MessageSquare, Trash2, Globe } from 'lucide-react';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -11,8 +11,8 @@ interface SidebarProps {
   onDeleteChat?: (id: string, e: React.MouseEvent) => void;
   onOpenUpgrade?: () => void;
   onOpenSettings?: () => void;
-  activeView?: 'chat' | 'canvas';
-  onToggleView?: (view: 'chat' | 'canvas') => void;
+  activeView?: 'marketing' | 'chat' | 'canvas';
+  onToggleView?: (view: 'marketing' | 'chat' | 'canvas') => void;
 }
 
 export default function Sidebar({
@@ -74,31 +74,46 @@ export default function Sidebar({
         {!collapsed && <span>New chat</span>}
       </button>
 
-      {/* View Switcher: Chat vs Canvas */}
+      {/* View Switcher: Marketing vs Chat vs Canvas */}
       {onToggleView && !collapsed && (
         <div className="mb-4 p-1 bg-[#131314] rounded-xl flex gap-1 border border-[#3c4043]/40 text-xs">
           <button
             type="button"
+            onClick={() => onToggleView('marketing')}
+            className={`flex-1 py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[11px] ${
+              activeView === 'marketing'
+                ? 'bg-[#2d2e30] text-white shadow-sm'
+                : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
+            }`}
+            title="Marketing Site"
+          >
+            <Globe size={13} className="text-[#4e8cff]" />
+            <span>Home</span>
+          </button>
+          <button
+            type="button"
             onClick={() => onToggleView('chat')}
-            className={`flex-1 py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 font-medium transition-colors ${
+            className={`flex-1 py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[11px] ${
               activeView === 'chat'
                 ? 'bg-[#2d2e30] text-white shadow-sm'
                 : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
             }`}
+            title="Chat Workspace"
           >
-            <MessageSquare size={14} />
+            <MessageSquare size={13} />
             <span>Chat</span>
           </button>
           <button
             type="button"
             onClick={() => onToggleView('canvas')}
-            className={`flex-1 py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 font-medium transition-colors ${
+            className={`flex-1 py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[11px] ${
               activeView === 'canvas'
                 ? 'bg-[#2d2e30] text-white shadow-sm'
                 : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
             }`}
+            title="Flow Canvas"
           >
-            <LayoutGrid size={14} />
+            <LayoutGrid size={13} />
             <span>Canvas</span>
           </button>
         </div>

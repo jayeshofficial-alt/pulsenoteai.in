@@ -47,6 +47,22 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "userId", "type", "prompt"]
+    },
+    "DocumentRecord": {
+      "title": "DocumentRecord",
+      "description": "Generated SOAP notes, executive memos, engineering RFCs and reports",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "industry": { "type": "string" },
+        "rawInput": { "type": "string" },
+        "markdownReport": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "industry"]
     }
   },
   "firestore": {
@@ -59,6 +75,13 @@
     },
     "/users/{userId}/threads/{threadId}": {
       "entity": "ChatThread",
+      "rules": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    },
+    "/users/{userId}/documents/{documentId}": {
+      "entity": "DocumentRecord",
       "rules": {
         "read": "request.auth != null && request.auth.uid == userId",
         "write": "request.auth != null && request.auth.uid == userId"

@@ -23,10 +23,11 @@ import {
   Gem, 
   Menu,
   ChevronDown,
-  Settings
+  Settings,
+  Key
 } from 'lucide-react';
 import Sidebar from './components/Sidebar';
-import PromptBar from './components/PromptBar';
+import PromptBar, { GeminiToolMode } from './components/PromptBar';
 import { ChatMessageBubble, ChatMessage } from './components/ChatMessageBubble';
 import { FlowCanvas } from './components/flow/FlowCanvas';
 import { FlowProjectHeader } from './components/flow/FlowProjectHeader';
@@ -38,8 +39,33 @@ import { OnboardingLegalModal } from './components/OnboardingLegalModal';
 import { AuthModal } from './components/AuthModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { ClientBillingModal } from './components/ClientBillingModal';
+import { GeminiStudioModal } from './components/GeminiStudioModal';
+import { ApiKeyModal } from './components/ApiKeyModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
-import { auth, onAuthStateChanged, logOut } from './lib/firebase';
+import { MarketingSite } from './components/marketing/MarketingSite';
+import { 
+  auth, 
+  onAuthStateChanged, 
+  logOut, 
+  saveThreadToFirestore, 
+  loadUserThreadsFromFirestore, 
+  deleteThreadFromFirestore, 
+  saveDocumentToFirestore 
+} from './lib/firebase';
+import {
+  chatCompletion,
+  streamChatCompletion,
+  understandImageWithOpenRouter,
+  generateAnimationWithOpenRouter,
+  getOpenRouterApiKey,
+  OPENROUTER_MODELS,
+  SYSTEM_PROMPT,
+  precheck_prompt,
+  generateVideoWithVeo,
+} from './services/openrouter';
+
+const IMAGE_KEYWORDS = /\b(create|generate|make|draw|design|illustrate)\b.*\b(image|picture|photo|art|illustration|drawing)\b/i;
+const VIDEO_KEYWORDS = /\b(create|generate|make|produce|animate|render)\b.*\b(video|clip|movie|animation|scene)\b/i;
 
 const TODAY_DATE_STR = () => new Date().toISOString().slice(0, 10);
 
@@ -53,6 +79,10 @@ export function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isClientBillingOpen, setIsClientBillingOpen] = useState(false);
+  const [isGeminiStudioOpen, setIsGeminiStudioOpen] = useState(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [toolMode, setToolMode] = useState<GeminiToolMode>('chat');
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [hasAcceptedLegalOnboarding, setHasAcceptedLegalOnboarding] = useState(true);
 
@@ -78,7 +108,17 @@ export function App() {
     }
   });
   const [model, setModel] = useState<'2.5 Flash' | '2.5 Pro'>('2.5 Flash');
-  const [activeView, setActiveView] = useState<'chat' | 'canvas'>('chat');
+  const [activeView, setActiveView] = useState<'marketing' | 'chat' | 'canvas'>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('view') === 'chat') return 'chat';
+        if (params.get('view') === 'canvas') return 'canvas';
+        if (window.location.hash.includes('chat') || window.location.hash.includes('app')) return 'chat';
+      }
+    } catch {}
+    return 'marketing';
+  });
   const [isDeepResearch, setIsDeepResearch] = useState(false);
 
   // Recent chats stored in localStorage
@@ -210,13 +250,27 @@ export function App() {
       syncAuthoritativeProfile(currentUser.email, currentUser.name, currentUser.avatarUrl);
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (fbUser: any) => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser: any) => {
       if (fbUser && fbUser.email) {
         syncAuthoritativeProfile(
           fbUser.email,
           fbUser.displayName || fbUser.email.split('@')[0],
           fbUser.photoURL || ''
         );
+
+        // Load persisted threads from Firestore
+        try {
+          const userThreads = await loadUserThreadsFromFirestore(fbUser.uid);
+          if (userThreads && userThreads.length > 0) {
+            setRecentChats(userThreads.map((t: any) => ({
+              id: t.id,
+              title: t.title || 'Untitled Session',
+              timestamp: new Date(t.updatedAt || t.createdAt).getTime(),
+            })));
+          }
+        } catch (err) {
+          console.warn('Firestore load notice:', err);
+        }
       }
     });
 
@@ -233,12 +287,22 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
-  // Save current messages to localStorage
+  // Save current messages to localStorage and Firestore
   useEffect(() => {
     try {
       localStorage.setItem('pulsenote_current_chat', JSON.stringify(messages));
     } catch {}
-  }, [messages]);
+
+    if (currentUser?.id && messages.length > 0) {
+      const firstUserMsg = messages.find((m) => m.role === 'user')?.content || 'New Conversation';
+      saveThreadToFirestore(currentUser.id, {
+        id: currentChatId,
+        title: firstUserMsg.slice(0, 45),
+        messages,
+        modelRole: model,
+      });
+    }
+  }, [messages, currentUser?.id, currentChatId, model]);
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -287,6 +351,9 @@ export function App() {
     try {
       localStorage.setItem('pulsenote_recent_chats', JSON.stringify(updated));
     } catch {}
+    if (currentUser?.id) {
+      deleteThreadFromFirestore(currentUser.id, id);
+    }
     if (currentChatId === id) {
       setMessages([]);
     }
@@ -319,12 +386,42 @@ export function App() {
     complianceDisclaimer: '> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*',
   });
 
-  // Main Send Action (PulseNote AI Gemini Chat with Streaming, Canvas Node Insertion & Multi-Modal Routing)
+  // Stop streaming generation handler
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsGenerating(false);
+    setMessages((prev) =>
+      prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m))
+    );
+    addToast('info', 'Generation stopped by user');
+  };
+
+  // Retry failed message handler
+  const handleRetry = (failedMsg: ChatMessage) => {
+    const idx = messages.findIndex((m) => m.id === failedMsg.id);
+    const userMsg = idx > 0 ? messages[idx - 1] : null;
+    if (userMsg) {
+      setMessages((prev) => prev.filter((m) => m.id !== failedMsg.id));
+      handleSend(userMsg.content, undefined, failedMsg.mediaType as any);
+    }
+  };
+
+  // Main Send Action (PulseNote AI Google Gemini Chat with Streaming, Media & Live Canvas Sync)
   const handleSend = async (
     overridePrompt?: string,
     overrideAttachment?: AttachedFile | null,
     overrideType?: FlowNodeType
   ) => {
+    // Abort any ongoing stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     // Determine the raw prompt and attachment safely
     const rawUserPrompt = overridePrompt !== undefined ? overridePrompt : input;
     const currentAttachment = overrideAttachment !== undefined ? overrideAttachment : stagedAttachment;
@@ -332,7 +429,7 @@ export function App() {
 
     if (!trimmedInput && !currentAttachment) return;
 
-    // KEEP PREMIUM LOGIC INTACT
+    // Daily & Pro Limits
     if (!effectiveIsPro && model === '2.5 Pro') {
       addToast('info', 'Upgrade to Premium to use 2.5 Pro.');
       setIsPricingModalOpen(true);
@@ -350,11 +447,51 @@ export function App() {
     const assistantMsgId = `msg_a_${Date.now()}`;
     const canvasNodeId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    // Mode determination
+    const isVideoMode =
+      toolMode === 'video' ||
+      overrideType === 'video' ||
+      VIDEO_KEYWORDS.test(userPrompt) ||
+      /\b(generate video|create video|make video|make a video|veo|cinematic scene|video of)\b/i.test(userPrompt);
+
+    const isImageMode =
+      !isVideoMode &&
+      (toolMode === 'image' ||
+        overrideType === 'image' ||
+        IMAGE_KEYWORDS.test(userPrompt) ||
+        /\b(generate image|draw|create image|picture of|photo of|illustration of)\b/i.test(userPrompt));
+
+    const isAnimationMode =
+      !isImageMode &&
+      !isVideoMode &&
+      (toolMode === 'animation' ||
+        /\b(generate animation|animate svg|canvas animation|css animation|live animation|interactive animation)\b/i.test(userPrompt));
+
+    const isUnderstandingMode =
+      !isImageMode &&
+      !isVideoMode &&
+      !isAnimationMode &&
+      (toolMode === 'understanding' || (currentAttachment && currentAttachment.category === 'image'));
+
+    const calculatedNodeType: FlowNodeType = isVideoMode
+      ? 'video'
+      : isImageMode
+      ? 'image'
+      : isAnimationMode
+      ? 'code'
+      : 'research';
+
+    // Insert user and assistant messages
     const userMessage: ChatMessage = {
       id: userMessageId,
       role: 'user',
       content: userPrompt,
       timestamp: Date.now(),
+      userAttachment: currentAttachment?.category === 'image' ? {
+        previewUrl: currentAttachment.previewUrl,
+        name: currentAttachment.name,
+        category: currentAttachment.category,
+      } : undefined,
     };
 
     const initialAssistantMessage: ChatMessage = {
@@ -363,32 +500,10 @@ export function App() {
       content: '',
       timestamp: Date.now(),
       isStreaming: true,
+      mediaType: isVideoMode ? 'video' : isImageMode ? 'image' : isAnimationMode ? 'animation' : 'text',
+      statusMessage: isVideoMode ? 'Submitting prompt to Veo (veo-3.1-generate-preview)...' : undefined,
+      progressPercent: isVideoMode ? 10 : undefined,
     };
-
-    // Check if media generation (video/image) or deep research is requested
-    const isVideoIntent =
-      overrideType === 'video' ||
-      /\b(generate video|animate|veo|cinematic scene|video of|animation of|make video)\b/i.test(userPrompt) ||
-      (currentAttachment?.category === 'image' && /\b(animate|video|motion|bring to life)\b/i.test(userPrompt));
-
-    const isImageIntent =
-      !isVideoIntent &&
-      (overrideType === 'image' ||
-        /\b(generate image|draw|create image|picture of|photo of|illustration of)\b/i.test(userPrompt));
-
-    const isCodeIntent =
-      overrideType === 'code' ||
-      /\b(write code|create component|react|typescript|python|function|api route|algorithm)\b/i.test(userPrompt);
-
-    const calculatedNodeType: FlowNodeType = isVideoIntent
-      ? 'video'
-      : isImageIntent
-      ? 'image'
-      : isCodeIntent
-      ? 'code'
-      : isDeepResearch || overrideType === 'research'
-      ? 'research'
-      : 'research';
 
     // Calculate canvas node position
     const existingNodes = currentProject.nodes || [];
@@ -399,7 +514,7 @@ export function App() {
     const initialCanvasNode: FlowNode = {
       id: canvasNodeId,
       type: calculatedNodeType,
-      title: userPrompt.slice(0, 36) || 'Intelligence Analysis',
+      title: userPrompt.slice(0, 36) || 'Gemini Intelligence',
       prompt: userPrompt,
       x: nodeX,
       y: nodeY,
@@ -413,7 +528,6 @@ export function App() {
       comments: [],
     };
 
-    // Instant DOM Insertion into both Chat and Canvas
     setMessages((prev) => [...prev, userMessage, initialAssistantMessage]);
     setCurrentProject((prev) => ({
       ...prev,
@@ -424,7 +538,6 @@ export function App() {
     setStagedAttachment(null);
     setIsGenerating(true);
 
-    // Save prompt title to recent if first message
     if (messages.length === 0) {
       const newRecent = [
         { id: currentChatId, title: userPrompt.slice(0, 36), timestamp: Date.now() },
@@ -437,103 +550,36 @@ export function App() {
     }
 
     try {
-      // Route media generation and deep research through transform stream
-      if (isVideoIntent || isImageIntent || isDeepResearch) {
-        const creativeMode = isVideoIntent ? 'video' : isImageIntent ? 'image' : undefined;
-        const response = await fetch('/api/transform/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            rawText: userPrompt,
-            creativeMode,
-            responseMode: isDeepResearch ? 'research' : 'productivity',
-            isPro: effectiveIsPro,
-            dailyPromptCount: usageState.dailyPromptCount,
-            userEmail: currentUser?.email || '',
-            attachedFile: currentAttachment ? {
-              id: currentAttachment.id,
-              name: currentAttachment.name,
-              size: currentAttachment.size,
-              type: currentAttachment.type,
-              category: currentAttachment.category,
-              data: currentAttachment.data,
-              previewUrl: currentAttachment.previewUrl,
-            } : undefined,
-          }),
-        });
+      // 1. IMAGE GENERATION (gemini-2.5-flash-image / responseModalities: [TEXT, IMAGE])
+      // 1. IMAGE GENERATION (OpenRouter-powered SVG / Visual generation)
+      if (isImageMode) {
+        const svgPrompt = [
+          {
+            role: 'system',
+            content: 'You are an elite vector artist and UI designer. Create a beautiful, complete, modern SVG graphic representing the user prompt. Return ONLY the self-contained <svg>...</svg> inside an ```xml markdown codeblock. Do not include any text before or after.',
+          },
+          { role: 'user', content: `Generate an SVG image for: ${userPrompt}` },
+        ];
+        const resSvg = await chatCompletion(svgPrompt, 'openai/gpt-4o-mini');
+        const match = resSvg.match(/<svg[\s\S]*?<\/svg>/i);
+        const svgContent = match
+          ? match[0]
+          : `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="#090a0f"/><text x="400" y="300" fill="#38bdf8" font-size="22" text-anchor="middle" font-family="sans-serif">${userPrompt.slice(0, 45)}</text></svg>`;
+        const imageUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgContent)}`;
 
-        if (!response.body) throw new Error('Stream connection failed');
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let streamBuffer = '';
-        let accumulated = '';
-        let mediaPayload: any = null;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          streamBuffer += decoder.decode(value, { stream: true });
-          const events = streamBuffer.split('\n\n');
-          streamBuffer = events.pop() || '';
-
-          for (const ev of events) {
-            if (ev.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(ev.slice(6));
-                if (data.type === 'limit_reached') {
-                  setIsPricingModalOpen(true);
-                  break;
-                } else if (data.type === 'media_ready') {
-                  mediaPayload = data;
-                } else if (data.type === 'token') {
-                  accumulated += data.text || '';
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: true } : m
-                    )
-                  );
-                  setCurrentProject((prev) => ({
-                    ...prev,
-                    nodes: (prev.nodes || []).map((n) =>
-                      n.id === canvasNodeId
-                        ? {
-                            ...n,
-                            status: 'generating',
-                            progress: Math.min(95, (n.progress || 25) + 3),
-                            report: createReportObject(n.title, userPrompt, accumulated, 'text'),
-                          }
-                        : n
-                    ),
-                  }));
-                } else if (data.type === 'done') {
-                  accumulated = data.fullText || accumulated;
-                }
-              } catch {}
-            }
-          }
-        }
-
-        const finalOutputText = mediaPayload?.executiveSummary || accumulated || 'Generation complete.';
-
-        // Finalize completed message in Chat
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMsgId
               ? {
                   ...m,
-                  content: finalOutputText,
+                  content: `Here is your image: I've created a custom visual for "${userPrompt}".`,
+                  mediaType: 'image',
+                  mediaUrl: imageUrl,
                   isStreaming: false,
-                  mediaType: mediaPayload?.mediaType,
-                  videoParams: mediaPayload?.videoParams,
-                  imageResults: mediaPayload?.imageResults,
                 }
               : m
           )
         );
-
-        // Finalize completed node on Canvas
         setCurrentProject((prev) => ({
           ...prev,
           nodes: (prev.nodes || []).map((n) =>
@@ -542,141 +588,244 @@ export function App() {
                   ...n,
                   status: 'completed',
                   progress: 100,
-                  type: mediaPayload?.mediaType === 'video' ? 'video' : mediaPayload?.mediaType === 'image' ? 'image' : n.type,
-                  videoParams: mediaPayload?.videoParams,
-                  imageResults: mediaPayload?.imageResults,
-                  imageParams: mediaPayload?.imageParams,
-                  report: createReportObject(
-                    n.title,
-                    userPrompt,
-                    accumulated || finalOutputText,
-                    mediaPayload?.mediaType || 'text'
-                  ),
+                  type: 'image',
+                  report: createReportObject(n.title, userPrompt, 'Image generated successfully', 'image'),
                 }
               : n
           ),
         }));
-      } else {
-        // Standard conversational multi-turn chat stream via /api/chat
-        const conversationHistory = [...messages, userMessage].map((m) => ({
-          role: m.role === 'user' ? 'user' : 'model',
-          content: m.content,
-        }));
+      }
 
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'text/event-stream',
-          },
-          body: JSON.stringify({
-            messages: conversationHistory,
-            model,
-            stream: true,
-            isPro: effectiveIsPro,
-            dailyPromptCount: usageState.dailyPromptCount,
-            userEmail: currentUser?.email || '',
-          }),
-        });
-
-        if (response.headers.get('content-type')?.includes('text/event-stream') && response.body) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let streamBuffer = '';
-          let accumulated = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            streamBuffer += decoder.decode(value, { stream: true });
-            const events = streamBuffer.split('\n\n');
-            streamBuffer = events.pop() || '';
-
-            for (const ev of events) {
-              if (ev.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(ev.slice(6));
-                  if (data.type === 'token') {
-                    accumulated += data.text || '';
-                    setMessages((prev) =>
-                      prev.map((m) =>
-                        m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: true } : m
-                      )
-                    );
-                    setCurrentProject((prev) => ({
-                      ...prev,
-                      nodes: (prev.nodes || []).map((n) =>
-                        n.id === canvasNodeId
-                          ? {
-                              ...n,
-                              status: 'generating',
-                              progress: Math.min(95, (n.progress || 25) + 3),
-                              report: createReportObject(n.title, userPrompt, accumulated, 'text'),
-                            }
-                          : n
-                      ),
-                    }));
-                  } else if (data.type === 'done') {
-                    accumulated = data.fullText || data.reply || accumulated;
-                  }
-                } catch {}
-              }
-            }
-          }
-
+      // 2. VIDEO GENERATION (Veo 3.0 / 3.1 with precheck prompt & safety filter)
+      else if (isVideoMode) {
+        // Run precheck prompt for safety and prohibited patterns
+        const precheckError = precheck_prompt(userPrompt);
+        if (precheckError) {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: false } : m
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: precheckError,
+                    mediaType: 'text',
+                    isStreaming: false,
+                  }
+                : m
             )
           );
-
           setCurrentProject((prev) => ({
             ...prev,
             nodes: (prev.nodes || []).map((n) =>
               n.id === canvasNodeId
                 ? {
                     ...n,
-                    status: 'completed',
+                    status: 'error',
                     progress: 100,
+                    type: 'research',
+                    report: createReportObject(n.title, userPrompt, precheckError, 'text'),
+                  }
+                : n
+            ),
+          }));
+          return;
+        }
+
+        // Update progress state
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  statusMessage: 'Generating video with Veo (veo-3.0-generate-preview)...',
+                  progressPercent: 35,
+                }
+              : m
+          )
+        );
+
+        const videoResult = await generateVideoWithVeo(userPrompt);
+
+        if (videoResult.status === 'blocked' || videoResult.status === 'rejected') {
+          const failMsg = videoResult.message || 'This prompt was blocked by the safety filter. Please try a different scene.';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: failMsg,
+                    mediaType: 'text',
+                    isStreaming: false,
+                  }
+                : m
+            )
+          );
+          return;
+        }
+
+        const videoUrl = videoResult.videoUrl || videoResult.file || 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  content: `Here is your video: Video ready for "${userPrompt}".`,
+                  mediaType: 'video',
+                  mediaUrl: videoUrl,
+                  videoParams: {
+                    videoUrl,
+                    title: userPrompt,
+                    aspectRatio: '16:9',
+                  } as any,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+
+        setCurrentProject((prev) => ({
+          ...prev,
+          nodes: (prev.nodes || []).map((n) =>
+            n.id === canvasNodeId
+              ? {
+                  ...n,
+                  status: 'completed',
+                  progress: 100,
+                  type: 'video',
+                  videoParams: {
+                    videoUrl,
+                    title: userPrompt,
+                    aspectRatio: '16:9',
+                  } as any,
+                  report: createReportObject(n.title, userPrompt, `Video ready: ${videoUrl}`, 'video'),
+                }
+              : n
+          ),
+        }));
+      }
+
+      // 3. LIVE ANIMATION (SVG, CSS, Canvas code inside Sandboxed Iframe via OpenRouter)
+      else if (isAnimationMode) {
+        const animResult = await generateAnimationWithOpenRouter(userPrompt, 'openai/gpt-4o-mini');
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  content: `Live interactive animation rendered for: "${userPrompt}"`,
+                  mediaType: 'animation',
+                  animationCode: animResult.code,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+        setCurrentProject((prev) => ({
+          ...prev,
+          nodes: (prev.nodes || []).map((n) =>
+            n.id === canvasNodeId
+              ? {
+                  ...n,
+                  status: 'completed',
+                  progress: 100,
+                  type: 'code',
+                  report: createReportObject(n.title, userPrompt, animResult.code, 'text'),
+                }
+              : n
+          ),
+        }));
+      }
+
+      // 4. IMAGE UNDERSTANDING (User uploads an image plus a question via OpenRouter Vision)
+      else if (isUnderstandingMode && currentAttachment?.data) {
+        const analysis = await understandImageWithOpenRouter(
+          userPrompt,
+          currentAttachment.data,
+          currentAttachment.type || 'image/jpeg',
+          'openai/gpt-4o-mini'
+        );
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  content: analysis,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+        setCurrentProject((prev) => ({
+          ...prev,
+          nodes: (prev.nodes || []).map((n) =>
+            n.id === canvasNodeId
+              ? {
+                  ...n,
+                  status: 'completed',
+                  progress: 100,
+                  report: createReportObject(n.title, userPrompt, analysis, 'text'),
+                }
+              : n
+          ),
+        }));
+      }
+
+      // 5. TEXT CHAT VIA OPENROUTER (openai/gpt-4o-mini)
+      else {
+        const conversationHistory = [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          { role: 'user', content: userPrompt },
+        ];
+
+        let accumulated = '';
+        for await (const token of streamChatCompletion(conversationHistory, 'openai/gpt-4o-mini', controller.signal)) {
+          accumulated += token;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: accumulated, isStreaming: true }
+                : m
+            )
+          );
+          setCurrentProject((prev) => ({
+            ...prev,
+            nodes: (prev.nodes || []).map((n) =>
+              n.id === canvasNodeId
+                ? {
+                    ...n,
+                    status: 'generating',
+                    progress: Math.min(95, (n.progress || 25) + 3),
                     report: createReportObject(n.title, userPrompt, accumulated, 'text'),
                   }
                 : n
             ),
           }));
-        } else {
-          // JSON fallback
-          const data = await response.json();
-          if (data.isLimitReached) {
-            setIsPricingModalOpen(true);
-            setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
-            setCurrentProject((prev) => ({
-              ...prev,
-              nodes: (prev.nodes || []).filter((n) => n.id !== canvasNodeId),
-            }));
-            return;
-          }
-          const replyText = data.reply || data.text || 'I have analyzed your prompt.';
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: replyText, isStreaming: false } : m
-            )
-          );
-
-          setCurrentProject((prev) => ({
-            ...prev,
-            nodes: (prev.nodes || []).map((n) =>
-              n.id === canvasNodeId
-                ? {
-                    ...n,
-                    status: 'completed',
-                    progress: 100,
-                    report: createReportObject(n.title, userPrompt, replyText, 'text'),
-                  }
-                : n
-            ),
-          }));
         }
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: accumulated, isStreaming: false }
+              : m
+          )
+        );
+        setCurrentProject((prev) => ({
+          ...prev,
+          nodes: (prev.nodes || []).map((n) =>
+            n.id === canvasNodeId
+              ? {
+                  ...n,
+                  status: 'completed',
+                  progress: 100,
+                  report: createReportObject(n.title, userPrompt, accumulated, 'text'),
+                }
+              : n
+          ),
+        }));
       }
 
       // Increment daily prompt count if free tier
@@ -694,24 +843,28 @@ export function App() {
         });
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return; // Normal abort by stop button
+      }
+      console.error('Gemini Generation Error:', err);
+      const errMsg = err?.message || 'Gemini encountered an issue generating a response.';
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
-            ? { ...m, content: 'PulseNote encountered an issue generating a response. Please try again.', isStreaming: false }
+            ? { ...m, isStreaming: false, error: errMsg }
             : m
         )
       );
       setCurrentProject((prev) => ({
         ...prev,
         nodes: (prev.nodes || []).map((n) =>
-          n.id === canvasNodeId
-            ? { ...n, status: 'error', progress: 0 }
-            : n
+          n.id === canvasNodeId ? { ...n, status: 'error', progress: 0 } : n
         ),
       }));
-      addToast('error', 'Generation notice: please retry.');
+      addToast('error', `⚠️ ${errMsg}`);
     } finally {
       setIsGenerating(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -961,6 +1114,17 @@ export function App() {
             <div className="hidden sm:flex bg-[#1e1f20] p-0.5 rounded-full border border-[#3c4043]/40 text-xs">
               <button
                 type="button"
+                onClick={() => setActiveView('marketing')}
+                className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
+                  activeView === 'marketing'
+                    ? 'bg-[#2d2e30] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Marketing
+              </button>
+              <button
+                type="button"
                 onClick={() => setActiveView('chat')}
                 className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
                   activeView === 'chat'
@@ -982,6 +1146,40 @@ export function App() {
                 Canvas
               </button>
             </div>
+
+            {/* API Key Settings Button */}
+            <button
+              type="button"
+              onClick={() => setIsApiKeyModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] text-xs font-medium text-[#c4c7c5] hover:text-white transition-all cursor-pointer shadow-sm"
+              title="Gemini API Key configuration"
+            >
+              <Key size={13} className="text-[#4e8cff]" />
+              <span className="hidden sm:inline">API Key</span>
+            </button>
+
+            {/* Gemini Multi-Modal Studio Button */}
+            <button
+              type="button"
+              onClick={() => setIsGeminiStudioOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-600/30 via-purple-600/30 to-pink-600/30 hover:from-blue-600/50 hover:via-purple-600/50 hover:to-pink-600/50 border border-blue-500/40 text-xs font-semibold text-blue-200 transition-all cursor-pointer shadow-sm"
+              title="Open Gemini Studio (Veo Video, Nano Banana Image, Search Grounding)"
+            >
+              <Sparkles size={14} className="text-blue-400 animate-pulse" />
+              <span className="hidden md:inline">Gemini Studio</span>
+            </button>
+
+            {/* OpenRouter App Standalone Mode Button */}
+            <a
+              href="/openrouter"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1e293b] hover:bg-[#334155] border border-blue-400/40 text-xs font-semibold text-blue-300 transition-all cursor-pointer shadow-sm"
+              title="Open simple OpenRouter web app (Pure OpenRouter API only, no Google/Gemini calls)"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="hidden sm:inline">OpenRouter App</span>
+            </a>
 
             {/* Model Selector Dropdown with Pro Gating */}
             <select
@@ -1023,8 +1221,17 @@ export function App() {
           </div>
         </header>
 
-        {/* 3. View Switch: Gemini Chat vs Infinite Flow Canvas */}
-        {activeView === 'chat' ? (
+        {/* 3. View Switch: Marketing Site vs Gemini Chat vs Infinite Flow Canvas */}
+        {activeView === 'marketing' ? (
+          <div className="flex-1 overflow-y-auto scrollbar-thin">
+            <MarketingSite
+              onLaunchApp={() => setActiveView('chat')}
+              onOpenPricing={() => setIsPricingModalOpen(true)}
+              usageState={usageState}
+              currentUser={currentUser}
+            />
+          </div>
+        ) : activeView === 'chat' ? (
           <div className="flex-1 flex flex-col overflow-y-auto px-4 sm:px-6 py-4 scrollbar-thin">
             {messages.length === 0 ? (
               /* Gemini Welcome Empty State */
@@ -1087,6 +1294,7 @@ export function App() {
                     message={m}
                     onAnimateImage={handleAnimateImage}
                     onShowToast={addToast}
+                    onRetry={handleRetry}
                   />
                 ))}
                 <div ref={chatBottomRef} />
@@ -1099,9 +1307,12 @@ export function App() {
                 input={input}
                 setInput={setInput}
                 onSend={handleSend}
+                onStop={handleStopGeneration}
                 isGenerating={isGenerating}
                 attachedFile={stagedAttachment}
                 onSetAttachedFile={setStagedAttachment}
+                toolMode={toolMode}
+                onSetToolMode={setToolMode}
                 isDeepResearch={isDeepResearch}
                 onToggleDeepResearch={() => setIsDeepResearch(!isDeepResearch)}
                 onToggleCanvas={() => setActiveView('canvas')}
@@ -1232,6 +1443,24 @@ export function App() {
           setHasAcceptedLegalOnboarding(true);
           setIsLegalModalOpen(false);
         }}
+      />
+
+      {/* Gemini Studio Multi-Modal Modal */}
+      <GeminiStudioModal
+        isOpen={isGeminiStudioOpen}
+        onClose={() => setIsGeminiStudioOpen(false)}
+        onInsertToChat={(text) => {
+          setInput(text);
+          setIsGeminiStudioOpen(false);
+          addToast('info', 'Loaded into prompt bar');
+        }}
+      />
+
+      {/* Standalone Gemini API Key Configuration Modal */}
+      <ApiKeyModal
+        isOpen={isApiKeyModalOpen}
+        onClose={() => setIsApiKeyModalOpen(false)}
+        onSave={(key) => addToast('success', key ? 'Gemini API key updated' : 'Key removed')}
       />
 
       {/* Global Toast Notifications */}

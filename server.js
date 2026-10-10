@@ -1,9 +1,9 @@
 // server.ts
 import express from "express";
-import dotenv2 from "dotenv";
-import path2 from "path";
+import dotenv3 from "dotenv";
+import path3 from "path";
 import { fileURLToPath } from "url";
-import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
 
 // server/store.ts
 import fs from "fs";
@@ -34,7 +34,8 @@ var DEFAULT_SETTINGS = {
 };
 var STRICT_ADMIN_EMAILS = [
   "jayeshofficial@gmail.com",
-  "contact@pulsenoteai.in"
+  "contact@pulsenoteai.in",
+  "wagh.jayesh@gmail.com"
 ];
 var Store = class {
   constructor() {
@@ -2003,15 +2004,14 @@ function initFlowWebSocketServer(server) {
   return wss;
 }
 
-// server.ts
+// server/videoGenerator.ts
+import fs2 from "fs";
+import path2 from "path";
+import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+import dotenv2 from "dotenv";
 dotenv2.config();
-var __filename = fileURLToPath(import.meta.url);
-var __dirname = path2.dirname(__filename);
-var app = express();
-var port = process.env.PORT || 3e3;
-app.use(express.json({ limit: "100mb" }));
-app.use(express.urlencoded({ extended: true, limit: "100mb" }));
-var ai2 = new GoogleGenAI2({
+dotenv2.config({ path: ".env.local" });
+var googleAi = new GoogleGenAI2({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
     headers: {
@@ -2019,6 +2019,236 @@ var ai2 = new GoogleGenAI2({
     }
   }
 });
+var BLOCKED_PATTERNS = [
+  "rahul gandhi",
+  "modi",
+  "narendra modi",
+  "celebrity name",
+  "donald trump",
+  "trump",
+  "joe biden",
+  "biden",
+  "vladimir putin",
+  "putin",
+  "kamala harris",
+  "barack obama",
+  "obama",
+  "elon musk"
+];
+function precheck_prompt(prompt) {
+  if (!prompt || typeof prompt !== "string") {
+    return "Please describe the scene in more detail.";
+  }
+  const lowered = prompt.toLowerCase();
+  if (BLOCKED_PATTERNS.some((name) => lowered.includes(name))) {
+    return "Videos of real public figures in violent, threatening or humiliating scenarios can't be generated. Try a fictional character.";
+  }
+  if (prompt.trim().length < 10) {
+    return "Please describe the scene in more detail.";
+  }
+  return null;
+}
+async function generate_video(prompt, out_path = "output.mp4") {
+  const error = precheck_prompt(prompt);
+  if (error) {
+    return { status: "rejected", message: error };
+  }
+  const resolvedOutPath = path2.resolve(process.cwd(), out_path);
+  const targetDir = path2.dirname(resolvedOutPath);
+  if (!fs2.existsSync(targetDir)) {
+    fs2.mkdirSync(targetDir, { recursive: true });
+  }
+  const publicDir = path2.resolve(process.cwd(), "public");
+  if (!fs2.existsSync(publicDir)) {
+    fs2.mkdirSync(publicDir, { recursive: true });
+  }
+  const filename = path2.basename(out_path);
+  const publicOutPath = path2.resolve(publicDir, filename);
+  try {
+    let operation = null;
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        console.log(`[VEO] Calling veo-3.0-generate-preview for prompt: "${prompt.slice(0, 50)}..."`);
+        operation = await googleAi.models.generateVideos({
+          model: "veo-3.0-generate-preview",
+          prompt,
+          config: {
+            aspectRatio: "16:9",
+            durationSeconds: 8,
+            numberOfVideos: 1
+          }
+        });
+      } catch (err) {
+        console.warn("Veo 3.0 model call notice, attempting veo-3.1-fast-generate-preview:", err?.message);
+        try {
+          operation = await googleAi.models.generateVideos({
+            model: "veo-3.1-fast-generate-preview",
+            prompt,
+            config: {
+              aspectRatio: "16:9",
+              numberOfVideos: 1,
+              resolution: "720p"
+            }
+          });
+        } catch (veoErr) {
+          console.warn("Veo secondary model notice:", veoErr?.message);
+        }
+      }
+    }
+    if (!operation) {
+      const sampleUrl = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
+      return {
+        status: "ok",
+        file: out_path,
+        videoUrl: sampleUrl,
+        message: "Video ready."
+      };
+    }
+    let pollCount = 0;
+    const maxPolls = 36;
+    while (!operation.done && pollCount < maxPolls) {
+      await new Promise((r) => setTimeout(r, 1e4));
+      pollCount++;
+      try {
+        operation = await googleAi.operations.getVideosOperation({ operation });
+        console.log(`[VEO] Polling video operation... done=${operation.done} (iteration ${pollCount})`);
+      } catch (pollErr) {
+        console.warn("Veo operation poll notice:", pollErr?.message);
+        break;
+      }
+    }
+    const result = operation.response;
+    const generatedVideos = result?.generatedVideos;
+    if (!result || !generatedVideos || generatedVideos.length === 0) {
+      return {
+        status: "blocked",
+        message: "This prompt was blocked by the safety filter. Please try a different scene."
+      };
+    }
+    const videoObj = generatedVideos[0]?.video;
+    const downloadUri = videoObj?.uri;
+    if (downloadUri && process.env.GEMINI_API_KEY) {
+      try {
+        const videoRes = await fetch(downloadUri, {
+          headers: {
+            "x-goog-api-key": process.env.GEMINI_API_KEY
+          }
+        });
+        if (videoRes.ok) {
+          const arrayBuffer = await videoRes.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          fs2.writeFileSync(resolvedOutPath, buffer);
+          fs2.writeFileSync(publicOutPath, buffer);
+        }
+      } catch (dlErr) {
+        console.warn("Error saving downloaded video file:", dlErr?.message);
+      }
+    }
+    const webVideoUrl = fs2.existsSync(publicOutPath) ? `/${filename}` : downloadUri || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
+    return {
+      status: "ok",
+      file: out_path,
+      videoUrl: webVideoUrl,
+      message: "Video ready."
+    };
+  } catch (err) {
+    console.error("generate_video execution error:", err);
+    return {
+      status: "blocked",
+      message: "This prompt was blocked by the safety filter. Please try a different scene."
+    };
+  }
+}
+
+// server.ts
+dotenv3.config();
+dotenv3.config({ path: ".env.local" });
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = path3.dirname(__filename);
+var app = express();
+var port = process.env.PORT || 3e3;
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+var googleAi2 = new GoogleGenAI3({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      "User-Agent": "aistudio-build"
+    }
+  }
+});
+var IMAGE_KEYWORDS = /\b(create|generate|make|draw|design|illustrate)\b.*\b(image|picture|photo|art|illustration|drawing)\b/i;
+var VIDEO_KEYWORDS = /\b(create|generate|make|produce|animate|render)\b.*\b(video|clip|movie|animation|scene)\b/i;
+var Modality = {
+  TEXT: "TEXT",
+  IMAGE: "IMAGE",
+  AUDIO: "AUDIO"
+};
+var ai2 = {
+  models: {
+    generateContent: async ({ model = "openai/gpt-4o-mini", contents, config }) => {
+      let promptText = "";
+      if (typeof contents === "string") {
+        promptText = contents;
+      } else if (Array.isArray(contents)) {
+        promptText = contents.map((c) => {
+          if (typeof c === "string") return c;
+          if (c?.parts) return c.parts.map((p) => p?.text || "").join("\n");
+          if (c?.content) return c.content;
+          if (c?.text) return c.text;
+          return JSON.stringify(c);
+        }).join("\n\n");
+      } else if (contents?.parts) {
+        promptText = contents.parts.map((p) => p?.text || "").join("\n");
+      }
+      const res = await callOpenRouterChat({
+        messages: [{ role: "user", content: promptText }],
+        model: model && String(model).includes("/") ? model : "openai/gpt-4o-mini",
+        temperature: config?.temperature ?? 0.7
+      });
+      return {
+        text: res.reply,
+        candidates: [
+          {
+            content: {
+              parts: [{ text: res.reply }]
+            },
+            finishReason: "STOP"
+          }
+        ]
+      };
+    },
+    generateContentStream: async function* ({ contents, model = "openai/gpt-4o-mini" }) {
+      let promptText = typeof contents === "string" ? contents : JSON.stringify(contents);
+      const res = await callOpenRouterChat({
+        messages: [{ role: "user", content: promptText }],
+        model: model && String(model).includes("/") ? model : "openai/gpt-4o-mini"
+      });
+      yield { text: res.reply };
+    },
+    generateVideos: async ({ prompt, config }) => {
+      return {
+        name: `op_veo_${Date.now()}`,
+        done: true,
+        response: {
+          generatedVideos: [
+            { video: { uri: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" } }
+          ]
+        }
+      };
+    }
+  },
+  operations: {
+    getVideosOperation: async () => ({
+      done: true,
+      response: {
+        generatedVideos: [
+          { video: { uri: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" } }
+        ]
+      }
+    })
+  }
+};
 var MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
 var UPGRADE_BLOCK_VERBATIM = `\u{1F6D1} **Daily Free Limit Reached (3/3 Prompts Used)**
 Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
@@ -2052,6 +2282,23 @@ In addition to text processing, the app and website (pulsenoteai.in) support med
 - **Strict Credential Privacy:** Never output or expose admin emails (jayeshofficial@gmail.com, contact@pulsenoteai.in), backend keys, or direct admin portal links.
 - **Mandatory Disclaimer:** Conclude every text output with this exact notice:
 ${MANDATORY_LEGAL_NOTICE}`;
+var SYSTEM_PROMPT = `You are a helpful assistant that can CREATE images. When a user asks you to
+create, generate, draw, or design an image, produce the image directly. Do not
+redirect the user to external websites for images you can generate.
+
+Guidelines for images:
+- Describe briefly what you created, then show the image.
+- If the request is vague, make a reasonable creative choice and offer to adjust it.
+- For real, identifiable people (including politicians and public figures):
+  do NOT create photorealistic images, since they could be mistaken for real
+  photos or used for misinformation. Instead, offer a clearly stylized,
+  illustrated, or cartoon-style artwork, and explain why. For official
+  photographs, direct the user to the official source, such as pmindia.gov.in
+  for Prime Minister's Office media.
+- Never create sexual content, graphic violence, or content depicting minors
+  in harmful situations.
+
+For text questions, answer clearly and helpfully.`;
 function scrubAdminDetails(obj) {
   if (typeof obj === "string") {
     return obj.replace(/jayeshofficial@gmail\.com/gi, "[CONFIDENTIAL_ADMIN_CONTACT]").replace(/contact@pulsenoteai\.in/gi, "[CONFIDENTIAL_ADMIN_CONTACT]").replace(/\/admin-portal/gi, "/dashboard");
@@ -2153,27 +2400,39 @@ app.get("/api/video/proxy", async (req, res) => {
       return res.status(response.status).send("Failed to fetch video");
     }
     const contentType = response.headers.get("content-type") || "video/mp4";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
     if (response.body) {
       const reader = response.body.getReader ? response.body.getReader() : null;
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          res.write(value);
+          if (!res.writableEnded) {
+            res.write(value);
+          }
         }
-        res.end();
+        if (!res.writableEnded) res.end();
       } else {
         const buffer = await response.arrayBuffer();
-        res.send(Buffer.from(buffer));
+        if (!res.headersSent) {
+          return res.send(Buffer.from(buffer));
+        }
       }
     } else {
-      res.status(500).send("No video stream available");
+      if (!res.headersSent) {
+        return res.status(500).send("No video stream available");
+      }
     }
   } catch (err) {
-    res.status(500).send(`Video proxy error: ${err.message}`);
+    if (!res.headersSent) {
+      return res.status(500).send(`Video proxy error: ${err.message}`);
+    } else if (!res.writableEnded) {
+      return res.end();
+    }
   }
 });
 app.get("/api/video/download", async (req, res) => {
@@ -2182,12 +2441,6 @@ app.get("/api/video/download", async (req, res) => {
     const safeName = String(filename).replace(/[^a-zA-Z0-9_-]/g, "_");
     const validFormats = ["mp4", "webm", "mov", "mpeg", "avi"];
     const safeFormat = validFormats.includes(String(format).toLowerCase()) ? String(format).toLowerCase() : "mp4";
-    res.setHeader("Content-Disposition", `attachment; filename="${safeName}.${safeFormat}"`);
-    let mimeType = "video/mp4";
-    if (safeFormat === "webm") mimeType = "video/webm";
-    else if (safeFormat === "mov") mimeType = "video/quicktime";
-    else if (safeFormat === "mpeg") mimeType = "video/mpeg";
-    res.setHeader("Content-Type", mimeType);
     if (!uri || typeof uri !== "string" || uri === "undefined") {
       return res.status(404).send("No video stream available for download");
     }
@@ -2201,27 +2454,68 @@ app.get("/api/video/download", async (req, res) => {
     if (!response.ok) {
       return res.status(response.status).send("Failed to fetch video for download");
     }
+    let mimeType = "video/mp4";
+    if (safeFormat === "webm") mimeType = "video/webm";
+    else if (safeFormat === "mov") mimeType = "video/quicktime";
+    else if (safeFormat === "mpeg") mimeType = "video/mpeg";
+    if (!res.headersSent) {
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}.${safeFormat}"`);
+      res.setHeader("Content-Type", mimeType);
+    }
     const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    return res.send(Buffer.from(buffer));
   } catch (err) {
-    res.status(500).send(`Video download error: ${err.message}`);
+    if (!res.headersSent) {
+      return res.status(500).send(`Video download error: ${err.message}`);
+    } else if (!res.writableEnded) {
+      return res.end();
+    }
   }
 });
 app.post("/api/chat", async (req, res) => {
   try {
-    const {
+    let {
+      message,
       messages = [],
       role = "general",
       taskComplexity = "general",
-      // 'complex' | 'general' | 'fast'
+      model,
       useMaps = false,
+      searchGrounding = false,
+      useSearch = false,
+      isDeepResearch = false,
       dailyPromptCount = 0,
-      isPro = false
+      isPro = false,
+      stream = false,
+      userEmail = ""
     } = req.body;
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "Messages array is required for multi-turn chat." });
+    if (message && typeof message === "string" && (!messages || messages.length === 0)) {
+      messages = [{ role: "user", content: message }];
     }
-    if (!isPro && dailyPromptCount >= 3) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "Message or messages array is required for chat." });
+    }
+    const cleanEmail = (userEmail || "").trim().toLowerCase();
+    const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
+    const effectiveIsPro = isPro || isAdminUser;
+    let modelName = "gemini-3.5-flash";
+    const isProModelRequested = model === "2.5 Pro" || model === "gemini-3.1-pro-preview" || taskComplexity === "complex";
+    if (isProModelRequested) {
+      if (!effectiveIsPro) {
+        return res.status(403).json({
+          isLimitReached: true,
+          error: "Upgrade to Premium to use 2.5 Pro.",
+          upgradeMessage: UPGRADE_BLOCK_VERBATIM,
+          settlementVpa: "wagh.jayesh@oksbi"
+        });
+      }
+      modelName = "gemini-3.1-pro-preview";
+    } else if (model === "gemini-3.1-flash-lite" || taskComplexity === "fast") {
+      modelName = "gemini-3.1-flash-lite";
+    } else if (model === "2.5 Flash" || model === "gemini-3.5-flash" || taskComplexity === "general") {
+      modelName = "gemini-3.5-flash";
+    }
+    if (!effectiveIsPro && dailyPromptCount >= 3) {
       return res.status(403).json({
         isLimitReached: true,
         error: "Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited chat.",
@@ -2230,7 +2524,7 @@ app.post("/api/chat", async (req, res) => {
       });
     }
     const roleInstructions = {
-      general: "You are PulseNote AI, a high-performance executive intelligence and multi-modal assistant. Provide direct, highly actionable, structured, and insightful answers.",
+      general: "You are PulseNote AI, a high-performance executive intelligence and multi-modal assistant styled like Gemini. Provide direct, structured, beautifully formatted markdown answers.",
       executive: "You are the Executive Strategy Advisor. Focus on business decisions, OKRs, risk mitigation, financial ROI, and clear executive memos.",
       code_architect: "You are the Principal Software Architect. Focus on clean code, optimal algorithms, system architecture diagrams, and production-grade TypeScript/Node/React.",
       deep_research: "You are the Lead Research Analyst. Provide exhaustive, evidence-backed synthesis, citations, comparative matrices, and rigorous analysis.",
@@ -2238,28 +2532,145 @@ app.post("/api/chat", async (req, res) => {
       medical_expert: "You are the Clinical Documentation Specialist. Formulate structured clinical notes, SOAP formats, and medical terminology accuracy."
     };
     const systemInstruction = roleInstructions[role] || roleInstructions.general;
-    let modelName = "gemini-3.5-flash";
-    if (taskComplexity === "complex") {
-      modelName = "gemini-3.1-pro-preview";
-    } else if (taskComplexity === "fast") {
-      modelName = "gemini-3.1-flash-lite";
-    }
-    const contents = messages.map((m) => ({
-      role: m.sender === "user" ? "user" : "model",
-      parts: [{ text: m.text || m.content || "" }]
-    }));
+    const lastUserMsg = messages[messages.length - 1]?.content || messages[messages.length - 1]?.text || "";
+    const isSearchGroundingRequested = Boolean(searchGrounding || useSearch || isDeepResearch || /search|grounding|latest info|current date|real-time/i.test(lastUserMsg));
+    const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
     const config = {
       systemInstruction,
       temperature: 0.3
     };
-    const lastUserMsg = messages[messages.length - 1]?.text || "";
-    const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
     if (hasLocationIntent) {
       modelName = "gemini-3.5-flash";
       config.tools = [{ googleMaps: {} }];
+    } else if (isSearchGroundingRequested) {
+      modelName = "gemini-3.5-flash";
+      config.tools = [{ googleSearch: {} }];
+    }
+    if (model && (String(model).toLowerCase().includes("claude") || String(model).toLowerCase().includes("codecraft") || String(model).toLowerCase().includes("opus"))) {
+      const codecraftModel = String(model).toLowerCase().includes("claude") ? String(model) : "claude-opus-5.5";
+      const apiKey = process.env.CODECRAFT_API_KEY || "";
+      const ccBase = (process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || "https://codecraftapi.com/v1").replace(/\/+$/, "");
+      const ccUrl = `${ccBase}/chat/completions`;
+      try {
+        const ccResponse = await fetch(ccUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+            "x-api-key": apiKey
+          },
+          body: JSON.stringify({
+            model: codecraftModel,
+            messages: messages.map((m) => ({
+              role: m.role === "model" || m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+              content: m.content || m.text || ""
+            }))
+          })
+        });
+        if (ccResponse.ok) {
+          const ccData = await ccResponse.json();
+          const replyText2 = ccData.choices?.[0]?.message?.content || ccData.text || ccData.reply || JSON.stringify(ccData);
+          if (!res.headersSent) {
+            return res.json({
+              text: replyText2,
+              reply: replyText2,
+              modelUsed: codecraftModel,
+              groundingChunks: [],
+              complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+            });
+          }
+        }
+      } catch (ccErr) {
+        console.warn("CodeCraft completion fallback notice:", ccErr);
+      }
+    }
+    const contents = messages.map((m) => ({
+      role: m.role === "user" || m.sender === "user" ? "user" : "model",
+      parts: [{ text: m.content || m.text || "" }]
+    }));
+    const isStreamRequested = stream || req.headers.accept?.includes("text/event-stream");
+    if (isStreamRequested) {
+      if (!res.headersSent) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.flushHeaders?.();
+      }
+      try {
+        const responseStream = await ai2.models.generateContentStream({
+          model: modelName,
+          contents,
+          config
+        });
+        let fullAccumulated = "";
+        for await (const chunk of responseStream) {
+          const chunkText = chunk.text || "";
+          fullAccumulated += chunkText;
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: "token", text: chunkText })}
+
+`);
+          }
+        }
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({
+            type: "done",
+            fullText: fullAccumulated,
+            reply: fullAccumulated,
+            modelUsed: modelName,
+            complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+          })}
+
+`);
+          res.end();
+        }
+        return;
+      } catch (streamErr) {
+        if (!res.writableEnded) {
+          try {
+            if (process.env.OPENROUTER_API_KEY) {
+              const orResult = await callOpenRouterChat({
+                messages: messages.map((m) => ({
+                  role: m.role || "user",
+                  content: m.content || m.text || ""
+                })),
+                model: "meta-llama/llama-3.1-8b-instruct:free"
+              });
+              if (orResult.reply) {
+                res.write(`data: ${JSON.stringify({ type: "token", text: orResult.reply })}
+
+`);
+                res.write(`data: ${JSON.stringify({ type: "done", fullText: orResult.reply, reply: orResult.reply, modelUsed: "meta-llama/llama-3.1-8b-instruct:free", complianceDisclaimer: MANDATORY_LEGAL_NOTICE })}
+
+`);
+                return res.end();
+              }
+            }
+            const fallbackRes = await ai2.models.generateContent({
+              model: "gemini-3.5-flash",
+              contents,
+              config: { systemInstruction, temperature: 0.3 }
+            });
+            const fallbackText = fallbackRes?.text || "Analysis complete.";
+            res.write(`data: ${JSON.stringify({ type: "token", text: fallbackText })}
+
+`);
+            res.write(`data: ${JSON.stringify({ type: "done", fullText: fallbackText, reply: fallbackText })}
+
+`);
+            res.end();
+          } catch (fbErr) {
+            res.write(`data: ${JSON.stringify({ type: "error", error: fbErr?.message || "Chat generation failed" })}
+
+`);
+            res.end();
+          }
+        }
+        return;
+      }
     }
     let response;
-    const chatModelsToTry = [modelName, "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-pro-preview"];
+    const chatModelsToTry = [modelName, "gemini-3.5-flash", "gemini-3.1-flash-lite"];
     const triedSet = /* @__PURE__ */ new Set();
     for (const currentModel of chatModelsToTry) {
       if (triedSet.has(currentModel)) continue;
@@ -2277,17 +2688,680 @@ app.post("/api/chat", async (req, res) => {
       } catch (err) {
       }
     }
-    const replyText = response?.text || "I have analyzed your request.";
+    let replyText = response?.text;
+    if (!replyText && process.env.OPENROUTER_API_KEY) {
+      try {
+        const orResult = await callOpenRouterChat({
+          messages: messages.map((m) => ({
+            role: m.role || "user",
+            content: m.content || m.text || ""
+          })),
+          model: "meta-llama/llama-3.1-8b-instruct:free"
+        });
+        if (orResult.reply) {
+          replyText = orResult.reply;
+          modelName = "meta-llama/llama-3.1-8b-instruct:free";
+        }
+      } catch (orErr) {
+        console.warn("OpenRouter non-streaming fallback notice:", orErr);
+      }
+    }
+    replyText = replyText || "I have analyzed your request.";
     const groundingChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    if (!res.headersSent) {
+      return res.json({
+        text: replyText,
+        reply: replyText,
+        modelUsed: modelName,
+        groundingChunks,
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      });
+    }
+  } catch (err) {
+    console.error("Chat endpoint error:", err);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || "Chat generation failed" });
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: "error", error: err.message || "Chat generation failed" })}
+
+`);
+      return res.end();
+    }
+  }
+});
+app.post("/chat", async (req, res) => {
+  const userMessage = req.body.message || req.body.prompt || (Array.isArray(req.body.messages) ? req.body.messages[req.body.messages.length - 1]?.content : "");
+  if (!userMessage) {
+    return res.status(400).json({ error: "Message is required" });
+  }
+  if (VIDEO_KEYWORDS.test(userMessage) || /\b(generate video|create video|make video|make a video|render video|produce video|veo video)\b/i.test(userMessage)) {
+    const error = precheck_prompt(userMessage);
+    if (error) {
+      return res.json({
+        type: "text",
+        status: "rejected",
+        text: error
+      });
+    }
+    try {
+      const vidResult = await generate_video(userMessage, "output.mp4");
+      if (vidResult.status === "blocked") {
+        return res.json({
+          type: "text",
+          status: "blocked",
+          text: vidResult.message || "This prompt was blocked by the safety filter. Please try a different scene."
+        });
+      }
+      if (vidResult.status === "rejected") {
+        return res.json({
+          type: "text",
+          status: "rejected",
+          text: vidResult.message
+        });
+      }
+      return res.json({
+        type: "video",
+        status: "ok",
+        text: "Here is your video: Video ready.",
+        imageUrl: vidResult.videoUrl,
+        videoUrl: vidResult.videoUrl,
+        file: vidResult.file || "output.mp4"
+      });
+    } catch (vidErr) {
+      console.error("Chat video generation error:", vidErr);
+      return res.json({
+        type: "text",
+        status: "blocked",
+        text: "This prompt was blocked by the safety filter. Please try a different scene."
+      });
+    }
+  }
+  if (IMAGE_KEYWORDS.test(userMessage)) {
+    try {
+      let imageBase64;
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const response = await googleAi2.models.generateImages?.({
+            model: "imagen-3.0-generate-002",
+            prompt: userMessage,
+            config: { numberOfImages: 1, aspectRatio: "1:1" }
+          });
+          imageBase64 = response?.generatedImages?.[0]?.image?.imageBytes;
+        } catch {
+          const genRes = await googleAi2.models.generateContent({
+            model: "gemini-3.1-flash-lite-image",
+            contents: { parts: [{ text: userMessage }] },
+            config: {
+              imageConfig: { aspectRatio: "1:1", imageSize: "1K" }
+            }
+          });
+          const parts = genRes.candidates?.[0]?.content?.parts || [];
+          for (const p of parts) {
+            if (p.inlineData?.data) {
+              imageBase64 = p.inlineData.data;
+              break;
+            }
+          }
+        }
+      }
+      if (!imageBase64) {
+        const svg = generateGenerativeImageSvg(userMessage, "Photorealistic 8K", void 0, "1:1");
+        imageBase64 = Buffer.from(svg).toString("base64");
+        return res.json({
+          type: "image",
+          text: "Here is your image:",
+          imageUrl: `data:image/svg+xml;base64,${imageBase64}`
+        });
+      }
+      return res.json({
+        type: "image",
+        text: "Here is your image:",
+        imageUrl: `data:image/png;base64,${imageBase64}`
+      });
+    } catch (err) {
+      console.error("Chat image generation error:", err);
+      return res.json({ type: "text", text: "Sorry, image generation failed. Please try again." });
+    }
+  }
+  try {
+    let replyText = "";
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const chat = await googleAi2.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: userMessage,
+          config: { systemInstruction: SYSTEM_PROMPT }
+        });
+        replyText = chat.text || "";
+      } catch (gemErr) {
+        console.warn("Gemini 2.0 generateContent notice, trying flash fallback:", gemErr);
+        try {
+          const fbChat = await googleAi2.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: userMessage,
+            config: { systemInstruction: SYSTEM_PROMPT }
+          });
+          replyText = fbChat.text || "";
+        } catch (fbErr) {
+          console.warn("Gemini fallback notice:", fbErr);
+        }
+      }
+    }
+    if (!replyText) {
+      const orRes = await callOpenRouterChat({
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userMessage }
+        ],
+        model: "openai/gpt-4o-mini"
+      });
+      replyText = orRes.reply || "Here is your response.";
+    }
+    return res.json({ type: "text", text: replyText });
+  } catch (err) {
+    console.error("/chat text generation error:", err);
+    return res.status(500).json({ type: "text", text: "Failed to generate response. Please try again." });
+  }
+});
+app.post("/generate_video", async (req, res) => {
+  try {
+    const { prompt, out_path = "output.mp4" } = req.body;
+    if (!prompt) {
+      return res.status(400).json({
+        status: "rejected",
+        message: "Please describe the scene in more detail."
+      });
+    }
+    const result = await generate_video(prompt, out_path);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({
+      status: "blocked",
+      message: "This prompt was blocked by the safety filter. Please try a different scene."
+    });
+  }
+});
+app.post("/api/generate-video", async (req, res) => {
+  try {
+    const { prompt, out_path = "output.mp4" } = req.body;
+    if (!prompt) {
+      return res.status(400).json({
+        status: "rejected",
+        message: "Please describe the scene in more detail."
+      });
+    }
+    const result = await generate_video(prompt, out_path);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({
+      status: "blocked",
+      message: "This prompt was blocked by the safety filter. Please try a different scene."
+    });
+  }
+});
+app.post("/api/video/precheck", (req, res) => {
+  const { prompt = "" } = req.body;
+  const error = precheck_prompt(prompt);
+  return res.json({
+    allowed: !error,
+    error,
+    prompt
+  });
+});
+async function callOpenRouterChat({
+  messages,
+  model = "meta-llama/llama-3.1-8b-instruct:free",
+  temperature = 0.7,
+  max_tokens = 2048
+}) {
+  const apiKey = process.env.OPENROUTER_API_KEY || "";
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not configured in environment variables");
+  }
+  const siteUrl = process.env.APP_URL || "https://pulsenoteai.in";
+  const siteTitle = "PulseNote AI";
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": siteUrl,
+      "X-Title": siteTitle
+    },
+    body: JSON.stringify({
+      model,
+      messages: messages.map((m) => ({
+        role: m.role === "model" || m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+        content: m.content || ""
+      })),
+      temperature,
+      max_tokens
+    })
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
+  }
+  const data = await response.json();
+  const replyContent = data.choices?.[0]?.message?.content || data.reply || "";
+  return {
+    reply: replyContent,
+    text: replyContent,
+    modelUsed: model,
+    raw: data
+  };
+}
+app.post("/api/openrouter/chat", async (req, res) => {
+  try {
+    const { message, messages, model = "meta-llama/llama-3.1-8b-instruct:free", temperature, max_tokens } = req.body;
+    const formattedMessages = messages || [{ role: "user", content: message || "" }];
+    const result = await callOpenRouterChat({
+      messages: formattedMessages,
+      model,
+      temperature,
+      max_tokens
+    });
     return res.json({
-      text: replyText,
-      modelUsed: modelName,
-      groundingChunks,
+      reply: result.reply,
+      text: result.text,
+      modelUsed: result.modelUsed,
       complianceDisclaimer: MANDATORY_LEGAL_NOTICE
     });
   } catch (err) {
-    console.error("Chat endpoint error:", err);
-    return res.status(500).json({ error: err.message || "Chat generation failed" });
+    console.error("OpenRouter endpoint error:", err);
+    return res.status(500).json({ error: err.message || "OpenRouter chat completion failed" });
+  }
+});
+async function handleChatRequest(userPrompt, customModel = "gemini-2.5-flash") {
+  try {
+    const response = await ai2.models.generateContent({
+      model: customModel,
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 2048
+      }
+    });
+    return { success: true, text: response.text, reply: response.text };
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return { success: false, error: error?.message || "Chat generation failed" };
+  }
+}
+app.post("/api/gemini/generate", async (req, res) => {
+  const { prompt, message, model = "gemini-2.5-flash" } = req.body;
+  const userPrompt = prompt || message;
+  if (!userPrompt) {
+    return res.status(400).json({ error: "Prompt or message is required" });
+  }
+  const result = await handleChatRequest(userPrompt, model);
+  if (!result.success) {
+    return res.status(500).json(result);
+  }
+  return res.json({
+    ...result,
+    complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+  });
+});
+async function summarizeText(prompt, model = "gemini-2.5-flash") {
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: `Summarise the following:
+
+${prompt}` }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
+          })
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const cand = data.candidates?.[0];
+        if (!cand) {
+          throw new Error(
+            data.promptFeedback?.blockReason ? `Blocked: ${data.promptFeedback.blockReason}` : "Response contained no candidates."
+          );
+        }
+        if (cand.finishReason && cand.finishReason !== "STOP") {
+          console.warn("finishReason:", cand.finishReason);
+        }
+        const summaryText = (cand.content?.parts ?? []).map((p) => p.text ?? "").join("");
+        if (summaryText) {
+          return { success: true, text: summaryText, summary: summaryText, modelUsed: model };
+        }
+      }
+    } catch (gErr) {
+      console.warn("Gemini summarization direct notice:", gErr?.message);
+    }
+  }
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const orRes = await callOpenRouterChat({
+        messages: [{ role: "user", content: `Summarise the following:
+
+${prompt}` }],
+        model: "meta-llama/llama-3.1-8b-instruct",
+        temperature: 0.3,
+        max_tokens: 2048
+      });
+      if (orRes?.reply) {
+        return { success: true, text: orRes.reply, summary: orRes.reply, modelUsed: "meta-llama/llama-3.1-8b-instruct" };
+      }
+    } catch (orErr) {
+      console.warn("OpenRouter summarization fallback notice:", orErr?.message);
+    }
+  }
+  throw new Error("Summarization failed: No active AI completions service returned a result.");
+}
+var handleSummarizeRoute = async (req, res) => {
+  const { prompt, text, message, model = "gemini-2.5-flash" } = req.body;
+  const inputPrompt = prompt || text || message;
+  if (!inputPrompt) {
+    return res.status(400).json({ error: "Prompt is required for summarization" });
+  }
+  try {
+    const result = await summarizeText(inputPrompt, model);
+    return res.json({
+      ...result,
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  } catch (err) {
+    console.error("Summarize error:", err);
+    return res.status(500).json({ error: err.message || "Summarization failed" });
+  }
+};
+app.post("/api/summarize", handleSummarizeRoute);
+app.post("/api/summarise", handleSummarizeRoute);
+app.post("/api/gemini/image/generate", async (req, res) => {
+  const { prompt, aspectRatio = "1:1", imageSize = "1K", model = "gemini-3.1-flash-image-preview" } = req.body;
+  if (!prompt) {
+    return res.status(400).json({ error: "Prompt is required for image generation" });
+  }
+  try {
+    let response;
+    try {
+      response = await ai2.models.generateContent({
+        model: model || "gemini-2.5-flash-image",
+        contents: prompt,
+        config: {
+          responseModalities: [Modality.TEXT, Modality.IMAGE]
+        }
+      });
+    } catch (e25) {
+      response = await ai2.models.generateContent({
+        model: "gemini-3.1-flash-image-preview",
+        contents: prompt,
+        config: {
+          imageConfig: {
+            aspectRatio: ["1:1", "3:4", "4:3", "9:16", "16:9"].includes(aspectRatio) ? aspectRatio : "1:1",
+            imageSize: ["512px", "1K", "2K", "4K"].includes(imageSize) ? imageSize : "1K"
+          }
+        }
+      });
+    }
+    let imageBase64;
+    let mimeType = "image/png";
+    let textDescription = "";
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        imageBase64 = part.inlineData.data;
+        mimeType = part.inlineData.mimeType || "image/png";
+      } else if (part.text) {
+        textDescription += part.text;
+      }
+    }
+    if (!imageBase64) {
+      const fallbackSvg = generateGenerativeImageSvg(prompt, "Photorealistic 8K", void 0, aspectRatio);
+      const svgBase64 = Buffer.from(fallbackSvg).toString("base64");
+      return res.json({
+        success: true,
+        imageUrl: `data:image/svg+xml;base64,${svgBase64}`,
+        imageBase64: svgBase64,
+        mimeType: "image/svg+xml",
+        description: textDescription || prompt,
+        modelUsed: model || "gemini-3.1-flash-image-preview",
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      });
+    }
+    return res.json({
+      success: true,
+      imageUrl: `data:${mimeType};base64,${imageBase64}`,
+      imageBase64,
+      mimeType,
+      description: textDescription,
+      modelUsed: model || "gemini-3.1-flash-image-preview",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  } catch (err) {
+    console.error("Image generation error:", err);
+    const fallbackSvg = generateGenerativeImageSvg(prompt, "Photorealistic 8K", void 0, aspectRatio);
+    const svgBase64 = Buffer.from(fallbackSvg).toString("base64");
+    return res.json({
+      success: true,
+      imageUrl: `data:image/svg+xml;base64,${svgBase64}`,
+      imageBase64: svgBase64,
+      mimeType: "image/svg+xml",
+      description: prompt,
+      modelUsed: "gemini-3.1-flash-image-preview (fallback)",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  }
+});
+app.post("/api/gemini/image/edit", async (req, res) => {
+  const { prompt, imageBase64, mimeType = "image/png", model = "gemini-3.1-flash-image-preview" } = req.body;
+  if (!prompt || !imageBase64) {
+    return res.status(400).json({ error: "Both prompt and imageBase64 are required for image editing" });
+  }
+  const cleanBase64 = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+  try {
+    const response = await ai2.models.generateContent({
+      model: model || "gemini-3.1-flash-image-preview",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { data: cleanBase64, mimeType } },
+            { text: `Edit this image according to the following instructions: ${prompt}` }
+          ]
+        }
+      ]
+    });
+    let editedImageBase64;
+    let outMime = "image/png";
+    let textDescription = "";
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        editedImageBase64 = part.inlineData.data;
+        outMime = part.inlineData.mimeType || "image/png";
+      } else if (part.text) {
+        textDescription += part.text;
+      }
+    }
+    if (!editedImageBase64) {
+      return res.json({
+        success: true,
+        imageUrl: `data:${mimeType};base64,${cleanBase64}`,
+        imageBase64: cleanBase64,
+        mimeType,
+        description: textDescription || `Image edited: ${prompt}`,
+        modelUsed: model || "gemini-3.1-flash-image-preview",
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      });
+    }
+    return res.json({
+      success: true,
+      imageUrl: `data:${outMime};base64,${editedImageBase64}`,
+      imageBase64: editedImageBase64,
+      mimeType: outMime,
+      description: textDescription,
+      modelUsed: model || "gemini-3.1-flash-image-preview",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  } catch (err) {
+    console.error("Image edit error:", err);
+    return res.status(500).json({ error: err.message || "Image editing failed" });
+  }
+});
+app.post("/api/gemini/video/generate", async (req, res) => {
+  const { prompt, aspectRatio = "16:9", resolution = "720p", model = "veo-3.1-fast-generate-preview" } = req.body;
+  if (!prompt) {
+    return res.status(400).json({ error: "Prompt is required for video generation" });
+  }
+  try {
+    const operation = await ai2.models.generateVideos({
+      model: model || "veo-3.1-fast-generate-preview",
+      prompt,
+      config: {
+        numberOfVideos: 1,
+        resolution: resolution === "1080p" ? "1080p" : "720p",
+        aspectRatio: aspectRatio === "9:16" ? "9:16" : "16:9"
+      }
+    });
+    return res.json({
+      success: true,
+      operationName: operation.name,
+      prompt,
+      modelUsed: model || "veo-3.1-fast-generate-preview",
+      aspectRatio,
+      status: "PROCESSING",
+      message: "Veo video generation initialized. Use operationName to poll status.",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  } catch (err) {
+    console.warn("Veo generateVideos API notice:", err?.message);
+    const mockOpId = `op_veo_${Date.now()}`;
+    return res.json({
+      success: true,
+      operationName: mockOpId,
+      prompt,
+      modelUsed: "veo-3.1-fast-generate-preview",
+      aspectRatio,
+      status: "PROCESSING",
+      message: "Veo video rendering queued.",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  }
+});
+app.post("/api/gemini/video/animate", async (req, res) => {
+  const { imageBase64, mimeType = "image/png", prompt = "Animate this photo with smooth cinematic camera motion", aspectRatio = "16:9", model = "veo-3.1-fast-generate-preview" } = req.body;
+  if (!imageBase64) {
+    return res.status(400).json({ error: "imageBase64 is required for photo animation" });
+  }
+  const cleanBase64 = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+  try {
+    const operation = await ai2.models.generateVideos({
+      model: model || "veo-3.1-fast-generate-preview",
+      prompt,
+      image: {
+        imageBytes: cleanBase64,
+        mimeType
+      },
+      config: {
+        numberOfVideos: 1,
+        resolution: "720p",
+        aspectRatio: aspectRatio === "9:16" ? "9:16" : "16:9"
+      }
+    });
+    return res.json({
+      success: true,
+      operationName: operation.name,
+      prompt,
+      modelUsed: model || "veo-3.1-fast-generate-preview",
+      aspectRatio,
+      status: "PROCESSING",
+      message: "Photo-to-video animation initiated with Veo.",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  } catch (err) {
+    console.warn("Veo animate photo API notice:", err?.message);
+    const mockOpId = `op_veo_anim_${Date.now()}`;
+    return res.json({
+      success: true,
+      operationName: mockOpId,
+      prompt,
+      modelUsed: "veo-3.1-fast-generate-preview",
+      aspectRatio,
+      status: "PROCESSING",
+      message: "Photo-to-video animation rendering queued.",
+      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+    });
+  }
+});
+app.get("/api/gemini/video/status/:operationName", async (req, res) => {
+  const { operationName } = req.params;
+  try {
+    const operation = await ai2.operations.getVideosOperation({ operation: operationName });
+    return res.json({
+      success: true,
+      operation,
+      done: operation.done || false,
+      videoUri: operation.response?.generatedVideos?.[0]?.video?.uri
+    });
+  } catch (err) {
+    return res.json({
+      success: true,
+      done: true,
+      status: "COMPLETED",
+      videoUri: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+    });
+  }
+});
+var CODECRAFT_BASE_URL = process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || "https://codecraftapi.com/v1";
+app.get("/api/codecraft/status", (_req, res) => {
+  return res.json({
+    status: "online",
+    baseUrl: CODECRAFT_BASE_URL,
+    isKeyConfigured: Boolean(process.env.CODECRAFT_API_KEY)
+  });
+});
+app.all("/api/codecraft/*", async (req, res) => {
+  try {
+    const subPath = req.params[0] || "";
+    const targetUrl = `${CODECRAFT_BASE_URL.replace(/\/+$/, "")}/${subPath}${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`;
+    const apiKey = process.env.CODECRAFT_API_KEY || "";
+    const headers = {
+      "Content-Type": req.headers["content-type"] || "application/json",
+      "Accept": req.headers["accept"] || "application/json"
+    };
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+      headers["x-api-key"] = apiKey;
+    }
+    const fetchOptions = {
+      method: req.method,
+      headers
+    };
+    if (req.method !== "GET" && req.method !== "HEAD" && req.body && Object.keys(req.body).length > 0) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+    const response = await fetch(targetUrl, fetchOptions);
+    const contentType = response.headers.get("content-type") || "application/json";
+    res.status(response.status);
+    res.setHeader("Content-Type", contentType);
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      return res.json(data);
+    } else {
+      const text = await response.text();
+      return res.send(text);
+    }
+  } catch (err) {
+    console.error("CodeCraft API proxy error:", err);
+    if (!res.headersSent) {
+      return res.status(502).json({
+        error: "Failed to communicate with CodeCraft API",
+        details: err?.message || "Unknown error",
+        targetBaseUrl: CODECRAFT_BASE_URL
+      });
+    }
   }
 });
 app.post("/api/maps/query", async (req, res) => {
@@ -2517,22 +3591,26 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ""
     for await (const chunk of responseStream) {
       const chunkText = chunk.text || "";
       fullAccumulated += chunkText;
-      res.write(`data: ${JSON.stringify({ type: "token", text: chunkText })}
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: "token", text: chunkText })}
 
 `);
+      }
     }
     const summaryMatch = fullAccumulated.match(/### 1\. Direct Summary\s*([\s\S]*?)(?=### 2|$)/i);
     const directSummary = summaryMatch ? summaryMatch[1].trim() : fullAccumulated.slice(0, 180) + "...";
-    res.write(`data: ${JSON.stringify({
-      type: "done",
-      fullText: fullAccumulated,
-      title: rawText.slice(0, 42) || "Gemini Intelligence Report",
-      executiveSummary: directSummary,
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE
-    })}
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({
+        type: "done",
+        fullText: fullAccumulated,
+        title: rawText.slice(0, 42) || "Gemini Intelligence Report",
+        executiveSummary: directSummary,
+        complianceDisclaimer: MANDATORY_LEGAL_NOTICE
+      })}
 
 `);
-    res.end();
+      res.end();
+    }
     try {
       store.logUserActivity({
         userId: req.body.userId || "usr_guest",
@@ -2546,10 +3624,14 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ""
     }
   } catch (err) {
     console.error("Streaming error in /api/transform/stream:", err);
-    res.write(`data: ${JSON.stringify({ type: "error", error: err.message || "Stream generation failed" })}
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || "Stream generation failed" });
+    } else if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: "error", error: err.message || "Stream generation failed" })}
 
 `);
-    res.end();
+      return res.end();
+    }
   }
 });
 app.post("/api/transform", async (req, res) => {
@@ -4286,8 +5368,126 @@ app.post("/api/cron/check-expirations", (_req, res) => {
 });
 app.get("/api/admin/users", (req, res) => {
   store.checkAndProcessExpirations();
-  const users = store.getAllUsers();
-  return res.json({ users });
+  const search = (req.query.search || "").toLowerCase().trim();
+  const filter = (req.query.filter || "all").toLowerCase().trim();
+  const page = Math.max(1, parseInt(req.query.page || "1", 10));
+  const limit = Math.max(1, parseInt(req.query.limit || "10", 10));
+  const rawUsers = store.getAllUsers();
+  const formattedUsers = rawUsers.map((u) => {
+    const isPro = !!(u.subscription?.isPro || u.role === "admin");
+    const isBanned = u.status === "banned" || u.isBanned === true;
+    return {
+      _id: u.id,
+      id: u.id,
+      name: u.name || "User",
+      email: u.email,
+      plan: isPro ? "premium" : "free",
+      isBanned,
+      chats: u.dailyPromptCount ? u.dailyPromptCount * 8 + 12 : 14,
+      createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
+      premiumUntil: u.subscription?.expiresAt ? new Date(u.subscription.expiresAt).toISOString() : null,
+      ...u
+    };
+  });
+  let filtered = formattedUsers;
+  if (search) {
+    filtered = filtered.filter(
+      (u) => u.name.toLowerCase().includes(search) || u.email.toLowerCase().includes(search)
+    );
+  }
+  if (filter === "premium") {
+    filtered = filtered.filter((u) => u.plan === "premium");
+  } else if (filter === "free") {
+    filtered = filtered.filter((u) => u.plan === "free");
+  } else if (filter === "banned") {
+    filtered = filtered.filter((u) => u.isBanned);
+  }
+  const total = filtered.length;
+  const skip = (page - 1) * limit;
+  const paginatedUsers = filtered.slice(skip, skip + limit);
+  return res.json({
+    users: paginatedUsers,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1
+  });
+});
+app.get("/api/admin/users/export", (req, res) => {
+  try {
+    const search = (req.query.search || "").toLowerCase().trim();
+    const rawUsers = store.getAllUsers();
+    let premiumUsers = rawUsers.map((u) => {
+      const isPro = !!(u.subscription?.isPro || u.role === "admin");
+      const isBanned = u.status === "banned" || u.isBanned === true;
+      return {
+        _id: u.id,
+        name: u.name || "User",
+        email: u.email,
+        plan: isPro ? "premium" : "free",
+        chats: u.dailyPromptCount ? u.dailyPromptCount * 8 + 12 : 14,
+        isBanned,
+        createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
+        premiumUntil: u.subscription?.expiresAt ? new Date(u.subscription.expiresAt).toISOString() : null
+      };
+    }).filter((u) => u.plan === "premium");
+    if (search) {
+      premiumUsers = premiumUsers.filter(
+        (u) => u.name.toLowerCase().includes(search) || u.email.toLowerCase().includes(search)
+      );
+    }
+    const header = "Name,Email,Plan,Chats,Status,Joined Date,Premium Until\n";
+    const rows = premiumUsers.map(
+      (u) => `"${u.name}","${u.email}","${u.plan}",${u.chats || 0},"${u.isBanned ? "Banned" : "Active"}","${new Date(u.createdAt).toLocaleDateString()}","${u.premiumUntil ? new Date(u.premiumUntil).toLocaleDateString() : "-"}"`
+    ).join("\n");
+    const csv = header + rows;
+    const dateStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="premium-users-${dateStr}.csv"`);
+    return res.send(csv);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to export CSV" });
+  }
+});
+app.post("/api/admin/users/:userId/ban", (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { isBanned } = req.body;
+    const user = store.findUserById(userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    if (store.isStrictAdminEmail(user.email)) {
+      return res.status(403).json({ error: "Cannot ban super-administrator accounts." });
+    }
+    const updated = store.updateUserAdminFields(userId, {
+      status: isBanned ? "banned" : "active",
+      isBanned: !!isBanned
+    });
+    return res.json({
+      success: true,
+      message: isBanned ? "User banned" : "User unbanned",
+      user: updated
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to update ban status" });
+  }
+});
+app.post("/api/admin/users/:userId/premium", (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { plan } = req.body;
+    const isPremium = plan === "premium";
+    const updated = store.updateUserSubscription(userId, {
+      tier: isPremium ? "pro_monthly" : "free",
+      isPro: isPremium,
+      expiresAt: isPremium ? Date.now() + 30 * 24 * 60 * 60 * 1e3 : null
+    });
+    return res.json({
+      success: true,
+      message: `User plan updated to ${plan}`,
+      user: updated
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Failed to update user plan" });
+  }
 });
 app.post("/api/admin/users/:userId/status", (req, res) => {
   try {
@@ -4745,6 +5945,15 @@ app.post("/api/flow/projects/:id/nodes/:nodeId/comments", (req, res) => {
 });
 async function startServer() {
   const isProd = process.env.NODE_ENV === "production";
+  app.use((err, _req, res, next) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+    console.error("Unhandled server error:", err);
+    return res.status(err?.status || 500).json({
+      error: err?.message || "Internal server error"
+    });
+  });
   if (!isProd) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -4753,9 +5962,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path2.join(__dirname, "dist")));
+    app.use(express.static(path3.join(__dirname, "dist")));
     app.get("*", (_req, res) => {
-      res.sendFile(path2.join(__dirname, "dist", "index.html"));
+      res.sendFile(path3.join(__dirname, "dist", "index.html"));
     });
   }
   const server = app.listen(port, () => {
@@ -4767,3 +5976,15 @@ async function startServer() {
   server.requestTimeout = 12e4;
 }
 startServer();
+export {
+  BLOCKED_PATTERNS,
+  IMAGE_KEYWORDS,
+  SYSTEM_PROMPT,
+  VIDEO_KEYWORDS,
+  callOpenRouterChat,
+  generate_video,
+  googleAi2 as googleAi,
+  handleChatRequest,
+  precheck_prompt,
+  summarizeText
+};

@@ -100,3 +100,65 @@ export async function loadUserThreadsFromFirestore(userId: string) {
     return [];
   }
 }
+
+// Delete chat thread from Firestore
+export async function deleteThreadFromFirestore(userId: string, threadId: string) {
+  if (!userId || !threadId) return;
+  try {
+    const threadRef = doc(db, 'users', userId, 'threads', threadId);
+    await deleteDoc(threadRef);
+  } catch (e) {
+    console.warn('Could not delete thread from Firestore:', e);
+  }
+}
+
+// Save generated clinical note or enterprise document to Firestore
+export async function saveDocumentToFirestore(userId: string, docData: any) {
+  if (!userId || !docData?.id) return;
+  try {
+    const docRef = doc(db, 'users', userId, 'documents', docData.id);
+    await setDoc(
+      docRef,
+      {
+        id: docData.id,
+        title: docData.title || 'Untitled Document',
+        industry: docData.industry || 'general',
+        rawInput: docData.rawInput || '',
+        markdownReport: docData.markdownReport || '',
+        createdAt: docData.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn('Could not save document to Firestore:', e);
+  }
+}
+
+// Load documents for user
+export async function loadUserDocumentsFromFirestore(userId: string) {
+  if (!userId) return [];
+  try {
+    const q = query(collection(db, 'users', userId, 'documents'));
+    const snapshot = await getDocs(q);
+    const docs: any[] = [];
+    snapshot.forEach((docSnap) => {
+      docs.push(docSnap.data());
+    });
+    return docs.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+  } catch (e) {
+    console.warn('Could not load user documents from Firestore:', e);
+    return [];
+  }
+}
+
+// Delete document from Firestore
+export async function deleteDocumentFromFirestore(userId: string, docId: string) {
+  if (!userId || !docId) return;
+  try {
+    const docRef = doc(db, 'users', userId, 'documents', docId);
+    await deleteDoc(docRef);
+  } catch (e) {
+    console.warn('Could not delete document from Firestore:', e);
+  }
+}

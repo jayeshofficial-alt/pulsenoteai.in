@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gemini isolation test - PulseNote AI</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; background: #f8fafc; color: #0f172a; }
+    .card { background: #ffffff; padding: 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }
+    h2 { margin-top: 0; display: flex; align-items: center; gap: 8px; font-size: 20px; }
+    input, textarea, button, select { width: 100%; font: inherit; padding: 10px 12px; margin: 6px 0 14px; box-sizing: border-box; border-radius: 6px; border: 1px solid #cbd5e1; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+    textarea { height: 90px; resize: vertical; }
+    button { background: #2563eb; color: #ffffff; border: none; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    button:hover { background: #1d4ed8; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    pre { background: #0f172a; color: #d1fae5; padding: 16px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; font-size: 13px; font-family: monospace; max-height: 420px; overflow-y: auto; }
+    label { font-size: 14px; font-weight: 500; color: #334155; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+    .badge { display: inline-block; padding: 2px 8px; font-size: 12px; font-weight: 600; border-radius: 9999px; background: #e0e7ff; color: #3730a3; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>⚡ Gemini Isolation & Diagnostics Test <span class="badge">API v1beta</span></h2>
+
+    <label>Mode</label>
+    <select id="mode">
+      <option value="direct">Direct Client REST (Using entered API Key)</option>
+      <option value="backend">Server Backend Proxy (/api/gemini/generate & /api/chat)</option>
+    </select>
+
+    <div id="key-container">
+      <label>API Key</label>
+      <input id="key" type="password" placeholder="AIzaSy...">
+    </div>
+
+    <label>Model</label>
+    <select id="model">
+      <option value="gemini-2.5-flash">gemini-2.5-flash (Fast, recommended)</option>
+      <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+      <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+      <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+    </select>
+
+    <label>Prompt</label>
+    <textarea id="prompt">Summarise: team sync Tuesday. Ship v2 by Friday. Priya owns billing. Need to decide on pricing.</textarea>
+
+    <div class="row">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+        <input type="checkbox" id="stream" style="width:auto; margin:0;">
+        Use streaming endpoint (Server-Sent Events)
+      </label>
+    </div>
+
+    <button id="go">Run Isolation Test</button>
+
+    <label>Diagnostics Output</label>
+    <pre id="out">Waiting for test run…</pre>
+  </div>
+
+<script>
+const BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const out = document.getElementById('out');
+let log = [];
+const say = (m) => { log.push(m); out.textContent = log.join('\n'); out.scrollTop = out.scrollHeight; };
+
+const modeSelect = document.getElementById('mode');
+const keyContainer = document.getElementById('key-container');
+
+modeSelect.addEventListener('change', () => {
+  if (modeSelect.value === 'backend') {
+    keyContainer.style.display = 'none';
+  } else {
+    keyContainer.style.display = 'block';
+  }
+});
+
+document.getElementById('go').onclick = async () => {
+  log = [];
+  const mode = modeSelect.value;
+  const key = document.getElementById('key').value.trim();
+  const prompt = document.getElementById('prompt').value.trim();
+  const model = document.getElementById('model').value;
+  const useStream = document.getElementById('stream').checked;
+
+  if (!prompt) return say('❌ No prompt entered.');
+
+  if (mode === 'backend') {
+    say('▶ Mode: Server Backend Proxy');
+    say('▶ Model: ' + model);
+    say('▶ Target: /api/chat or /api/gemini/generate');
+
+    try {
+      if (useStream) {
+        say('▶ Connecting to SSE /api/chat stream...');
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+          body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], stream: true, model })
+        });
+        say('▶ HTTP status: ' + res.status + ' ' + res.statusText);
+        if (!res.ok) {
+          say('❌ Error response: ' + (await res.text()));
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '', full = '', frames = 0;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const json = line.slice(6).trim();
+            if (!json || json === '[DONE]') continue;
+            frames++;
+            try {
+              const obj = JSON.parse(json);
+              if (obj.text) full += obj.text;
+              if (obj.fullText) full = obj.fullText;
+            } catch (e) {}
+          }
+        }
+        say('▶ SSE frames received: ' + frames);
+        say(full ? '\n✅ TEXT:\n' + full : '\n❌ Stream closed with ZERO text.');
+      } else {
+        say('▶ Sending non-streaming request to /api/gemini/generate...');
+        const res = await fetch('/api/gemini/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, model })
+        });
+        say('▶ HTTP status: ' + res.status + ' ' + res.statusText);
+        const data = await res.json();
+        say('▶ RAW RESPONSE:\n' + JSON.stringify(data, null, 2));
+        if (data.text || data.reply) {
+          say('\n✅ TEXT:\n' + (data.text || data.reply));
+        } else if (data.error) {
+          say('\n❌ ERROR:\n' + data.error);
+        }
+      }
+    } catch (err) {
+      say('❌ BACKEND FETCH ERROR: ' + err.name + ': ' + err.message);
+    }
+    return;
+  }
+
+  // Direct REST
+  if (!key) return say('❌ No API key entered.');
+  say('▶ Key length: ' + key.length + (key.startsWith('AIza') ? ' (looks like a Google key ✅)' : ' (⚠️ does NOT start with "AIza" — probably wrong)'));
+  say('▶ Model: ' + model);
+  say('▶ Endpoint: ' + (useStream ? 'streamGenerateContent' : 'generateContent'));
+
+  try {
+    const url = BASE + model + (useStream ? ':streamGenerateContent?alt=sse&key=' : ':generateContent?key=') + encodeURIComponent(key);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
+      })
+    });
+
+    say('▶ HTTP status: ' + res.status + ' ' + res.statusText);
+    if (!res.ok) {
+      say('❌ Request rejected. Full error body:');
+      say(await res.text());
+      return;
+    }
+
+    if (!useStream) {
+      const data = await res.json();
+      say('▶ RAW RESPONSE:\n' + JSON.stringify(data, null, 2));
+
+      const cand = data?.candidates?.[0];
+      if (!cand) return say('❌ No "candidates" array. See promptFeedback above.');
+      say('▶ finishReason: ' + (cand.finishReason ?? 'none'));
+      if (data.promptFeedback?.blockReason) say('❌ BLOCKED by safety: ' + data.promptFeedback.blockReason);
+
+      const text = (cand.content?.parts ?? []).map(p => p.text ?? '').join('');
+      say(text ? '\n✅ TEXT:\n' + text : '\n❌ 200 OK but text is EMPTY (see finishReason / blockReason above)');
+      return;
+    }
+
+    // streaming
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', full = '', frames = 0;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) { if (line.trim()) say('  (non-data line) ' + line); continue; }
+        const json = line.slice(6).trim();
+        if (!json || json === '[DONE]') continue;
+        frames++;
+        try {
+          const obj = JSON.parse(json);
+          const parts = obj?.candidates?.[0]?.content?.parts ?? [];
+          for (const p of parts) if (p.text) full += p.text;
+        } catch (e) {
+          say('  ⚠️ JSON parse failed on frame ' + frames + ': ' + json.slice(0, 120));
+        }
+      }
+    }
+
+    say('▶ SSE frames received: ' + frames);
+    say(full ? '\n✅ TEXT:\n' + full : '\n❌ Stream closed with ZERO text.');
+  } catch (err) {
+    say('❌ FETCH THREW: ' + err.name + ': ' + err.message);
+    say('(Common cause: network/adblock — try another browser or disable shields.)');
+  }
+};
+</script>
+</body>
+</html>

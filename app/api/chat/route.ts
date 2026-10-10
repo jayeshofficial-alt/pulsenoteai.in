@@ -1,39 +1,48 @@
-import { NextRequest, NextResponse } from "next/server"
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { NextRequest, NextResponse } from "next/server";
+import { GoogleGenAI } from "@google/genai";
+import { getSystemPromptForMode } from "../../../src/data/modePrompts";
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, model } = await req.json();
+    const { message, model, mode, industryMode, industry } = await req.json();
     
-    if (!message) {
-      return NextResponse.json({ error: "Message is required" }, { status: 400 });
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return NextResponse.json({ error: "Message is required and must be non-empty." }, { status: 400 });
     }
+
+    // Defensive input clamp (prevent memory exhaustion)
+    const sanitizedMessage = message.slice(0, 30000);
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "GEMINI_API_KEY missing in .env.local" }, { status: 500 });
+      return NextResponse.json({ error: "GEMINI_API_KEY missing in server environment" }, { status: 500 });
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
+    const ai = new GoogleGenAI({ apiKey });
     
-    // Map frontend model name with robust fallback
-    const candidateModels = model === "2.5 Pro" 
-      ? ["gemini-2.5-pro", "gemini-1.5-pro", "gemini-3.1-pro-preview"] 
-      : ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-3.8-flash"];
+    // Select per-mode tailored system instruction
+    const targetMode = mode || industryMode || industry || 'general';
+    const systemInstruction = getSystemPromptForMode(targetMode);
+
+    // Map candidate models with robust fallback
+    const candidateModels = model === "2.5 Pro" || model === "pro"
+      ? ["gemini-3.1-pro-preview", "gemini-2.5-pro"] 
+      : ["gemini-3.8-flash", "gemini-2.5-flash"];
 
     let lastError: any = null;
     let text = "";
 
     for (const modelName of candidateModels) {
       try {
-        const geminiModel = genAI.getGenerativeModel({ 
+        const response = await ai.models.generateContent({
           model: modelName,
-          systemInstruction: "You are PulseNote AI, a helpful AI assistant created by PulseNote AI. You are inspired by Google Gemini. Be helpful, accurate, concise and friendly. Format code with markdown."
+          contents: sanitizedMessage,
+          config: {
+            systemInstruction,
+            temperature: 0.3,
+          }
         });
-
-        const result = await geminiModel.generateContent(message);
-        const response = await result.response;
-        text = response.text();
+        text = response.text || "";
         if (text) break;
       } catch (err: any) {
         lastError = err;
@@ -44,7 +53,11 @@ export async function POST(req: NextRequest) {
       throw lastError;
     }
 
-    return NextResponse.json({ reply: text, text });
+    return NextResponse.json({ 
+      reply: text, 
+      text,
+      modeUsed: targetMode,
+    });
 
   } catch (error: any) {
     console.error("Gemini Error:", error);
