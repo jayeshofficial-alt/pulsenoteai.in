@@ -59,6 +59,7 @@ import {
   understandImageWithOpenRouter,
   generateAnimationWithOpenRouter,
   getOpenRouterApiKey,
+  setAdminEmail,
   OPENROUTER_MODELS,
   SYSTEM_PROMPT,
   precheck_prompt,
@@ -313,6 +314,11 @@ export function App() {
       chatBottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isGenerating, activeView]);
+
+  // Sync admin email to the OpenRouter service (controls server-key access)
+  useEffect(() => {
+    setAdminEmail(currentUser?.email || null);
+  }, [currentUser?.email]);
 
   const isAdmin = currentUser?.role === 'admin';
   const effectiveIsPro = usageState.isPro || isAdmin;

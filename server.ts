@@ -1054,8 +1054,13 @@ app.post('/api/openrouter/chat', async (req, res) => {
   }
 });
 
-// Provide OPENROUTER_API_KEY to the client runtime variable without displaying it in UI
-app.get('/api/openrouter/key', (_req, res) => {
+// Provide OPENROUTER_API_KEY to admin users only (never expose to visitors)
+app.get('/api/openrouter/key', (req, res) => {
+  const email = (req.query.email as string) || '';
+  const isAdmin = store.isStrictAdminEmail(email);
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'Admin access required', configured: false, apiKey: '' });
+  }
   const key = process.env.OPENROUTER_API_KEY || '';
   return res.json({
     configured: Boolean(key),
