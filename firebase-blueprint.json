@@ -2,96 +2,117 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile with role, subscription tier and stats",
+      "description": "User profile with plan, credits, notesUsedThisMonth, and teamId",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "email": { "type": "string" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
-        "isPro": { "type": "boolean" },
-        "role": { "type": "string" },
+        "plan": { "type": "string", "enum": ["free", "pro", "team"] },
+        "notesUsedThisMonth": { "type": "number" },
+        "monthResetAt": { "type": "string" },
+        "credits": { "type": "number" },
+        "teamId": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "referralCode": { "type": "string" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "email"]
     },
-    "ChatThread": {
-      "title": "ChatThread",
-      "description": "Multi-turn Gemini chat threads and notes history",
+    "FeatureSettings": {
+      "title": "FeatureSettings",
+      "description": "Admin toggle for image and video generation",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "title": { "type": "string" },
-        "modelRole": { "type": "string" },
-        "lens": { "type": "string" },
-        "messages": { "type": "array" },
-        "createdAt": { "type": "string" },
+        "imageGenerationEnabled": { "type": "boolean" },
+        "videoGenerationEnabled": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
-      "required": ["id", "userId", "title"]
+      "required": ["imageGenerationEnabled", "videoGenerationEnabled"]
     },
-    "MediaAsset": {
-      "title": "MediaAsset",
-      "description": "Generated images, videos, audio music tracks and transcriptions",
+    "Team": {
+      "title": "Team",
+      "description": "Team account with seats and members",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "userId": { "type": "string" },
-        "type": { "type": "string" },
-        "prompt": { "type": "string" },
-        "modelUsed": { "type": "string" },
-        "mediaUrl": { "type": "string" },
-        "aspectRatio": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "name": { "type": "string" },
+        "seats": { "type": "number" },
+        "members": { "type": "array" },
         "createdAt": { "type": "string" }
       },
-      "required": ["id", "userId", "type", "prompt"]
+      "required": ["id", "ownerUid", "name", "seats"]
     },
-    "DocumentRecord": {
-      "title": "DocumentRecord",
-      "description": "Generated SOAP notes, executive memos, engineering RFCs and reports",
+    "VideoJob": {
+      "title": "VideoJob",
+      "description": "Veo video generation job tracking",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "title": { "type": "string" },
-        "industry": { "type": "string" },
-        "rawInput": { "type": "string" },
-        "markdownReport": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "operationName": { "type": "string" },
+        "prompt": { "type": "string" },
+        "status": { "type": "string", "enum": ["processing", "completed", "failed"] },
+        "videoUrl": { "type": "string" },
+        "error": { "type": "string" },
+        "createdAt": { "type": "string" }
       },
-      "required": ["id", "userId", "title", "industry"]
+      "required": ["id", "userId", "operationName", "status"]
+    },
+    "PartnerLead": {
+      "title": "PartnerLead",
+      "description": "Partner inquiries and lead submissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "organization": { "type": "string" },
+        "type": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "email", "organization"]
     }
   },
   "firestore": {
+    "/settings/{settingId}": {
+      "entity": "FeatureSettings",
+      "rules": {
+        "read": "request.auth != null",
+        "write": "request.auth != null && (request.auth.token.email == 'jayeshofficial@gmail.com' || request.auth.token.email == 'contact@pulsenoteai.in') && request.auth.token.email_verified == true"
+      }
+    },
     "/users/{userId}": {
       "entity": "User",
       "rules": {
-        "read": "request.auth != null && request.auth.uid == userId",
+        "read": "request.auth != null && (request.auth.uid == userId || request.auth.token.email in ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in'])",
         "write": "request.auth != null && request.auth.uid == userId"
       }
     },
-    "/users/{userId}/threads/{threadId}": {
-      "entity": "ChatThread",
+    "/teams/{teamId}": {
+      "entity": "Team",
       "rules": {
-        "read": "request.auth != null && request.auth.uid == userId",
-        "write": "request.auth != null && request.auth.uid == userId"
+        "read": "request.auth != null",
+        "write": "request.auth != null && resource.data.ownerUid == request.auth.uid"
       }
     },
-    "/users/{userId}/documents/{documentId}": {
-      "entity": "DocumentRecord",
+    "/videoJobs/{jobId}": {
+      "entity": "VideoJob",
       "rules": {
-        "read": "request.auth != null && request.auth.uid == userId",
-        "write": "request.auth != null && request.auth.uid == userId"
+        "read": "request.auth != null",
+        "write": "false"
       }
     },
-    "/users/{userId}/media/{mediaId}": {
-      "entity": "MediaAsset",
+    "/partnerLeads/{leadId}": {
+      "entity": "PartnerLead",
       "rules": {
-        "read": "request.auth != null && request.auth.uid == userId",
-        "write": "request.auth != null && request.auth.uid == userId"
+        "read": "request.auth != null && request.auth.token.email in ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in']",
+        "write": "true"
       }
     }
   }

@@ -243,7 +243,7 @@ export async function generateVideoFromPrompt(
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
   if (!ctx) throw new Error('Canvas 2D is not supported in this browser.');
   if (typeof MediaRecorder === 'undefined' || !canvas.captureStream) {
     throw new Error('Video recording is not supported in this browser.');

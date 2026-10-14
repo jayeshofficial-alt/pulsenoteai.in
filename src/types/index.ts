@@ -504,4 +504,73 @@ export interface FlowProject {
   thumbnail?: string;
 }
 
+// =========================================================================
+// PULSENOTE AI: Admin Feature Switch & Firestore Real-Time Types
+// =========================================================================
+export interface FeatureSettingsDoc {
+  imageGenerationEnabled: boolean;
+  videoGenerationEnabled: boolean;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export type PulseNotePlan = 'free' | 'pro' | 'team';
+
+export interface UserFirestoreData {
+  plan: PulseNotePlan;
+  notesUsedThisMonth: number;
+  monthResetAt: string;
+  credits: number;
+  teamId?: string;
+  referralCode?: string;
+  referredBy?: string;
+}
+
+export interface TeamDoc {
+  id: string;
+  ownerUid: string;
+  name: string;
+  seats: number;
+  members: string[]; // Email list of members
+  createdAt: string;
+}
+
+export interface CustomTemplateSection {
+  id: string;
+  title: string;
+  instructions: string;
+}
+
+export interface CustomTemplateDoc {
+  id: string;
+  name: string;
+  industry: 'Clinical' | 'Legal' | 'Property Inspection' | 'Engineering RFC' | 'Corporate Memo';
+  sections: CustomTemplateSection[];
+  createdAt: string;
+  isTeamShared?: boolean;
+  ownerUid?: string;
+}
+
+export interface VideoJobDoc {
+  id: string;
+  userId: string;
+  operationName: string;
+  prompt: string;
+  status: 'processing' | 'completed' | 'failed';
+  videoUrl?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PartnerLeadDoc {
+  id?: string;
+  name: string;
+  email: string;
+  organization: string;
+  type: string;
+  notes?: string;
+  createdAt: string;
+}
+
 

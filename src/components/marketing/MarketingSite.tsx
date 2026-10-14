@@ -48,7 +48,7 @@ const INDUSTRY_SHOWCASE = [
     name: 'Clinical & Medical',
     shortName: 'SOAP Notes',
     icon: Stethoscope,
-    tagline: 'Transform messy doctor-patient dictations into structured, HIPAA-compliant SOAP documentation in seconds.',
+    tagline: 'Transform messy doctor-patient dictations into structured clinical SOAP documentation in seconds. Built on Google Cloud. Do not enter patient-identifying information.',
     accentColor: '#10b981',
     badge: 'Healthcare & EHR',
     sampleInput: `Doctor: Patient is 58yo male presenting for follow-up of type 2 diabetes and hypertension. Reports mild bilateral lower extremity tingling over the past 2 months, worse at night. Taking Metformin 1000mg BID and Lisinopril 20mg daily. Admits he missed evening doses several times this month. No chest pain, SOB, or dizziness. Vitals today: BP 138/86, HR 74, BMI 29.4, SpO2 98%. Fasting fingerstick blood glucose is 168. Last HbA1c from 3 weeks ago was 8.2%. Monofilament exam reveals decreased sensation over 1st and 5th metatarsal heads bilaterally. Peripheral pulses 2+ intact.`,
@@ -58,7 +58,7 @@ const INDUSTRY_SHOWCASE = [
       { label: 'Assessment', text: '1. Type 2 diabetes mellitus with diabetic polyneuropathy, uncontrolled (ICD-10: E11.42).\n2. Essential hypertension, suboptimally controlled (ICD-10: I10).\n3. Medication non-compliance secondary to missed evening dosing.' },
       { label: 'Plan', text: '1. Titrate Metformin to ER formulation 2000mg with breakfast to enhance adherence.\n2. Initiate Gabapentin 300mg QHS for neuropathic discomfort.\n3. Order comprehensive metabolic panel, urine microalbumin-to-creatinine ratio, and repeat HbA1c in 3 months.\n4. Diabetic foot care education provided; refer to podiatry and certified diabetes care educator.\n5. Follow-up clinic encounter in 6 weeks with home blood sugar log.' }
     ],
-    features: ['ICD-10 code extraction', 'Vitals auto-flagging', 'EMR/EHR export format', 'Zero-PHI retention policy']
+    features: ['ICD-10 code extraction', 'Vitals auto-flagging', 'EMR/EHR export format', 'Google Cloud infrastructure']
   },
   {
     id: 'executive',
@@ -262,11 +262,11 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
 
   // Full EMR Raw string for copy/export — prefers the live API output
   const rawEmrText = soapLiveOutput
-    ? `=== PULSE NOTE AI CLINICAL SUMMARY ===\nPATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}\nTIMESTAMP: ${new Date().toISOString()}\nCOMPLIANCE: HIPAA Edge-Sanitized (Zero Retention)\n\n${soapLiveOutput}\n=======================================`
+    ? `=== PULSE NOTE AI CLINICAL SUMMARY ===\nPATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}\nTIMESTAMP: ${new Date().toISOString()}\nCOMPLIANCE: Built on Google Cloud. Do not enter patient-identifying information.\n\n${soapLiveOutput}\n=======================================`
     : `=== PULSE NOTE AI CLINICAL SUMMARY ===
 PATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}
 TIMESTAMP: ${new Date().toISOString()}
-COMPLIANCE: HIPAA Edge-Sanitized (Zero Retention)
+COMPLIANCE: Built on Google Cloud. Do not enter patient-identifying information.
 
 [SUBJECTIVE]
 ${currentSoapOutput.subjective.map(s => `• ${s.field}: ${s.value}`).join('\n')}
@@ -285,8 +285,8 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
   const FAQ_LIST = [
     {
       category: 'clinical',
-      question: 'How does Pulse Note AI guarantee HIPAA compliance and patient data privacy?',
-      answer: 'Pulse Note AI operates on a zero-retention, edge-sanitized architecture. Clinical dictations and patient data are processed in memory and are never stored on public disks, used to train foundational AI models, or logged in permanent telemetry. We enforce strict client-side encryption and automated PHI redacting before model execution.'
+      question: 'How does Pulse Note AI handle patient data privacy?',
+      answer: 'Pulse Note AI is built on Google Cloud. Do not enter patient-identifying information. Clinical dictations and patient data are processed deterministically. All users are responsible for ensuring notes do not contain direct patient identifiers before submission.'
     },
     {
       category: 'clinical',
@@ -440,8 +440,8 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <div className="text-xs text-[#9aa0a6]">Documentation turnover time</div>
             </div>
             <div className="p-4 rounded-xl bg-[#1e1f20]/50 border border-[#3c4043]/30">
-              <div className="text-2xl font-bold text-[#10b981] mb-0.5">HIPAA Ready</div>
-              <div className="text-xs text-[#9aa0a6]">Zero retention edge security</div>
+              <div className="text-base sm:text-lg font-bold text-[#10b981] mb-0.5">Google Cloud</div>
+              <div className="text-xs text-[#9aa0a6]">Do not enter patient identifiers</div>
             </div>
             <div className="p-4 rounded-xl bg-[#1e1f20]/50 border border-[#3c4043]/30">
               <div className="text-2xl font-bold text-[#4e8cff] mb-0.5">5 Modes</div>
@@ -826,13 +826,13 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <div className="w-12 h-12 rounded-xl bg-[#4e8cff]/15 text-[#4e8cff] flex items-center justify-center">
                 <Lock className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-white">Zero Data Retention</h3>
+              <h3 className="text-xl font-bold text-white">Built on Google Cloud</h3>
               <p className="text-xs sm:text-sm text-[#9aa0a6] leading-relaxed">
-                Inputs and transcripts are processed Ephemerally in volatile memory. No audio waveforms or patient names ever persist on disk or train commercial models.
+                Built on Google Cloud. Do not enter patient-identifying information. Processed with enterprise-grade infrastructure.
               </p>
               <div className="pt-2 text-xs font-medium text-[#4e8cff] flex items-center gap-1.5">
                 <Check className="w-4 h-4" />
-                <span>Stateless memory execution</span>
+                <span>Google Cloud architecture</span>
               </div>
             </div>
 
@@ -1077,7 +1077,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               Frequently Asked Questions
             </h2>
             <p className="text-sm text-[#9aa0a6]">
-              Everything you need to know about models, clinical HIPAA guarantees, pricing, and templates.
+              Everything you need to know about models, privacy guidelines, pricing, and templates. Built on Google Cloud. Do not enter patient-identifying information.
             </p>
           </div>
 
@@ -1361,7 +1361,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             </div>
             <div className="flex items-center gap-6">
               <a href="#about" className="hover:text-white transition-colors">Security Architecture</a>
-              <a href="#faq" className="hover:text-white transition-colors">HIPAA Policy</a>
+              <a href="#privacy" className="hover:text-white transition-colors">Privacy Policy</a>
               <a href="mailto:contact@pulsenoteai.in" className="hover:text-white transition-colors">Enterprise Support</a>
             </div>
           </div>
@@ -1416,7 +1416,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                     <span>Welcome Message From The CEO</span>
                   </span>
                   <button
-                    onClick={() => handleCopyText('welcome', `Dear Innovator, Physician, and Builder,\n\nWelcome to PulseNote AI (pulsenoteai.in)...\n\nEvery great product starts with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical founders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters.\n\nWe didn't build PulseNote AI to be another conversational novelty. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly, while honoring zero-retention privacy.\n\nWhether you're charting your 30th patient encounter of the day or documenting a pivotal board decision, PulseNote AI is engineered to give you your time and presence back.\n\nThank you for trusting our platform. Let's build a future where documentation works for you, not against you.\n\nWarmly,\nJayesh Wagh\nFounder & CEO, PulseNote AI\ngithub.com/jayeshwagh`)}
+                    onClick={() => handleCopyText('welcome', `Dear Innovator, Physician, and Builder,\n\nWelcome to PulseNote AI (pulsenoteai.in)...\n\nEvery great product starts with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical founders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters.\n\nWe didn't build PulseNote AI to be another conversational novelty. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly. Built on Google Cloud. Do not enter patient-identifying information.\n\nWhether you're charting your 30th patient encounter of the day or documenting a pivotal board decision, PulseNote AI is engineered to give you your time and presence back.\n\nThank you for trusting our platform. Let's build a future where documentation works for you, not against you.\n\nWarmly,\nJayesh Wagh\nFounder & CEO, PulseNote AI\ngithub.com/jayeshwagh`)}
                     className="text-[11px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     {copiedSection === 'welcome' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1427,7 +1427,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   "Every great product begins with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical leaders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters."
                 </p>
                 <p className="text-[11px] text-[#9aa0a6]">
-                  "We didn't build PulseNote AI to be another conversational novelty. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly, while honoring zero-retention privacy. Welcome to next-generation documentation."
+                  "We didn't build PulseNote AI to be another conversational novelty. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly. Built on Google Cloud. Do not enter patient-identifying information. Welcome to next-generation documentation."
                 </p>
                 <div className="text-[11px] text-[#e3e3e3] font-semibold pt-1">
                   — Jayesh Wagh, Founder & CEO
@@ -1442,7 +1442,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-white uppercase tracking-wider">Short Bio (Conferences & X)</span>
                     <button
-                      onClick={() => handleCopyText('shortBio', `Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, zero-retention healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders.`)}
+                      onClick={() => handleCopyText('shortBio', `Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, secure healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders. Built on Google Cloud. Do not enter patient-identifying information.`)}
                       className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
                     >
                       {copiedSection === 'shortBio' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1450,7 +1450,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                     </button>
                   </div>
                   <p className="text-[11px] text-[#9aa0a6]">
-                    Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, zero-retention healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders.
+                    Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, secure healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders. Built on Google Cloud. Do not enter patient-identifying information.
                   </p>
                 </div>
 
@@ -1478,7 +1478,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-white uppercase tracking-wider">Full Executive Bio (Press Kit & Media)</span>
                   <button
-                    onClick={() => handleCopyText('longBio', `Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern multimodal AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.\n\nUnder Jayesh's leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from HIPAA-oriented SOAP clinical dictation to software RFC generation and commercial property defect grading. Jayesh is a staunch advocate for zero-retention data privacy in AI, ensuring that patient conversations and executive strategies remain completely confidential.\n\nAn active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and video generation models like Veo, continuously pushing the boundaries of what assistive generative software can achieve.`)}
+                    onClick={() => handleCopyText('longBio', `Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern multimodal AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.\n\nUnder Jayesh's leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from structured SOAP clinical dictation to software RFC generation and commercial property defect grading. Built on Google Cloud. Do not enter patient-identifying information.\n\nAn active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and video generation models like Veo, continuously pushing the boundaries of what assistive generative software can achieve.`)}
                     className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
                   >
                     {copiedSection === 'longBio' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1490,7 +1490,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                     Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern multimodal AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.
                   </p>
                   <p>
-                    Under Jayesh's leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from HIPAA-oriented SOAP clinical dictation to software RFC generation and commercial property defect grading. Jayesh is a staunch advocate for zero-retention data privacy in AI, ensuring that patient conversations and executive strategies remain completely confidential.
+                    Under Jayesh's leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from structured SOAP clinical dictation to software RFC generation and commercial property defect grading. Built on Google Cloud. Do not enter patient-identifying information.
                   </p>
                   <p>
                     An active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and generative video pipelines, continuously pushing the boundaries of what assistive generative software can achieve.
@@ -1503,7 +1503,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-white uppercase tracking-wider">Executive Fast Facts & Press Sheet</span>
                   <button
-                    onClick={() => handleCopyText('facts', `Name: Jayesh Wagh\nTitle: Founder & CEO\nCompany: PulseNote AI\nDomain: pulsenoteai.in\nGitHub: https://github.com/jayeshwagh\nContact: contact@pulsenoteai.in\nCore Technology: Dual-rail Google Gemini 2.5 + OpenRouter, Node.js, React SPA, Vite, Tailwind CSS\nKey Products: PulseNote Clinical SOAP Studio, Veo AI Video Engine, OpenRouter Chat Portal\nPrivacy Standard: Zero Data Retention (Stateless volatile processing)\nTarget Industries: Healthcare, Executive Leadership, Software Engineering, Commercial Real Estate`)}
+                    onClick={() => handleCopyText('facts', `Name: Jayesh Wagh\nTitle: Founder & CEO\nCompany: PulseNote AI\nDomain: pulsenoteai.in\nGitHub: https://github.com/jayeshwagh\nContact: contact@pulsenoteai.in\nCore Technology: Dual-rail Google Gemini 2.5 + OpenRouter, Node.js, React SPA, Vite, Tailwind CSS\nKey Products: PulseNote Clinical SOAP Studio, Veo AI Video Engine, OpenRouter Chat Portal\nPrivacy Standard: Built on Google Cloud. Do not enter patient-identifying information.\nTarget Industries: Healthcare, Executive Leadership, Software Engineering, Commercial Real Estate`)}
                     className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
                   >
                     {copiedSection === 'facts' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1535,7 +1535,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   </div>
                   <div className="p-2.5 rounded-lg bg-[#1e1f20] border border-[#3c4043]/30">
                     <span className="text-[#9aa0a6] block text-[10px]">Compliance</span>
-                    <span className="font-semibold text-[#10b981]">Zero Data Retention</span>
+                    <span className="font-semibold text-[#10b981]">Built on Google Cloud</span>
                   </div>
                 </div>
               </div>
