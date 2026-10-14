@@ -50,11 +50,10 @@ const DEFAULT_SETTINGS: AppInterfaceSettings = {
   lastUpdatedBy: 'jayeshofficial@gmail.com',
 };
 
-// STRICT ALLOWED ADMIN EMAILS
+// STRICT ALLOWED ADMIN EMAILS (As specified in section 1)
 export const STRICT_ADMIN_EMAILS = [
   'jayeshofficial@gmail.com',
   'contact@pulsenoteai.in',
-  'wagh.jayesh@gmail.com',
 ];
 
 class Store {

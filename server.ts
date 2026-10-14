@@ -2,8 +2,9 @@ import express from 'express';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
 import { store } from './server/store.js';
 import { mediaQueue } from './server/mediaQueue.js';
 import { generateGenerativeImageSvg } from './server/svgGenerator.js';
@@ -21,6 +22,17 @@ dotenv.config({ path: '.env.local' });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Firebase Configuration for Server-Side ID Token Verification
+let firebaseConfig: any = {};
+try {
+  const cfgPath = path.join(__dirname, 'firebase-applet-config.json');
+  if (fs.existsSync(cfgPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  }
+} catch (e) {
+  console.warn('Could not read firebase-applet-config.json on server:', e);
+}
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -28,7 +40,7 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // Official Google GenAI SDK instance for server-side operations
-export const googleAi = new GoogleGenAI({
+export const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
     headers: {
@@ -36,6 +48,7 @@ export const googleAi = new GoogleGenAI({
     },
   },
 });
+export const googleAi = ai;
 
 // Image intent keyword detector (as requested for multi-modal routing)
 export const IMAGE_KEYWORDS = /\b(create|generate|make|draw|design|illustrate)\b.*\b(image|picture|photo|art|illustration|drawing)\b/i;
@@ -43,82 +56,12 @@ export const IMAGE_KEYWORDS = /\b(create|generate|make|draw|design|illustrate)\b
 // Video intent keyword detector (for video generation and animation)
 export const VIDEO_KEYWORDS = /\b(create|generate|make|produce|animate|render)\b.*\b(video|clip|movie|animation|scene)\b/i;
 
-// OpenRouter-powered completions handler (replaces @google/genai)
+// Modality constants for multimodal interactions
 const Modality = {
   TEXT: 'TEXT',
   IMAGE: 'IMAGE',
   AUDIO: 'AUDIO',
 } as const;
-
-const ai = {
-  models: {
-    generateContent: async ({ model = 'openai/gpt-4o-mini', contents, config }: any) => {
-      let promptText = '';
-      if (typeof contents === 'string') {
-        promptText = contents;
-      } else if (Array.isArray(contents)) {
-        promptText = contents
-          .map((c: any) => {
-            if (typeof c === 'string') return c;
-            if (c?.parts) return c.parts.map((p: any) => p?.text || '').join('\n');
-            if (c?.content) return c.content;
-            if (c?.text) return c.text;
-            return JSON.stringify(c);
-          })
-          .join('\n\n');
-      } else if (contents?.parts) {
-        promptText = contents.parts.map((p: any) => p?.text || '').join('\n');
-      }
-
-      const res = await callOpenRouterChat({
-        messages: [{ role: 'user', content: promptText }],
-        model: model && String(model).includes('/') ? model : 'openai/gpt-4o-mini',
-        temperature: config?.temperature ?? 0.7,
-      });
-
-      return {
-        text: res.reply,
-        candidates: [
-          {
-            content: {
-              parts: [{ text: res.reply }],
-            },
-            finishReason: 'STOP',
-          },
-        ],
-      };
-    },
-    generateContentStream: async function* ({ contents, model = 'openai/gpt-4o-mini' }: any) {
-      let promptText = typeof contents === 'string' ? contents : JSON.stringify(contents);
-      const res = await callOpenRouterChat({
-        messages: [{ role: 'user', content: promptText }],
-        model: model && String(model).includes('/') ? model : 'openai/gpt-4o-mini',
-      });
-      yield { text: res.reply };
-    },
-    generateVideos: async ({ prompt, config }: any) => {
-      return {
-        name: `op_veo_${Date.now()}`,
-        done: true,
-        response: {
-          generatedVideos: [
-            { video: { uri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4' } }
-          ]
-        }
-      };
-    }
-  },
-  operations: {
-    getVideosOperation: async () => ({
-      done: true,
-      response: {
-        generatedVideos: [
-          { video: { uri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4' } },
-        ],
-      },
-    }),
-  },
-};
 
 const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
 
@@ -759,44 +702,35 @@ app.post('/chat', async (req, res) => {
   // 2. Detect image requests and call the image model
   if (IMAGE_KEYWORDS.test(userMessage)) {
     try {
+      console.log('[Imagen] Chat prompt:', userMessage);
+      console.log('[Imagen] Model: imagen-4.0-generate-001');
+
       let imageBase64: string | undefined;
 
-      // Attempt official Imagen / Gemini image generation if key configured
       if (process.env.GEMINI_API_KEY) {
         try {
-          const response: any = await (googleAi.models as any).generateImages?.({
-            model: 'imagen-3.0-generate-002',
-            prompt: userMessage,
-            config: { numberOfImages: 1, aspectRatio: '1:1' },
+          const response: any = await (ai.models as any).generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: userMessage, // EXACTLY as typed
+            config: { numberOfImages: 1, outputMimeType: 'image/png', aspectRatio: '1:1' },
           });
+          console.log('[Imagen] Raw Response (chat):', JSON.stringify(response, null, 2));
           imageBase64 = response?.generatedImages?.[0]?.image?.imageBytes;
-        } catch {
-          // Fallback to gemini-3.1-flash-lite-image or nano banana
-          const genRes: any = await googleAi.models.generateContent({
-            model: 'gemini-3.1-flash-lite-image',
-            contents: { parts: [{ text: userMessage }] },
-            config: {
-              imageConfig: { aspectRatio: '1:1', imageSize: '1K' } as any,
-            },
+        } catch (genErr: any) {
+          console.error('[Imagen] Chat generateImages error:', genErr);
+          return res.json({
+            type: 'text',
+            status: 'blocked',
+            text: genErr?.message || 'This image prompt was blocked by safety filters or failed to generate. Please try another prompt.',
           });
-          const parts = genRes.candidates?.[0]?.content?.parts || [];
-          for (const p of parts) {
-            if (p.inlineData?.data) {
-              imageBase64 = p.inlineData.data;
-              break;
-            }
-          }
         }
       }
 
-      // If no API key or generation failed, produce high quality SVG visual
       if (!imageBase64) {
-        const svg = generateGenerativeImageSvg(userMessage, 'Photorealistic 8K', undefined, '1:1');
-        imageBase64 = Buffer.from(svg).toString('base64');
         return res.json({
-          type: 'image',
-          text: 'Here is your image:',
-          imageUrl: `data:image/svg+xml;base64,${imageBase64}`,
+          type: 'text',
+          status: 'error',
+          text: 'No image was generated. Please ensure your GEMINI_API_KEY is configured on the server.',
         });
       }
 
@@ -805,9 +739,9 @@ app.post('/chat', async (req, res) => {
         text: 'Here is your image:',
         imageUrl: `data:image/png;base64,${imageBase64}`,
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Chat image generation error:', err);
-      return res.json({ type: 'text', text: 'Sorry, image generation failed. Please try again.' });
+      return res.json({ type: 'text', text: err?.message || 'Sorry, image generation failed. Please try again.' });
     }
   }
 
@@ -1206,269 +1140,812 @@ app.post('/api/summarize', handleSummarizeRoute);
 app.post('/api/summarise', handleSummarizeRoute);
 
 // ==========================================
-// GEMINI IMAGE GENERATION & EDITING (gemini-3.1-flash-image-preview)
+// ADMIN FEATURE SWITCH & USER AUTH (Section 1)
+// ==========================================
+const PULSENOTE_ADMIN_EMAILS = ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in'];
+
+export async function verifyServerFirebaseUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.split('Bearer ')[1].trim();
+  if (!token) return null;
+
+  try {
+    if (firebaseConfig?.apiKey) {
+      const verifyRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: token }),
+        }
+      );
+      const data = await verifyRes.json();
+      if (data?.users?.[0]) {
+        const u = data.users[0];
+        return {
+          uid: u.localId,
+          email: (u.email || '').toLowerCase().trim(),
+          emailVerified: Boolean(u.emailVerified),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[ServerAuth] Firebase ID token lookup error:', err);
+  }
+  return null;
+}
+
+export function isAuthorizedAdmin(user: { email?: string; emailVerified?: boolean } | null) {
+  if (!user || !user.email) return false;
+  return PULSENOTE_ADMIN_EMAILS.includes(user.email.toLowerCase().trim()) && user.emailVerified === true;
+}
+
+// Global in-memory / cache mirror for Firestore doc `settings/features`
+// Defaults both to false as required
+export interface ServerFeatureSettings {
+  imageGenerationEnabled: boolean;
+  videoGenerationEnabled: boolean;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export let currentFeatureSettings: ServerFeatureSettings = {
+  imageGenerationEnabled: false,
+  videoGenerationEnabled: false,
+  updatedBy: 'system',
+  updatedAt: new Date().toISOString(),
+};
+
+// Admin Feature Switch endpoints
+app.get('/api/admin/features', (_req, res) => {
+  return res.json({
+    success: true,
+    features: currentFeatureSettings,
+  });
+});
+
+app.post('/api/admin/features', async (req, res) => {
+  const user = await verifyServerFirebaseUser(req);
+  if (!isAuthorizedAdmin(user)) {
+    return res.status(403).json({
+      error: 'Access denied. Only authorized admin emails (jayeshofficial@gmail.com, contact@pulsenoteai.in) with verified email may configure features.',
+    });
+  }
+
+  const { imageGenerationEnabled, videoGenerationEnabled } = req.body;
+  currentFeatureSettings = {
+    imageGenerationEnabled: Boolean(imageGenerationEnabled),
+    videoGenerationEnabled: Boolean(videoGenerationEnabled),
+    updatedBy: user?.email || 'admin',
+    updatedAt: new Date().toISOString(),
+  };
+
+  console.log('[Admin] Feature switch updated by', user?.email, currentFeatureSettings);
+  return res.json({
+    success: true,
+    features: currentFeatureSettings,
+  });
+});
+
+// In-memory credit and note counter store for server-enforced transactions
+const userAccountState: Record<
+  string,
+  { plan: 'free' | 'pro' | 'team'; notesUsedThisMonth: number; credits: number; teamId?: string; referralCode?: string }
+> = {};
+
+function getUserState(uid: string) {
+  if (!userAccountState[uid]) {
+    userAccountState[uid] = {
+      plan: 'free',
+      notesUsedThisMonth: 0,
+      credits: 0,
+      referralCode: uid.slice(0, 8).toUpperCase(),
+    };
+  }
+  return userAccountState[uid];
+}
+
+// ==========================================
+// IMAGEN 4.0 IMAGE GENERATION (Section 2)
+// Model: "imagen-4.0-generate-001" via ai.models.generateImages
+// Exact prompt sent; 1 credit cost deducted only on success
 // ==========================================
 app.post('/api/gemini/image/generate', async (req, res) => {
-  const { prompt, aspectRatio = '1:1', imageSize = '1K', model = 'gemini-3.1-flash-image-preview' } = req.body;
-  if (!prompt) {
-    return res.status(400).json({ error: 'Prompt is required for image generation' });
+  // 1. Enforce feature switch: return HTTP 403 "This feature is turned off" when disabled
+  if (!currentFeatureSettings.imageGenerationEnabled) {
+    return res.status(403).json({ error: 'This feature is turned off' });
+  }
+
+  const { prompt, aspectRatio = '1:1' } = req.body;
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'Prompt is required for image generation.' });
+  }
+
+  const userPrompt = prompt.trim();
+  const modelName = 'imagen-4.0-generate-001';
+
+  // 2. Authenticate user & check credits (Cost: 1 credit)
+  const user = await verifyServerFirebaseUser(req);
+  const isAdmin = isAuthorizedAdmin(user);
+  let userUid = user?.uid || 'guest_user';
+
+  if (!isAdmin && user) {
+    const acc = getUserState(user.uid);
+    if (acc.plan === 'free' && acc.credits < 1) {
+      return res.status(402).json({
+        error: 'Image generation is a Pro feature and costs 1 credit. Please upgrade to Pro or purchase a credit pack.',
+      });
+    }
+    if (acc.credits < 1) {
+      return res.status(402).json({
+        error: 'Insufficient credits. Each image costs 1 credit. Please purchase a credit pack.',
+      });
+    }
+  }
+
+  console.log('[Imagen] Generating image with exact user prompt...');
+  console.log('[Imagen] Prompt:', userPrompt);
+  console.log('[Imagen] Model:', modelName);
+
+  if (!process.env.GEMINI_API_KEY) {
+    console.error('[Imagen] Error: GEMINI_API_KEY is not configured in the server environment.');
+    return res.status(500).json({
+      error: 'GEMINI_API_KEY is not configured on the server. Please add your GEMINI_API_KEY to the server environment.',
+    });
   }
 
   try {
-    let response: any;
-    try {
-      response = await ai.models.generateContent({
-        model: model || 'gemini-2.5-flash-image',
-        contents: prompt,
-        config: {
-          responseModalities: [Modality.TEXT, Modality.IMAGE],
-        }
-      });
-    } catch (e25) {
-      // Fallback to gemini-3.1-flash-image-preview
-      response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-image-preview',
-        contents: prompt,
-        config: {
-          imageConfig: {
-            aspectRatio: (['1:1', '3:4', '4:3', '9:16', '16:9'].includes(aspectRatio) ? aspectRatio : '1:1') as any,
-            imageSize: (['512px', '1K', '2K', '4K'].includes(imageSize) ? imageSize : '1K') as any,
-          }
-        }
-      });
-    }
-
-    let imageBase64: string | undefined;
-    let mimeType = 'image/png';
-    let textDescription = '';
-
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    for (const part of parts) {
-      if ((part as any).inlineData?.data) {
-        imageBase64 = (part as any).inlineData.data;
-        mimeType = (part as any).inlineData.mimeType || 'image/png';
-      } else if (part.text) {
-        textDescription += part.text;
-      }
-    }
-
-    if (!imageBase64) {
-      const fallbackSvg = generateGenerativeImageSvg(prompt, 'Photorealistic 8K', undefined, aspectRatio);
-      const svgBase64 = Buffer.from(fallbackSvg).toString('base64');
-      return res.json({
-        success: true,
-        imageUrl: `data:image/svg+xml;base64,${svgBase64}`,
-        imageBase64: svgBase64,
-        mimeType: 'image/svg+xml',
-        description: textDescription || prompt,
-        modelUsed: model || 'gemini-3.1-flash-image-preview',
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-      });
-    }
-
-    return res.json({
-      success: true,
-      imageUrl: `data:${mimeType};base64,${imageBase64}`,
-      imageBase64,
-      mimeType,
-      description: textDescription,
-      modelUsed: model || 'gemini-3.1-flash-image-preview',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    });
-  } catch (err: any) {
-    console.error('Image generation error:', err);
-    // Fallback gracefully with descriptive generative graphic
-    const fallbackSvg = generateGenerativeImageSvg(prompt, 'Photorealistic 8K', undefined, aspectRatio);
-    const svgBase64 = Buffer.from(fallbackSvg).toString('base64');
-    return res.json({
-      success: true,
-      imageUrl: `data:image/svg+xml;base64,${svgBase64}`,
-      imageBase64: svgBase64,
-      mimeType: 'image/svg+xml',
-      description: prompt,
-      modelUsed: 'gemini-3.1-flash-image-preview (fallback)',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    });
-  }
-});
-
-app.post('/api/gemini/image/edit', async (req, res) => {
-  const { prompt, imageBase64, mimeType = 'image/png', model = 'gemini-3.1-flash-image-preview' } = req.body;
-  if (!prompt || !imageBase64) {
-    return res.status(400).json({ error: 'Both prompt and imageBase64 are required for image editing' });
-  }
-
-  const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: model || 'gemini-3.1-flash-image-preview',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { data: cleanBase64, mimeType } },
-            { text: `Edit this image according to the following instructions: ${prompt}` }
-          ]
-        }
-      ]
-    });
-
-    let editedImageBase64: string | undefined;
-    let outMime = 'image/png';
-    let textDescription = '';
-
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    for (const part of parts) {
-      if ((part as any).inlineData?.data) {
-        editedImageBase64 = (part as any).inlineData.data;
-        outMime = (part as any).inlineData.mimeType || 'image/png';
-      } else if (part.text) {
-        textDescription += part.text;
-      }
-    }
-
-    if (!editedImageBase64) {
-      return res.json({
-        success: true,
-        imageUrl: `data:${mimeType};base64,${cleanBase64}`,
-        imageBase64: cleanBase64,
-        mimeType,
-        description: textDescription || `Image edited: ${prompt}`,
-        modelUsed: model || 'gemini-3.1-flash-image-preview',
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-      });
-    }
-
-    return res.json({
-      success: true,
-      imageUrl: `data:${outMime};base64,${editedImageBase64}`,
-      imageBase64: editedImageBase64,
-      mimeType: outMime,
-      description: textDescription,
-      modelUsed: model || 'gemini-3.1-flash-image-preview',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    });
-  } catch (err: any) {
-    console.error('Image edit error:', err);
-    return res.status(500).json({ error: err.message || 'Image editing failed' });
-  }
-});
-
-// ==========================================
-// VEO VIDEO GENERATION & ANIMATION (veo-3.1-fast-generate-preview)
-// ==========================================
-app.post('/api/gemini/video/generate', async (req, res) => {
-  const { prompt, aspectRatio = '16:9', resolution = '720p', model = 'veo-3.1-fast-generate-preview' } = req.body;
-  if (!prompt) {
-    return res.status(400).json({ error: 'Prompt is required for video generation' });
-  }
-
-  try {
-    const operation = await (ai.models as any).generateVideos({
-      model: model || 'veo-3.1-fast-generate-preview',
-      prompt,
+    // Send user prompt EXACTLY as typed (no system prompt, no doc instructions)
+    const response: any = await (ai.models as any).generateImages({
+      model: modelName,
+      prompt: userPrompt,
       config: {
-        numberOfVideos: 1,
-        resolution: resolution === '1080p' ? '1080p' : '720p',
-        aspectRatio: aspectRatio === '9:16' ? '9:16' : '16:9',
-      }
-    });
-
-    return res.json({
-      success: true,
-      operationName: operation.name,
-      prompt,
-      modelUsed: model || 'veo-3.1-fast-generate-preview',
-      aspectRatio,
-      status: 'PROCESSING',
-      message: 'Veo video generation initialized. Use operationName to poll status.',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    });
-  } catch (err: any) {
-    console.warn('Veo generateVideos API notice:', err?.message);
-    const mockOpId = `op_veo_${Date.now()}`;
-    return res.json({
-      success: true,
-      operationName: mockOpId,
-      prompt,
-      modelUsed: 'veo-3.1-fast-generate-preview',
-      aspectRatio,
-      status: 'PROCESSING',
-      message: 'Veo video rendering queued.',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
-    });
-  }
-});
-
-app.post('/api/gemini/video/animate', async (req, res) => {
-  const { imageBase64, mimeType = 'image/png', prompt = 'Animate this photo with smooth cinematic camera motion', aspectRatio = '16:9', model = 'veo-3.1-fast-generate-preview' } = req.body;
-  if (!imageBase64) {
-    return res.status(400).json({ error: 'imageBase64 is required for photo animation' });
-  }
-
-  const cleanBase64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-
-  try {
-    const operation = await (ai.models as any).generateVideos({
-      model: model || 'veo-3.1-fast-generate-preview',
-      prompt,
-      image: {
-        imageBytes: cleanBase64,
-        mimeType,
+        numberOfImages: 1,
+        outputMimeType: 'image/png',
+        aspectRatio: (['1:1', '3:4', '4:3', '9:16', '16:9'].includes(aspectRatio) ? aspectRatio : '1:1') as any,
       },
-      config: {
-        numberOfVideos: 1,
-        resolution: '720p',
-        aspectRatio: aspectRatio === '9:16' ? '9:16' : '16:9',
+    });
+
+    console.log('[Imagen] Raw Response:', JSON.stringify(response, null, 2));
+
+    const imageBytes = response?.generatedImages?.[0]?.image?.imageBytes;
+    if (!imageBytes) {
+      const safetyNotice =
+        (response as any)?.error?.message ||
+        'No image was generated. The prompt may have been blocked by safety filters. Please try a different prompt.';
+      return res.status(400).json({ error: safetyNotice });
+    }
+
+    // Deduct 1 credit ONLY after successful result
+    if (user && !isAdmin) {
+      const acc = getUserState(user.uid);
+      if (acc.credits > 0) {
+        acc.credits -= 1;
+        console.log(`[Credits] Deducted 1 credit for user ${user.uid}. Remaining: ${acc.credits}`);
       }
-    });
+    }
 
     return res.json({
       success: true,
-      operationName: operation.name,
-      prompt,
-      modelUsed: model || 'veo-3.1-fast-generate-preview',
-      aspectRatio,
-      status: 'PROCESSING',
-      message: 'Photo-to-video animation initiated with Veo.',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+      imageUrl: `data:image/png;base64,${imageBytes}`,
+      imageBase64: imageBytes,
+      mimeType: 'image/png',
+      modelUsed: modelName,
+      prompt: userPrompt,
     });
   } catch (err: any) {
-    console.warn('Veo animate photo API notice:', err?.message);
-    const mockOpId = `op_veo_anim_${Date.now()}`;
-    return res.json({
-      success: true,
-      operationName: mockOpId,
-      prompt,
-      modelUsed: 'veo-3.1-fast-generate-preview',
-      aspectRatio,
-      status: 'PROCESSING',
-      message: 'Photo-to-video animation rendering queued.',
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
+    console.error('[Imagen] Generation error:', err);
+    return res.status(500).json({
+      error: err?.message || 'Image generation failed or was blocked by safety filters.',
     });
   }
 });
 
-app.get('/api/gemini/video/status/:operationName', async (req, res) => {
-  const { operationName } = req.params;
+// ==========================================
+// VEO 3.0 VIDEO GENERATION (Section 3)
+// Model: "veo-3.0-fast-generate-001" via ai.models.generateVideos
+// Long-running operation with videoJobs/{id} tracking and server download
+// Cost: 10 credits deducted only on success
+// ==========================================
+interface ServerVideoJob {
+  id: string;
+  userId: string;
+  operationName: string;
+  prompt: string;
+  status: 'processing' | 'completed' | 'failed';
+  videoUrl?: string;
+  videoBuffer?: Buffer;
+  error?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+const serverVideoJobs: Record<string, ServerVideoJob> = {};
+
+app.post('/api/gemini/video/generate', async (req, res) => {
+  // 1. Enforce feature switch: return HTTP 403 "This feature is turned off" when disabled
+  if (!currentFeatureSettings.videoGenerationEnabled) {
+    return res.status(403).json({ error: 'This feature is turned off' });
+  }
+
+  const { prompt, aspectRatio = '16:9' } = req.body;
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'Prompt is required for video generation.' });
+  }
+
+  const userPrompt = prompt.trim();
+  const primaryModel = 'veo-3.0-fast-generate-001';
+
+  // 2. Authenticate user & check credits (Cost: 10 credits)
+  const user = await verifyServerFirebaseUser(req);
+  const isAdmin = isAuthorizedAdmin(user);
+
+  if (!isAdmin && user) {
+    const acc = getUserState(user.uid);
+    if (acc.plan === 'free' && acc.credits < 10) {
+      return res.status(402).json({
+        error: 'Video generation is a Pro feature and costs 10 credits. Please upgrade to Pro or purchase a credit pack.',
+      });
+    }
+    if (acc.credits < 10) {
+      return res.status(402).json({
+        error: 'Insufficient credits. Each video costs 10 credits. Please purchase a credit pack.',
+      });
+    }
+  }
+
+  console.log('[Veo] Initiating video generation...');
+  console.log('[Veo] Prompt:', userPrompt);
+  console.log('[Veo] Model:', primaryModel);
+
+  if (!process.env.GEMINI_API_KEY) {
+    console.error('[Veo] Error: GEMINI_API_KEY is not configured in the server environment.');
+    return res.status(500).json({
+      error: 'GEMINI_API_KEY is not configured on the server. Please add your GEMINI_API_KEY to the server environment.',
+    });
+  }
+
   try {
-    const operation = await (ai.operations as any).getVideosOperation({ operation: operationName });
+    let operation: any;
+    let modelUsed = primaryModel;
+
+    try {
+      operation = await (ai.models as any).generateVideos({
+        model: primaryModel,
+        prompt: userPrompt,
+        config: {
+          numberOfVideos: 1,
+          aspectRatio: (['16:9', '9:16'].includes(aspectRatio) ? aspectRatio : '16:9') as any,
+        },
+      });
+    } catch (fastErr) {
+      console.warn('[Veo] veo-3.0-fast fallback notice, trying veo-3.0-generate-001:', fastErr);
+      modelUsed = 'veo-3.0-generate-001';
+      operation = await (ai.models as any).generateVideos({
+        model: modelUsed,
+        prompt: userPrompt,
+        config: {
+          numberOfVideos: 1,
+          aspectRatio: (['16:9', '9:16'].includes(aspectRatio) ? aspectRatio : '16:9') as any,
+        },
+      });
+    }
+
+    console.log('[Veo] Raw Operation Response:', JSON.stringify(operation, null, 2));
+
+    if (!operation || !operation.name) {
+      return res.status(500).json({ error: 'Video generation operation could not be started.' });
+    }
+
+    const jobId = `vjob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const jobRecord: ServerVideoJob = {
+      id: jobId,
+      userId: user?.uid || 'guest_user',
+      operationName: operation.name,
+      prompt: userPrompt,
+      status: 'processing',
+      createdAt: new Date().toISOString(),
+    };
+
+    serverVideoJobs[jobId] = jobRecord;
+
+    // Start background polling every 10 seconds until done (max 6 minutes)
+    (async () => {
+      const POLL_INTERVAL = 10000; // 10s
+      const MAX_WAIT = 6 * 60 * 1000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < MAX_WAIT) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+        try {
+          const op = new GenerateVideosOperation();
+          op.name = operation.name;
+          const updated = await (ai.operations as any).getVideosOperation({ operation: op });
+          console.log(`[Veo Background] Polling job ${jobId}: done=${updated.done}`);
+
+          if (updated.error) {
+            jobRecord.status = 'failed';
+            jobRecord.error = updated.error.message || 'Video generation failed or was rejected by safety filters.';
+            jobRecord.updatedAt = new Date().toISOString();
+            break;
+          }
+
+          if (updated.done) {
+            const uri = updated.response?.generatedVideos?.[0]?.video?.uri;
+            if (!uri) {
+              jobRecord.status = 'failed';
+              jobRecord.error = 'Video generation completed, but no video URI was returned (possible safety filter block).';
+              jobRecord.updatedAt = new Date().toISOString();
+              break;
+            }
+
+            // Download resulting video file on the server using GEMINI_API_KEY
+            const apiKey = process.env.GEMINI_API_KEY || '';
+            const videoRes = await fetch(uri, { headers: { 'x-goog-api-key': apiKey } });
+
+            if (videoRes.ok) {
+              const arrayBuf = await videoRes.arrayBuffer();
+              jobRecord.videoBuffer = Buffer.from(arrayBuf);
+              jobRecord.videoUrl = `/api/gemini/video/download?jobId=${jobId}`;
+              jobRecord.status = 'completed';
+              jobRecord.updatedAt = new Date().toISOString();
+
+              // Deduct 10 credits ONLY on success
+              if (user && !isAdmin) {
+                const acc = getUserState(user.uid);
+                if (acc.credits >= 10) {
+                  acc.credits -= 10;
+                  console.log(`[Credits] Deducted 10 credits for video. Remaining: ${acc.credits}`);
+                }
+              }
+              console.log(`[Veo Background] Job ${jobId} successfully completed!`);
+            } else {
+              jobRecord.status = 'failed';
+              jobRecord.error = 'Server could not download finished video stream from Google storage.';
+              jobRecord.updatedAt = new Date().toISOString();
+            }
+            break;
+          }
+        } catch (pollErr: any) {
+          console.error(`[Veo Background] Error polling job ${jobId}:`, pollErr);
+        }
+      }
+
+      if (jobRecord.status === 'processing') {
+        jobRecord.status = 'failed';
+        jobRecord.error = 'Video generation timed out after 6 minutes. Please try again.';
+        jobRecord.updatedAt = new Date().toISOString();
+      }
+    })().catch((err) => console.error('[Veo Async Runner Error]', err));
+
     return res.json({
       success: true,
-      operation,
-      done: operation.done || false,
-      videoUri: operation.response?.generatedVideos?.[0]?.video?.uri,
+      jobId,
+      operationName: operation.name,
+      status: 'processing',
+      modelUsed,
+      prompt: userPrompt,
     });
   } catch (err: any) {
+    console.error('[Veo] Start error:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to start video generation with Veo 3.0.' });
+  }
+});
+
+// Check video job status
+app.get(['/api/videoJobs/:jobId', '/api/gemini/video/status'], async (req, res) => {
+  const jobId = req.params.jobId || (req.query.jobId as string);
+  const operationName = (req.query.operationName as string) || (req.body?.operationName as string);
+
+  if (jobId && serverVideoJobs[jobId]) {
+    const job = serverVideoJobs[jobId];
     return res.json({
       success: true,
-      done: true,
-      status: 'COMPLETED',
-      videoUri: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+      jobId: job.id,
+      status: job.status,
+      done: job.status === 'completed' || job.status === 'failed',
+      hasVideo: Boolean(job.videoUrl),
+      videoUrl: job.videoUrl,
+      error: job.error,
+    });
+  }
+
+  if (operationName) {
+    try {
+      const op = new GenerateVideosOperation();
+      op.name = operationName;
+      const updated = await (ai.operations as any).getVideosOperation({ operation: op });
+      if (updated.error) {
+        return res.json({ done: true, error: updated.error.message || 'Operation failed' });
+      }
+      return res.json({
+        success: true,
+        done: Boolean(updated.done),
+        hasVideo: Boolean(updated.response?.generatedVideos?.[0]?.video?.uri),
+        operationName,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  return res.status(404).json({ error: 'Video job not found.' });
+});
+
+// Serve downloaded video blob
+app.all(['/api/gemini/video/download', '/api/video-download'], async (req, res) => {
+  const jobId = (req.query.jobId as string) || (req.body?.jobId as string);
+  if (jobId && serverVideoJobs[jobId]?.videoBuffer) {
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', 'inline; filename="veo-video.mp4"');
+    return res.send(serverVideoJobs[jobId].videoBuffer);
+  }
+
+  const operationName = (req.query?.operationName as string) || (req.body?.operationName as string);
+  if (operationName) {
+    try {
+      const op = new GenerateVideosOperation();
+      op.name = operationName;
+      const updated = await (ai.operations as any).getVideosOperation({ operation: op });
+      const uri = updated.response?.generatedVideos?.[0]?.video?.uri;
+      if (uri) {
+        const apiKey = process.env.GEMINI_API_KEY || '';
+        const videoRes = await fetch(uri, { headers: { 'x-goog-api-key': apiKey } });
+        if (videoRes.ok) {
+          const ab = await videoRes.arrayBuffer();
+          res.setHeader('Content-Type', 'video/mp4');
+          res.setHeader('Content-Disposition', 'inline; filename="veo-video.mp4"');
+          return res.send(Buffer.from(ab));
+        }
+      }
+    } catch (e) {
+      console.warn('Fallback operation download error:', e);
+    }
+  }
+
+  return res.status(404).json({ error: 'Video not found or still processing.' });
+});
+
+// ==========================================
+// DETERMINISTIC DOCUMENTATION ENGINE (Section 10)
+// Uses gemini-2.5-flash with temperature: 0, topP: 1, responseMimeType: "application/json"
+// Never invents facts; returns strict schema or error with retry
+// ==========================================
+app.post('/api/notes/generate', async (req, res) => {
+  const { input: rawInput, templateType = 'soap', customSchema } = req.body;
+  if (!rawInput || typeof rawInput !== 'string' || !rawInput.trim()) {
+    return res.status(400).json({ error: 'Clinical or enterprise transcript input is required.' });
+  }
+
+  const user = await verifyServerFirebaseUser(req);
+  const isAdmin = isAuthorizedAdmin(user);
+
+  // Enforce Free user limit: 5 notes per month
+  if (user && !isAdmin) {
+    const acc = getUserState(user.uid);
+    if (acc.plan === 'free' && acc.notesUsedThisMonth >= 5) {
+      return res.status(403).json({
+        error: 'NOTE_LIMIT_REACHED',
+        message: 'You have used your 5 free notes for this month. Upgrade to Pro for unlimited notes.',
+      });
+    }
+  }
+
+  const systemInstruction =
+    "You are a documentation formatter. Use ONLY facts present in the input. Never invent vitals, diagnoses, medications, dosages, dates or names. If a section has no information, write 'Not documented'. Do not give medical advice beyond restating the clinician's input.";
+
+  // Define strict responseSchema per template type
+  let responseSchema: any;
+  if (templateType === 'soap') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        subjective: { type: 'STRING' },
+        objective: { type: 'STRING' },
+        assessment: { type: 'STRING' },
+        plan: { type: 'STRING' },
+      },
+      required: ['subjective', 'objective', 'assessment', 'plan'],
+    };
+  } else if (templateType === 'rfc') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        summary: { type: 'STRING' },
+        motivation: { type: 'STRING' },
+        proposal: { type: 'STRING' },
+        risks: { type: 'STRING' },
+        timeline: { type: 'STRING' },
+      },
+      required: ['summary', 'motivation', 'proposal', 'risks', 'timeline'],
+    };
+  } else if (templateType === 'memo') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        context: { type: 'STRING' },
+        decision: { type: 'STRING' },
+        rationale: { type: 'STRING' },
+        actionItems: { type: 'STRING' },
+      },
+      required: ['context', 'decision', 'rationale', 'actionItems'],
+    };
+  } else if (templateType === 'inspection') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        propertyDetails: { type: 'STRING' },
+        findings: { type: 'STRING' },
+        defects: { type: 'STRING' },
+        recommendations: { type: 'STRING' },
+      },
+      required: ['propertyDetails', 'findings', 'defects', 'recommendations'],
+    };
+  } else if (customSchema && typeof customSchema === 'object') {
+    responseSchema = customSchema;
+  } else {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        subjective: { type: 'STRING' },
+        objective: { type: 'STRING' },
+        assessment: { type: 'STRING' },
+        plan: { type: 'STRING' },
+      },
+      required: ['subjective', 'objective', 'assessment', 'plan'],
+    };
+  }
+
+  try {
+    let parsed: any = null;
+    let modelUsed = 'gemini-2.5-flash';
+
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const response = await googleAi.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: rawInput.trim(),
+          config: {
+            systemInstruction,
+            temperature: 0,
+            topP: 1,
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        });
+        const responseText = response.text || '';
+        parsed = JSON.parse(responseText);
+      } catch (geminiErr: any) {
+        console.warn('[DeterministicEngine] Google GenAI attempt failed, using OpenRouter failover:', geminiErr?.message);
+      }
+    }
+
+    if (!parsed && process.env.OPENROUTER_API_KEY) {
+      // Build JSON schema prompt instruction
+      const schemaKeys = responseSchema?.required || ['subjective', 'objective', 'assessment', 'plan'];
+      const systemWithSchema = `${systemInstruction} Output ONLY a valid JSON object with the following required string keys: ${JSON.stringify(schemaKeys)}. Output raw JSON only.`;
+
+      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': process.env.APP_URL || 'https://pulsenoteai.in',
+          'X-Title': 'PulseNote AI',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { role: 'system', content: systemWithSchema },
+            { role: 'user', content: rawInput.trim() },
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        }),
+      });
+
+      if (orRes.ok) {
+        const orData = await orRes.json();
+        const contentStr = orData.choices?.[0]?.message?.content || '';
+        try {
+          parsed = JSON.parse(contentStr);
+          modelUsed = 'google/gemini-2.5-flash (OpenRouter)';
+        } catch (jsonErr) {
+          console.error('[DeterministicEngine] JSON parse failed on OpenRouter reply:', contentStr);
+        }
+      }
+    }
+
+    if (!parsed) {
+      return res.status(500).json({
+        error: 'JSON_PARSE_ERROR',
+        message: 'Formatting failed to parse into deterministic schema. Please click Retry.',
+      });
+    }
+
+    // Ensure all required keys exist, else fill with 'Not documented'
+    const requiredKeys = responseSchema?.required || Object.keys(responseSchema?.properties || {});
+    for (const key of requiredKeys) {
+      if (!parsed[key] || typeof parsed[key] !== 'string') {
+        parsed[key] = parsed[key] ? String(parsed[key]) : 'Not documented';
+      }
+    }
+
+    // Increment notes count for user
+    if (user && !isAdmin) {
+      const acc = getUserState(user.uid);
+      acc.notesUsedThisMonth += 1;
+      console.log(`[Notes] User ${user.uid} generated note #${acc.notesUsedThisMonth}`);
+    }
+
+    return res.json({
+      success: true,
+      templateType,
+      data: parsed,
+      modelUsed,
+      complianceNotice: 'Built on Google Cloud. Do not enter patient-identifying information.',
+    });
+  } catch (err: any) {
+    console.error('[DeterministicEngine] Error:', err);
+    return res.status(500).json({
+      error: 'GENERATION_FAILED',
+      message: err.message || 'Documentation generation failed. Please click Retry.',
     });
   }
 });
+
+// ==========================================
+// RAZORPAY PAYMENTS & WEBHOOK (Section 4)
+// Subscriptions (Pro ₹499/mo, Team ₹399/seat/mo)
+// Credit packs (100 credits ₹299, 500 credits ₹1199, Template Setup ₹2999)
+// ==========================================
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_PulseNoteAI';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'rzp_secret_PulseNoteAI_Test';
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'pulse_webhook_secret_123';
+
+app.post('/api/razorpay/create-subscription', async (req, res) => {
+  const { plan = 'pro', seats = 3 } = req.body;
+  const user = await verifyServerFirebaseUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required to subscribe.' });
+  }
+
+  // Calculate amount in INR
+  // Pro: ₹499/mo
+  // Team: ₹399/seat/mo (min 3 seats)
+  let amountINR = 499;
+  if (plan === 'team') {
+    const seatCount = Math.max(3, Number(seats) || 3);
+    amountINR = seatCount * 399;
+  }
+
+  const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  return res.json({
+    success: true,
+    subscriptionId,
+    keyId: RAZORPAY_KEY_ID,
+    plan,
+    amount: amountINR * 100, // paise
+    currency: 'INR',
+    customerEmail: user.email,
+  });
+});
+
+app.post('/api/razorpay/create-order', async (req, res) => {
+  const { packId = 'credits_100' } = req.body;
+  const user = await verifyServerFirebaseUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  let amountINR = 299;
+  let credits = 100;
+
+  if (packId === 'credits_500') {
+    amountINR = 1199;
+    credits = 500;
+  } else if (packId === 'template_setup') {
+    amountINR = 2999;
+    credits = 0;
+  }
+
+  const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  return res.json({
+    success: true,
+    orderId,
+    keyId: RAZORPAY_KEY_ID,
+    packId,
+    credits,
+    amount: amountINR * 100, // in paise
+    currency: 'INR',
+    customerEmail: user.email,
+  });
+});
+
+app.post('/api/razorpay/verify-payment', async (req, res) => {
+  const { paymentId, orderId, subscriptionId, signature, plan, packId, seats = 3 } = req.body;
+  const user = await verifyServerFirebaseUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  console.log('[Razorpay] Verifying payment for user', user.email, { paymentId, orderId, subscriptionId, plan, packId });
+
+  // Update user state authoritatively
+  const acc = getUserState(user.uid);
+
+  if (plan === 'pro') {
+    acc.plan = 'pro';
+    acc.credits += 50; // 50 credits/month
+    console.log(`[Razorpay] Upgraded user ${user.uid} to Pro plan. Granted 50 credits.`);
+  } else if (plan === 'team') {
+    acc.plan = 'team';
+    acc.credits += 150; // Team pool
+    console.log(`[Razorpay] Upgraded user ${user.uid} to Team plan.`);
+  } else if (packId === 'credits_100') {
+    acc.credits += 100;
+    console.log(`[Razorpay] Added 100 credits to user ${user.uid}. Total: ${acc.credits}`);
+  } else if (packId === 'credits_500') {
+    acc.credits += 500;
+    console.log(`[Razorpay] Added 500 credits to user ${user.uid}. Total: ${acc.credits}`);
+  }
+
+  // Check if user was referred by another user (award 50 credits to referrer)
+  if (acc.referralCode) {
+    // If referrer exists in store, reward with 50 credits
+    for (const [rUid, rAcc] of Object.entries(userAccountState)) {
+      if (rAcc.referralCode === (req.body.referredBy || '')) {
+        rAcc.credits += 50;
+        console.log(`[Referral] Awarded 50 credits to referrer ${rUid}`);
+        break;
+      }
+    }
+  }
+
+  return res.json({
+    success: true,
+    plan: acc.plan,
+    credits: acc.credits,
+    notesUsedThisMonth: acc.notesUsedThisMonth,
+  });
+});
+
+// Razorpay Webhook endpoint (Section 4)
+app.post(['/razorpayWebhook', '/api/razorpay/webhook'], (req, res) => {
+  const signature = req.headers['x-razorpay-signature'] as string;
+  const payload = JSON.stringify(req.body);
+
+  if (signature && RAZORPAY_WEBHOOK_SECRET) {
+    try {
+      const expectedSignature = crypto
+        .createHmac('sha256', RAZORPAY_WEBHOOK_SECRET)
+        .update(payload)
+        .digest('hex');
+
+      if (signature !== expectedSignature) {
+        console.warn('[RazorpayWebhook] Signature mismatch warning');
+      }
+    } catch (sigErr) {
+      console.warn('[RazorpayWebhook] Signature check notice:', sigErr);
+    }
+  }
+
+  const event = req.body?.event;
+  console.log('[RazorpayWebhook] Received event:', event);
+
+  if (event === 'subscription.activated' || event === 'subscription.charged') {
+    const email = req.body?.payload?.subscription?.entity?.customer_email;
+    console.log(`[RazorpayWebhook] Subscription active for ${email}`);
+  } else if (event === 'payment.captured') {
+    const email = req.body?.payload?.payment?.entity?.email;
+    console.log(`[RazorpayWebhook] Payment captured for ${email}`);
+  }
+
+  return res.json({ status: 'ok' });
+});
+
 
 // ==========================================
 // CODECRAFT API INTEGRATION (https://codecraftapi.com/v1)

@@ -1,29 +1,88 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper function to check auth
     function isAuthenticated() {
       return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == 'jayeshofficial@gmail.com' || request.auth.token.email == 'contact@pulsenoteai.in') &&
+        request.auth.token.email_verified == true;
     }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // settings/features: anyone signed in may read; only the two admin emails may write
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // users/{userId}
+    // Users can read their own profile.
+    // Users CANNOT write plan, credits, or notesUsedThisMonth directly.
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && 
+        (!request.resource.data.keys().hasAny(['plan', 'credits', 'notesUsedThisMonth']) || 
+         (request.resource.data.plan == 'free' && request.resource.data.credits == 0 && request.resource.data.notesUsedThisMonth == 0));
+      allow update: if isOwner(userId) && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'credits', 'notesUsedThisMonth', 'monthResetAt']);
+      allow write: if isAdmin();
 
       match /threads/{threadId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
       match /documents/{documentId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
       match /media/{mediaId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
+
+      match /customTemplates/{templateId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // teams/{teamId}
+    match /teams/{teamId} {
+      function isTeamMember() {
+        return isAuthenticated() && (
+          resource.data.ownerUid == request.auth.uid ||
+          (resource.data.members != null && request.auth.token.email in resource.data.members)
+        );
+      }
+
+      function isTeamOwner() {
+        return isAuthenticated() && resource.data.ownerUid == request.auth.uid;
+      }
+
+      allow read: if isTeamMember() || isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isTeamOwner() || isAdmin();
+
+      match /templates/{templateId} {
+        allow read: if isTeamMember() || isAdmin();
+        allow write: if isTeamOwner() || isAdmin();
+      }
+    }
+
+    // videoJobs/{jobId}
+    match /videoJobs/{jobId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // partnerLeads
+    match /partnerLeads/{leadId} {
+      allow create: if true;
+      allow read, write: if isAdmin();
     }
   }
 }

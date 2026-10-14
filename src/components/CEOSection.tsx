@@ -40,18 +40,18 @@ export const CEO_PROFILE = {
     'Clinicians and technical leaders should never have to fight software just to record what happened in the room. When you replace administrative friction with deterministic intelligence, you don\'t just save hours—you restore human focus and empathy.',
 
   shortBio: 
-    'Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, zero-retention healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders.',
+    'Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, secure healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders. Built on Google Cloud. Do not enter patient-identifying information.',
 
   longBio: [
     'Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern generative AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.',
-    'Under Jayesh\'s leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from HIPAA-oriented SOAP clinical dictation to software RFC generation and commercial property defect grading. Jayesh is a staunch advocate for zero-retention data privacy in AI, ensuring that patient conversations and executive strategies remain completely confidential.',
+    'Under Jayesh\'s leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from structured SOAP clinical dictation to software RFC generation and commercial property defect grading. Built on Google Cloud. Do not enter patient-identifying information.',
     'An active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and video generation models like Veo, continuously pushing the boundaries of what assistive generative software can achieve.'
   ],
 
   welcomeMessage: {
     greeting: 'Dear Innovator, Physician, and Builder,',
     p1: 'Every great product begins with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical founders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters.',
-    p2: 'We didn\'t build PulseNote AI to be another conversational novelty that writes rambling paragraphs. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly, while honoring zero-retention privacy.',
+    p2: 'We didn\'t build PulseNote AI to be another conversational novelty that writes rambling paragraphs. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly. Built on Google Cloud. Do not enter patient-identifying information.',
     p3: 'Whether you\'re charting your 30th patient encounter of the day or documenting a pivotal architecture decision, PulseNote AI is engineered to give you your time and presence back. Thank you for trusting our platform. Let\'s build a future where software serves you, not the other way around.',
     signature: 'Jayesh Wagh\nFounder & CEO, PulseNote AI'
   },
@@ -65,7 +65,7 @@ export const CEO_PROFILE = {
     { label: 'GitHub', value: '@jayeshwagh', link: 'https://github.com/jayeshwagh', highlight: true, color: 'text-[#ff5757]' },
     { label: 'Official Domain', value: 'pulsenoteai.in', link: 'https://pulsenoteai.in', highlight: false },
     { label: 'Core Architecture', value: 'Dual-Rail Gemini + OpenRouter', highlight: false },
-    { label: 'Compliance Standard', value: 'Zero Data Retention (ZDR)', highlight: true, color: 'text-[#10b981]' },
+    { label: 'Compliance Standard', value: 'Built on Google Cloud. Do not enter patient-identifying information.', highlight: true, color: 'text-[#10b981]' },
     { label: 'Industry Modes', value: '5 Domain Lenses (Clinical, Exec, Dev, RE, Multimodal)', highlight: false },
     { label: 'Direct Press Desk', value: 'contact@pulsenoteai.in', link: 'mailto:contact@pulsenoteai.in', highlight: false }
   ],
@@ -73,8 +73,8 @@ export const CEO_PROFILE = {
   pillars: [
     {
       icon: ShieldCheck,
-      title: 'Zero Data Retention',
-      description: 'Zero audio or transcript persistence. In-memory execution only.',
+      title: 'Built on Google Cloud',
+      description: 'Built on Google Cloud. Do not enter patient-identifying information.',
       accent: '#10b981'
     },
     {

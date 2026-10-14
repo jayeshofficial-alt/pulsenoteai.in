@@ -34,7 +34,7 @@ Structure your response strictly following the SOAP framework:
 
 Formatting Rules:
 - Enforce clinical accuracy, objective tone, and professional brevity.
-- Redact or generalize personal identifiers to maintain HIPAA privacy.
+- Built on Google Cloud. Do not enter patient-identifying information.
 - Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`,
 

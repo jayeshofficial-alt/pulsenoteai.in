@@ -37,6 +37,8 @@ interface PromptBarProps {
   onStartVoice?: () => void;
   isRecording?: boolean;
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
+  imageGenerationEnabled?: boolean;
+  videoGenerationEnabled?: boolean;
 }
 
 export default function PromptBar({
@@ -55,6 +57,8 @@ export default function PromptBar({
   onStartVoice,
   isRecording = false,
   onShowToast,
+  imageGenerationEnabled = false,
+  videoGenerationEnabled = false,
 }: PromptBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -123,13 +127,16 @@ export default function PromptBar({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const toolModes: Array<{ id: GeminiToolMode; label: string; icon: any; color: string }> = [
-    { id: 'chat', label: 'Chat', icon: MessageSquare, color: 'text-blue-400' },
-    { id: 'image', label: 'Create Image', icon: ImageIcon, color: 'text-amber-400' },
-    { id: 'video', label: 'Veo Video', icon: Film, color: 'text-purple-400' },
-    { id: 'animation', label: 'Animation', icon: Wand2, color: 'text-pink-400' },
-    { id: 'understanding', label: 'Understand Photo', icon: Eye, color: 'text-emerald-400' },
+  const rawToolModes: Array<{ id: GeminiToolMode; label: string; icon: any; color: string; enabled: boolean }> = [
+    { id: 'chat', label: 'Chat', icon: MessageSquare, color: 'text-blue-400', enabled: true },
+    { id: 'image', label: 'Create Image', icon: ImageIcon, color: 'text-amber-400', enabled: Boolean(imageGenerationEnabled) },
+    { id: 'video', label: 'Veo Video', icon: Film, color: 'text-purple-400', enabled: Boolean(videoGenerationEnabled) },
+    { id: 'animation', label: 'Animation', icon: Wand2, color: 'text-pink-400', enabled: true },
+    { id: 'understanding', label: 'Understand Photo', icon: Eye, color: 'text-emerald-400', enabled: true },
   ];
+
+  // Completely omit disabled media modes (not just greying them out)
+  const toolModes = rawToolModes.filter((m) => m.enabled);
 
   const getPlaceholder = () => {
     switch (toolMode) {

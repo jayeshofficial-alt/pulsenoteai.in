@@ -13,8 +13,14 @@ import {
   Maximize2, 
   AlertCircle,
   Loader2,
-  ExternalLink
+  ExternalLink,
+  Lock,
+  FileDown,
+  FileText,
+  FileCode,
+  RefreshCw
 } from 'lucide-react';
+import { exportNoteToPdf, exportNoteToDocx, generateFhirHl7ReadyJson, NoteExportSection } from '../lib/exportUtils';
 
 export interface ChatMessage {
   id: string;
@@ -41,10 +47,13 @@ export interface ChatMessage {
   statusMessage?: string;
   progressPercent?: number;
   error?: string;
+  structuredNote?: Record<string, string>;
 }
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
+  isPaidPlan?: boolean;
+  onOpenPricing?: () => void;
   onAnimateImage?: (imageUrl: string, title: string) => void;
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
   onRetry?: (message: ChatMessage) => void;
@@ -52,12 +61,17 @@ interface ChatMessageBubbleProps {
 
 export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
+  isPaidPlan = false,
+  onOpenPricing,
   onAnimateImage,
   onShowToast,
   onRetry,
 }) => {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [copiedFhir, setCopiedFhir] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [showCode, setShowCode] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -195,14 +209,14 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               />
             </div>
             <div className="flex items-center justify-between px-1 text-xs text-slate-400">
-              <span className="truncate">gemini-2.5-flash-image</span>
+              <span className="truncate font-mono text-[11px] text-amber-300">imagen-4.0-generate-001</span>
               <button
                 type="button"
-                onClick={() => handleDownloadImage(message.mediaUrl!, 'gemini-generated-image.png')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition"
+                onClick={() => handleDownloadImage(message.mediaUrl!, 'imagen-generated-image.png')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition cursor-pointer"
               >
                 <Download size={13} />
-                <span>Download</span>
+                <span>Download PNG</span>
               </button>
             </div>
           </div>
@@ -220,11 +234,11 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               className="w-full aspect-video rounded-xl object-contain bg-black"
             />
             <div className="flex items-center justify-between px-1 text-xs text-slate-400">
-              <span className="truncate font-medium">Veo Video (16:9)</span>
+              <span className="truncate font-mono text-[11px] text-purple-300">veo-3.0-generate-001</span>
               <button
                 type="button"
                 onClick={() => handleDownloadVideo(message.videoParams?.videoUrl || message.mediaUrl!, 'veo-generated-video.mp4', message.videoBlob)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition cursor-pointer"
               >
                 <Download size={13} />
                 <span>Download MP4</span>
@@ -283,6 +297,29 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           </div>
         )}
 
+        {/* Error State with prominent Retry button (Never blank output) */}
+        {message.error && (
+          <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-start justify-between gap-3 text-red-200">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-red-300">Generation Notice</p>
+                <p className="text-xs text-red-200/90 mt-0.5">{message.error}</p>
+              </div>
+            </div>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={() => onRetry(message)}
+                className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+              >
+                <RefreshCw size={13} />
+                <span>Retry</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Text Content with Markdown */}
         {message.content && (
           <div className="prose prose-invert max-w-none text-[#e3e3e3] prose-p:leading-relaxed prose-pre:bg-[#1e1f20] prose-pre:border prose-pre:border-[#3c4043] prose-pre:rounded-xl">
@@ -295,17 +332,107 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           <span className="inline-block w-2 h-4 bg-[#4e8cff] animate-pulse ml-1 rounded-sm" />
         )}
 
-        {/* Message Actions */}
+        {/* Message Actions & Paywalled Downloads (Section 5) */}
         {!message.isStreaming && message.content && (
-          <div className="flex items-center gap-2 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#2d2e30]/60">
+            {/* Copy raw response button */}
             <button
               type="button"
               onClick={handleCopy}
-              className="p-1.5 hover:bg-[#2d2e30] rounded-lg text-[#9aa0a6] hover:text-[#e3e3e3] transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+              className="px-2.5 py-1.5 rounded-lg bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/50 text-[#c4c7c5] hover:text-white transition cursor-pointer text-xs flex items-center gap-1.5"
               title="Copy response"
             >
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
               <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+
+            {/* Export PDF Button (Pro/Team only) */}
+            <button
+              type="button"
+              onClick={async () => {
+                if (!isPaidPlan) {
+                  onShowToast?.('info', 'PDF export is locked on the Free plan. Upgrade to Pro or Team to download.');
+                  onOpenPricing?.();
+                  return;
+                }
+                setIsExportingPdf(true);
+                try {
+                  const sections = extractSectionsFromNote(message.content, message.structuredNote);
+                  exportNoteToPdf({ title: 'PulseNote Clinical & Enterprise Record', authorName: 'PulseNote AI' }, sections);
+                  onShowToast?.('success', 'PDF downloaded successfully.');
+                } catch (e: any) {
+                  onShowToast?.('error', e?.message || 'Failed to export PDF.');
+                } finally {
+                  setIsExportingPdf(false);
+                }
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
+                !isPaidPlan
+                  ? 'bg-[#1e1f20] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
+                  : 'bg-[#1e1f20] hover:bg-[#2d2e30] border-blue-500/30 text-blue-300 hover:text-white'
+              }`}
+              title={!isPaidPlan ? 'Upgrade to Pro to export PDF' : 'Download formatted PDF note'}
+            >
+              {!isPaidPlan ? <Lock size={12} className="text-amber-400" /> : <FileDown size={13} className="text-blue-400" />}
+              <span>Export PDF</span>
+            </button>
+
+            {/* Export Word (.docx) Button (Pro/Team only) */}
+            <button
+              type="button"
+              onClick={async () => {
+                if (!isPaidPlan) {
+                  onShowToast?.('info', 'Word (.docx) export is locked on the Free plan. Upgrade to Pro or Team to download.');
+                  onOpenPricing?.();
+                  return;
+                }
+                setIsExportingDocx(true);
+                try {
+                  const sections = extractSectionsFromNote(message.content, message.structuredNote);
+                  await exportNoteToDocx({ title: 'PulseNote Clinical & Enterprise Record', authorName: 'PulseNote AI' }, sections);
+                  onShowToast?.('success', 'Word (.docx) file downloaded successfully.');
+                } catch (e: any) {
+                  onShowToast?.('error', e?.message || 'Failed to export Word file.');
+                } finally {
+                  setIsExportingDocx(false);
+                }
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
+                !isPaidPlan
+                  ? 'bg-[#1e1f20] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
+                  : 'bg-[#1e1f20] hover:bg-[#2d2e30] border-indigo-500/30 text-indigo-300 hover:text-white'
+              }`}
+              title={!isPaidPlan ? 'Upgrade to Pro to export Word (.docx)' : 'Download formatted Word (.docx) note'}
+            >
+              {!isPaidPlan ? <Lock size={12} className="text-amber-400" /> : <FileText size={13} className="text-indigo-400" />}
+              <span>Export Word (.docx)</span>
+            </button>
+
+            {/* Copy as FHIR / HL7-ready text (Pro/Team only) */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!isPaidPlan) {
+                  onShowToast?.('info', 'FHIR / HL7 text export is locked on the Free plan. Upgrade to Pro or Team to unlock.');
+                  onOpenPricing?.();
+                  return;
+                }
+                const sections = extractSectionsFromNote(message.content, message.structuredNote);
+                const fhirJson = generateFhirHl7ReadyJson({ title: 'PulseNote SOAP Clinical Composition' }, sections);
+                navigator.clipboard.writeText(fhirJson);
+                setCopiedFhir(true);
+                onShowToast?.('success', 'FHIR / HL7 Composition JSON copied to clipboard.');
+                setTimeout(() => setCopiedFhir(false), 2500);
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
+                !isPaidPlan
+                  ? 'bg-[#1e1f20] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
+                  : 'bg-[#1e1f20] hover:bg-[#2d2e30] border-emerald-500/30 text-emerald-300 hover:text-white'
+              }`}
+              title={!isPaidPlan ? 'Upgrade to Pro to export FHIR / HL7 JSON' : 'Copy structured FHIR HL7 JSON'}
+            >
+              {!isPaidPlan ? <Lock size={12} className="text-amber-400" /> : copiedFhir ? <Check size={13} className="text-emerald-400" /> : <FileCode size={13} className="text-emerald-400" />}
+              <span>{copiedFhir ? 'Copied FHIR JSON' : 'Copy as FHIR / HL7'}</span>
             </button>
           </div>
         )}
@@ -313,3 +440,52 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     </div>
   );
 };
+
+// Helper to convert structured note or markdown text into NoteExportSections
+function extractSectionsFromNote(
+  content: string,
+  structuredNote?: Record<string, string>
+): NoteExportSection[] {
+  if (structuredNote && Object.keys(structuredNote).length > 0) {
+    return Object.entries(structuredNote).map(([key, val]) => ({
+      title: key.toUpperCase(),
+      content: val || 'Not documented',
+    }));
+  }
+
+  // Try parsing JSON if content itself is JSON
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === 'object') {
+      return Object.entries(parsed).map(([key, val]) => ({
+        title: key.toUpperCase(),
+        content: typeof val === 'string' ? val : JSON.stringify(val),
+      }));
+    }
+  } catch {}
+
+  // Parse markdown headings
+  const lines = content.split('\n');
+  const sections: NoteExportSection[] = [];
+  let currentTitle = 'Clinical / Enterprise Synthesis';
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const match = line.match(/^#{1,4}\s+(.+)$/);
+    if (match) {
+      if (currentLines.length > 0) {
+        sections.push({ title: currentTitle, content: currentLines.join('\n').trim() });
+        currentLines = [];
+      }
+      currentTitle = match[1].trim();
+    } else {
+      currentLines.push(line);
+    }
+  }
+
+  if (currentLines.length > 0) {
+    sections.push({ title: currentTitle, content: currentLines.join('\n').trim() });
+  }
+
+  return sections.length > 0 ? sections : [{ title: 'Documentation Note', content }];
+}

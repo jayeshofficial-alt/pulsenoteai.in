@@ -9,7 +9,10 @@ import {
   UserUsageState, 
   SubscriptionPlan, 
   AttachedFile,
-  TransformedReport
+  TransformedReport,
+  FeatureSettingsDoc,
+  UserFirestoreData,
+  PulseNotePlan
 } from './types';
 import { 
   UploadCloud, 
@@ -24,9 +27,13 @@ import {
   Menu,
   ChevronDown,
   Settings,
-  Key
+  Key,
+  Film,
+  Layers,
+  Lock,
+  Plus
 } from 'lucide-react';
-import Sidebar from './components/Sidebar';
+import Sidebar, { AppActiveView } from './components/Sidebar';
 import PromptBar, { GeminiToolMode } from './components/PromptBar';
 import { SettingsModal } from './components/SettingsModal';
 import { ChatMessageBubble, ChatMessage } from './components/ChatMessageBubble';
@@ -44,6 +51,14 @@ import { GeminiStudioModal } from './components/GeminiStudioModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { MarketingSite } from './components/marketing/MarketingSite';
+import { ImageStudio } from './components/ImageStudio';
+import { VideoStudio } from './components/VideoStudio';
+import { AdminPage } from './components/AdminPage';
+import { TeamDashboard } from './components/TeamDashboard';
+import { PartnersPage } from './components/PartnersPage';
+import { TemplateBuilderModal } from './components/TemplateBuilderModal';
+import { LegalTrustModal } from './components/LegalTrustModal';
+import { generateImageWithImagen, generateVideoWithVeo as generateVeo3Video } from './services/mediaService';
 import { 
   auth, 
   onAuthStateChanged, 
@@ -51,7 +66,10 @@ import {
   saveThreadToFirestore, 
   loadUserThreadsFromFirestore, 
   deleteThreadFromFirestore, 
-  saveDocumentToFirestore 
+  saveDocumentToFirestore,
+  subscribeToFeatureSettings,
+  subscribeToUserProfile,
+  isPulseNoteAdmin
 } from './lib/firebase';
 import {
   chatCompletion,
@@ -85,10 +103,27 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGeminiStudioOpen, setIsGeminiStudioOpen] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [isTemplateBuilderOpen, setIsTemplateBuilderOpen] = useState(false);
+  const [legalModalType, setLegalModalType] = useState<'privacy' | 'terms' | 'testimonials' | 'demo' | null>(null);
   const [toolMode, setToolMode] = useState<GeminiToolMode>('chat');
   const abortControllerRef = useRef<AbortController | null>(null);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [hasAcceptedLegalOnboarding, setHasAcceptedLegalOnboarding] = useState(true);
+
+  // Feature Switches Doc & Firestore User Subscription
+  const [features, setFeatures] = useState<FeatureSettingsDoc>({
+    imageGenerationEnabled: false,
+    videoGenerationEnabled: false,
+    updatedBy: 'system',
+    updatedAt: '',
+  });
+
+  const [userFirestore, setUserFirestore] = useState<UserFirestoreData>({
+    plan: 'free',
+    notesUsedThisMonth: 0,
+    monthResetAt: new Date().toISOString(),
+    credits: 0,
+  });
 
   // Authenticated User Profile
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
@@ -112,12 +147,16 @@ export function App() {
     }
   });
   const [model, setModel] = useState<'2.5 Flash' | '2.5 Pro'>('2.5 Flash');
-  const [activeView, setActiveView] = useState<'marketing' | 'chat' | 'canvas'>(() => {
+  const [activeView, setActiveView] = useState<AppActiveView>(() => {
     try {
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         if (params.get('view') === 'chat') return 'chat';
+        if (params.get('view') === 'image') return 'image';
+        if (params.get('view') === 'video') return 'video';
         if (params.get('view') === 'canvas') return 'canvas';
+        if (window.location.hash.includes('image')) return 'image';
+        if (window.location.hash.includes('video')) return 'video';
         if (window.location.hash.includes('chat') || window.location.hash.includes('app')) return 'chat';
       }
     } catch {}
@@ -315,13 +354,58 @@ export function App() {
     }
   }, [messages, isGenerating, activeView]);
 
-  // Sync admin email to the OpenRouter service (controls server-key access)
+  // Real-time subscribe to Firestore settings/features (Section 1)
   useEffect(() => {
-    setAdminEmail(currentUser?.email || null);
-  }, [currentUser?.email]);
+    const unsub = subscribeToFeatureSettings((f) => {
+      setFeatures(f);
+    });
+    return () => unsub();
+  }, []);
 
-  const isAdmin = currentUser?.role === 'admin';
-  const effectiveIsPro = usageState.isPro || isAdmin;
+  // Real-time subscribe to user's plan and credits in Firestore users/{uid} (Section 4)
+  useEffect(() => {
+    const uid = currentUser?.id || (currentUser as any)?.uid || auth.currentUser?.uid;
+    if (!uid) return;
+    const unsub = subscribeToUserProfile(uid, (data) => {
+      setUserFirestore(data);
+    });
+    return () => unsub();
+  }, [currentUser?.id, (currentUser as any)?.uid, auth.currentUser?.uid]);
+
+  // URL routes & referral parameter (Section 8 & 9)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const path = window.location.pathname;
+    const params = new URLSearchParams(window.location.search);
+
+    const ref = params.get('ref');
+    if (ref) {
+      try {
+        localStorage.setItem('pulsenote_referrer_code', ref);
+      } catch {}
+    }
+
+    if (path === '/admin') {
+      setActiveView('admin');
+    } else if (path === '/team') {
+      setActiveView('team');
+    } else if (path === '/partners') {
+      setActiveView('partners');
+    } else if (path === '/pricing') {
+      setIsPricingModalOpen(true);
+    } else if (path === '/privacy') {
+      setLegalModalType('privacy');
+    } else if (path === '/terms') {
+      setLegalModalType('terms');
+    } else if (path === '/testimonials') {
+      setLegalModalType('testimonials');
+    }
+  }, []);
+
+  // Strict Admin Email Verification (jayeshofficial@gmail.com, contact@pulsenoteai.in)
+  const isSuperAdmin = isPulseNoteAdmin(currentUser?.email, (currentUser as any)?.emailVerified);
+  const isPaidPlan = userFirestore.plan === 'pro' || userFirestore.plan === 'team' || isSuperAdmin;
+  const effectiveIsPro = isPaidPlan || usageState.isPro;
 
   // Model switch with Premium logic check
   const handleModelChange = (newModel: '2.5 Flash' | '2.5 Pro') => {
@@ -563,64 +647,35 @@ export function App() {
     }
 
     try {
-      // 1. IMAGE GENERATION (gemini-2.5-flash-image / responseModalities: [TEXT, IMAGE])
-      // 1. IMAGE GENERATION (OpenRouter-powered SVG / Visual generation)
+      // 1. IMAGE GENERATION (Imagen 4.0 "imagen-4.0-generate-001" via ai.models.generateImages)
       if (isImageMode) {
-        const svgPrompt = [
-          {
-            role: 'system',
-            content: 'You are an elite vector artist and UI designer. Create a beautiful, complete, modern SVG graphic representing the user prompt. Return ONLY the self-contained <svg>...</svg> inside an ```xml markdown codeblock. Do not include any text before or after.',
-          },
-          { role: 'user', content: `Generate an SVG image for: ${userPrompt}` },
-        ];
-        const resSvg = await chatCompletion(svgPrompt, 'openai/gpt-4o-mini');
-        const match = resSvg.match(/<svg[\s\S]*?<\/svg>/i);
-        const svgContent = match
-          ? match[0]
-          : `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="#090a0f"/><text x="400" y="300" fill="#38bdf8" font-size="22" text-anchor="middle" font-family="sans-serif">${userPrompt.slice(0, 45)}</text></svg>`;
-        const imageUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgContent)}`;
+        // Enforce admin feature switch
+        if (!features.imageGenerationEnabled) {
+          const errorMsg = 'This feature is turned off by the platform administrator.';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: errorMsg, error: errorMsg, mediaType: 'text', isStreaming: false }
+                : m
+            )
+          );
+          addToast('error', errorMsg);
+          setIsGenerating(false);
+          return;
+        }
 
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId
-              ? {
-                  ...m,
-                  content: `Here is your image: I've created a custom visual for "${userPrompt}".`,
-                  mediaType: 'image',
-                  mediaUrl: imageUrl,
-                  isStreaming: false,
-                }
-              : m
-          )
-        );
-        setCurrentProject((prev) => ({
-          ...prev,
-          nodes: (prev.nodes || []).map((n) =>
-            n.id === canvasNodeId
-              ? {
-                  ...n,
-                  status: 'completed',
-                  progress: 100,
-                  type: 'image',
-                  report: createReportObject(n.title, userPrompt, 'Image generated successfully', 'image'),
-                }
-              : n
-          ),
-        }));
-      }
+        try {
+          // Read from React state at submit time; prompt sent EXACTLY as typed
+          const imageResult = await generateImageWithImagen(userPrompt, '1:1');
 
-      // 2. VIDEO GENERATION (Veo 3.0 / 3.1 with precheck prompt & safety filter)
-      else if (isVideoMode) {
-        // Run precheck prompt for safety and prohibited patterns
-        const precheckError = precheck_prompt(userPrompt);
-        if (precheckError) {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
                 ? {
                     ...m,
-                    content: precheckError,
-                    mediaType: 'text',
+                    content: `Here is your image: Generated with Google Imagen 4.0 (imagen-4.0-generate-001).`,
+                    mediaType: 'image',
+                    mediaUrl: imageResult.imageUrl, // data:image/png;base64,...
                     isStreaming: false,
                   }
                 : m
@@ -632,117 +687,135 @@ export function App() {
               n.id === canvasNodeId
                 ? {
                     ...n,
-                    status: 'error',
+                    status: 'completed',
                     progress: 100,
-                    type: 'research',
-                    report: createReportObject(n.title, userPrompt, precheckError, 'text'),
+                    type: 'image',
+                    report: createReportObject(n.title, userPrompt, 'Image generated successfully with Imagen 4.0', 'image'),
                   }
                 : n
             ),
           }));
-          return;
-        }
-
-        // Update progress state
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId
-              ? {
-                  ...m,
-                  statusMessage: 'Generating video...',
-                  progressPercent: 35,
-                }
-              : m
-          )
-        );
-
-        // Generate video client-side (produces real, downloadable WebM)
-        let videoUrl: string;
-        let videoBlob: Blob | null = null;
-        try {
-          const duration = Math.min(20, Math.max(5, Math.round(userPrompt.length / 10)));
-          const result = await generateVideoFromPrompt(userPrompt, duration);
-          videoUrl = result.blobUrl;
-          videoBlob = result.blob;
-        } catch {
-          // Fallback to server-side generation
-          const videoResult = await generateVideoWithVeo(userPrompt);
-          if (videoResult.status === 'blocked' || videoResult.status === 'rejected') {
-            const failMsg = videoResult.message || 'This prompt was blocked by the safety filter. Please try a different scene.';
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId
-                  ? { ...m, content: failMsg, mediaType: 'text', isStreaming: false }
-                  : m
-              )
-            );
-            return;
-          }
-          if (videoResult.status === 'error') {
-            const errMsg = videoResult.message || 'Video generation service unavailable. Please try again.';
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsgId
-                  ? { ...m, content: errMsg, mediaType: 'text', isStreaming: false }
-                  : m
-              )
-            );
-            return;
-          }
-          videoUrl = videoResult.videoUrl || videoResult.file || '';
-          videoBlob = null;
-        }
-
-        if (!videoUrl) {
+        } catch (imgErr: any) {
+          console.error('Imagen generation error:', imgErr);
+          const errorMsg = imgErr?.message || 'Image generation failed or was blocked by safety filters.';
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
-                ? { ...m, content: 'Video generation failed. Please try again.', mediaType: 'text', isStreaming: false }
+                ? {
+                    ...m,
+                    content: errorMsg,
+                    error: errorMsg,
+                    mediaType: 'text',
+                    isStreaming: false,
+                  }
                 : m
             )
           );
+          addToast('error', errorMsg);
+          return;
+        }
+      }
+
+      // 2. VIDEO GENERATION (Veo 3.0 "veo-3.0-generate-001" via ai.models.generateVideos)
+      else if (isVideoMode) {
+        // Enforce admin feature switch
+        if (!features.videoGenerationEnabled) {
+          const errorMsg = 'This feature is turned off by the platform administrator.';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: errorMsg, error: errorMsg, mediaType: 'text', isStreaming: false }
+                : m
+            )
+          );
+          addToast('error', errorMsg);
+          setIsGenerating(false);
           return;
         }
 
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId
-              ? {
-                  ...m,
-                  content: `Here is your video: Video ready for "${userPrompt}".`,
-                  mediaType: 'video',
-                  mediaUrl: videoUrl,
-                  videoBlob: videoBlob || undefined,
-                  videoParams: {
-                    videoUrl,
-                    title: userPrompt,
-                    aspectRatio: '16:9',
-                  } as any,
-                  isStreaming: false,
-                }
-              : m
-          )
-        );
+        try {
+          // Prompt sent EXACTLY as typed, long-running operation polled every 10s (max 6 mins)
+          const videoResult = await generateVeo3Video(
+            userPrompt,
+            (status, percent) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        statusMessage: status,
+                        progressPercent: percent,
+                      }
+                    : m
+                )
+              );
+            },
+            '16:9'
+          );
 
-        setCurrentProject((prev) => ({
-          ...prev,
-          nodes: (prev.nodes || []).map((n) =>
-            n.id === canvasNodeId
-              ? {
-                  ...n,
-                  status: 'completed',
-                  progress: 100,
-                  type: 'video',
-                  videoParams: {
-                    videoUrl,
-                    title: userPrompt,
-                    aspectRatio: '16:9',
-                  } as any,
-                  report: createReportObject(n.title, userPrompt, `Video ready: ${videoUrl}`, 'video'),
-                }
-              : n
-          ),
-        }));
+          // Render video with server-downloaded blob/object URL in <video controls>
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: `Here is your video: Generated with Google Veo 3.0 (veo-3.0-generate-001).`,
+                    mediaType: 'video',
+                    mediaUrl: videoResult.blobUrl, // Blob URL (never raw storage URI)
+                    videoBlob: videoResult.blob,
+                    videoParams: {
+                      videoUrl: videoResult.blobUrl,
+                      title: userPrompt,
+                      aspectRatio: '16:9',
+                    } as any,
+                    isStreaming: false,
+                    statusMessage: undefined,
+                    progressPercent: 100,
+                  }
+                : m
+            )
+          );
+
+          setCurrentProject((prev) => ({
+            ...prev,
+            nodes: (prev.nodes || []).map((n) =>
+              n.id === canvasNodeId
+                ? {
+                    ...n,
+                    status: 'completed',
+                    progress: 100,
+                    type: 'video',
+                    videoParams: {
+                      videoUrl: videoResult.blobUrl,
+                      title: userPrompt,
+                      aspectRatio: '16:9',
+                    } as any,
+                    report: createReportObject(n.title, userPrompt, `Video ready: ${videoResult.blobUrl}`, 'video'),
+                  }
+                : n
+            ),
+          }));
+        } catch (vidErr: any) {
+          console.error('Veo video generation error:', vidErr);
+          const errorMsg = vidErr?.message || 'Video generation failed or was blocked by safety filters.';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: errorMsg,
+                    error: errorMsg,
+                    mediaType: 'text',
+                    isStreaming: false,
+                    statusMessage: undefined,
+                    progressPercent: undefined,
+                  }
+                : m
+            )
+          );
+          addToast('error', errorMsg);
+          return;
+        }
       }
 
       // 3. LIVE ANIMATION (SVG, CSS, Canvas code inside Sandboxed Iframe via OpenRouter)
@@ -811,62 +884,134 @@ export function App() {
         }));
       }
 
-      // 5. TEXT CHAT VIA OPENROUTER (openai/gpt-4o-mini)
+      // 5. DETERMINISTIC CLINICAL & ENTERPRISE DOCUMENTATION (Section 10)
       else {
-        const conversationHistory = [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          { role: 'user', content: userPrompt },
-        ];
-
-        let accumulated = '';
-        for await (const token of streamChatCompletion(conversationHistory, 'openai/gpt-4o-mini', controller.signal)) {
-          accumulated += token;
+        // Enforce Free user limit: 5 notes per month
+        if (!isPaidPlan && userFirestore.notesUsedThisMonth >= 5) {
+          const limitMsg = 'You have used all 5 free notes for this month. Upgrade to Pro for unlimited notes.';
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
-                ? { ...m, content: accumulated, isStreaming: true }
+                ? {
+                    ...m,
+                    content: limitMsg,
+                    error: limitMsg,
+                    isStreaming: false,
+                  }
                 : m
             )
           );
+          setIsPricingModalOpen(true);
+          addToast('info', limitMsg);
+          setIsGenerating(false);
+          return;
+        }
+
+        // Detect appropriate template type based on prompt semantics
+        let detectedTemplate: 'soap' | 'rfc' | 'memo' | 'inspection' = 'soap';
+        if (/\b(rfc|proposal|request for comment|auth2|oauth|architecture|migration)\b/i.test(userPrompt)) {
+          detectedTemplate = 'rfc';
+        } else if (/\b(memo|decision|offsite|executive|action items|stakeholders)\b/i.test(userPrompt)) {
+          detectedTemplate = 'memo';
+        } else if (/\b(inspection|defect|property|foundation|roof|cracks|plumbing)\b/i.test(userPrompt)) {
+          detectedTemplate = 'inspection';
+        }
+
+        try {
+          let token = '';
+          if (auth.currentUser) {
+            try {
+              token = await auth.currentUser.getIdToken();
+            } catch {}
+          }
+
+          const res = await fetch('/api/notes/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: token ? `Bearer ${token}` : '',
+            },
+            body: JSON.stringify({
+              input: userPrompt,
+              templateType: detectedTemplate,
+            }),
+          });
+
+          const noteData = await res.json();
+          if (!res.ok) {
+            if (noteData.error === 'NOTE_LIMIT_REACHED') {
+              setIsPricingModalOpen(true);
+              throw new Error(noteData.message || 'Free monthly note limit reached.');
+            }
+            throw new Error(noteData.message || 'Formatting failed to parse into deterministic schema. Please click Retry.');
+          }
+
+          const sectionsObj = noteData.data || {};
+          let formattedText = '';
+
+          if (noteData.templateType === 'soap') {
+            formattedText = `### Subjective\n${sectionsObj.subjective || 'Not documented'}\n\n### Objective\n${sectionsObj.objective || 'Not documented'}\n\n### Assessment\n${sectionsObj.assessment || 'Not documented'}\n\n### Plan\n${sectionsObj.plan || 'Not documented'}`;
+          } else if (noteData.templateType === 'rfc') {
+            formattedText = `### Summary\n${sectionsObj.summary || 'Not documented'}\n\n### Motivation\n${sectionsObj.motivation || 'Not documented'}\n\n### Proposal\n${sectionsObj.proposal || 'Not documented'}\n\n### Risks\n${sectionsObj.risks || 'Not documented'}\n\n### Timeline\n${sectionsObj.timeline || 'Not documented'}`;
+          } else if (noteData.templateType === 'memo') {
+            formattedText = `### Context\n${sectionsObj.context || 'Not documented'}\n\n### Decision\n${sectionsObj.decision || 'Not documented'}\n\n### Rationale\n${sectionsObj.rationale || 'Not documented'}\n\n### Action Items\n${sectionsObj.actionItems || 'Not documented'}`;
+          } else if (noteData.templateType === 'inspection') {
+            formattedText = `### Property Details\n${sectionsObj.propertyDetails || 'Not documented'}\n\n### Findings\n${sectionsObj.findings || 'Not documented'}\n\n### Defects\n${sectionsObj.defects || 'Not documented'}\n\n### Recommendations\n${sectionsObj.recommendations || 'Not documented'}`;
+          } else {
+            formattedText = Object.entries(sectionsObj)
+              .map(([k, v]) => `### ${k.toUpperCase()}\n${v}`)
+              .join('\n\n');
+          }
+
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: formattedText,
+                    structuredNote: sectionsObj,
+                    isStreaming: false,
+                    error: undefined,
+                  }
+                : m
+            )
+          );
+
+          setUserFirestore((prev) => ({
+            ...prev,
+            notesUsedThisMonth: prev.notesUsedThisMonth + 1,
+          }));
+
           setCurrentProject((prev) => ({
             ...prev,
             nodes: (prev.nodes || []).map((n) =>
               n.id === canvasNodeId
                 ? {
                     ...n,
-                    status: 'generating',
-                    progress: Math.min(95, (n.progress || 25) + 3),
-                    report: createReportObject(n.title, userPrompt, accumulated, 'text'),
+                    status: 'completed',
+                    progress: 100,
+                    report: createReportObject(n.title, userPrompt, formattedText, 'text'),
                   }
                 : n
             ),
           }));
+        } catch (noteErr: any) {
+          console.error('[NoteGenerationError]', noteErr);
+          const errorMsg = noteErr?.message || 'Formatting failed to parse into deterministic schema. Please click Retry.';
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: '',
+                    error: errorMsg,
+                    isStreaming: false,
+                  }
+                : m
+            )
+          );
+          addToast('error', errorMsg);
         }
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId
-              ? { ...m, content: accumulated, isStreaming: false }
-              : m
-          )
-        );
-        setCurrentProject((prev) => ({
-          ...prev,
-          nodes: (prev.nodes || []).map((n) =>
-            n.id === canvasNodeId
-              ? {
-                  ...n,
-                  status: 'completed',
-                  progress: 100,
-                  report: createReportObject(n.title, userPrompt, accumulated, 'text'),
-                }
-              : n
-          ),
-        }));
       }
 
       // Increment daily prompt count if free tier
@@ -1125,11 +1270,15 @@ export function App() {
         onDeleteChat={handleDeleteChat}
         onOpenUpgrade={() => setIsPricingModalOpen(true)}
         onOpenSettings={() => {
-          if (isAdmin) setIsAdminPanelOpen(true);
+          if (isSuperAdmin) setActiveView('admin');
           else setIsSettingsOpen(true);
         }}
         activeView={activeView}
         onToggleView={setActiveView}
+        imageGenerationEnabled={features.imageGenerationEnabled}
+        videoGenerationEnabled={features.videoGenerationEnabled}
+        isAdmin={isSuperAdmin}
+        onOpenTemplates={() => setIsTemplateBuilderOpen(true)}
       />
 
       {/* 2. Main Center Body */}
@@ -1148,10 +1297,37 @@ export function App() {
               </button>
             )}
             <h1 className="text-xl font-medium tracking-tight text-[#e3e3e3]">PulseNote AI</h1>
+
+            {/* Note usage counter & credits badge in header (Section 4) */}
+            <div className="hidden lg:flex items-center gap-2 ml-2">
+              <button
+                type="button"
+                onClick={() => setIsPricingModalOpen(true)}
+                className="px-2.5 py-1 rounded-full bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] text-xs font-mono text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
+                title="Notes usage count this month (Free limit: 5 notes / month)"
+              >
+                <span className={`w-2 h-2 rounded-full ${userFirestore.notesUsedThisMonth >= 5 && !isPaidPlan ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                <span>
+                  {userFirestore.plan === 'free'
+                    ? `${userFirestore.notesUsedThisMonth} of 5 notes used`
+                    : 'Unlimited notes'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsPricingModalOpen(true)}
+                className="px-2.5 py-1 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-mono text-amber-300 flex items-center gap-1.5 transition cursor-pointer"
+                title="Multimedia credits balance (Click to top up)"
+              >
+                <span>🪙 {userFirestore.credits} credits</span>
+                <span className="text-[10px] text-amber-400 font-bold">+</span>
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* View Switch Pill */}
+            {/* View Switch Pill with image and video tabs strictly hidden when disabled */}
             <div className="hidden sm:flex bg-[#1e1f20] p-0.5 rounded-full border border-[#3c4043]/40 text-xs">
               <button
                 type="button"
@@ -1162,7 +1338,7 @@ export function App() {
                     : 'text-[#9aa0a6] hover:text-white'
                 }`}
               >
-                Marketing
+                Home
               </button>
               <button
                 type="button"
@@ -1173,8 +1349,43 @@ export function App() {
                     : 'text-[#9aa0a6] hover:text-white'
                 }`}
               >
-                Chat
+                Notes
               </button>
+
+              {/* Real-time feature switch: ONLY show Image tab when enabled */}
+              {features.imageGenerationEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setActiveView('image')}
+                  className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer flex items-center gap-1.5 ${
+                    activeView === 'image'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                      : 'text-[#9aa0a6] hover:text-amber-300'
+                  }`}
+                  title="Imagen 4.0 Studio"
+                >
+                  <ImageIcon size={13} className="text-amber-400" />
+                  <span>Image</span>
+                </button>
+              )}
+
+              {/* Real-time feature switch: ONLY show Video tab when enabled */}
+              {features.videoGenerationEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setActiveView('video')}
+                  className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer flex items-center gap-1.5 ${
+                    activeView === 'video'
+                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                      : 'text-[#9aa0a6] hover:text-purple-300'
+                  }`}
+                  title="Veo 3.0 Video Studio"
+                >
+                  <Film size={13} className="text-purple-400" />
+                  <span>Video</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setActiveView('canvas')}
@@ -1188,49 +1399,33 @@ export function App() {
               </button>
             </div>
 
-            {/* API Key Settings Button */}
+            {/* Custom Templates Quick Button */}
             <button
               type="button"
-              onClick={() => setIsApiKeyModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] text-xs font-medium text-[#c4c7c5] hover:text-white transition-all cursor-pointer shadow-sm"
-              title="Gemini API Key configuration"
+              onClick={() => setIsTemplateBuilderOpen(true)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] text-xs font-medium text-[#c4c7c5] hover:text-white transition-all cursor-pointer shadow-sm"
+              title="Custom template builder"
             >
-              <Key size={13} className="text-[#4e8cff]" />
-              <span className="hidden sm:inline">API Key</span>
+              <Layers size={13} className="text-amber-400" />
+              <span>Templates</span>
             </button>
 
-            {/* Gemini Multi-Modal Studio Button */}
-            <button
-              type="button"
-              onClick={() => setIsGeminiStudioOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-600/30 via-purple-600/30 to-pink-600/30 hover:from-blue-600/50 hover:via-purple-600/50 hover:to-pink-600/50 border border-blue-500/40 text-xs font-semibold text-blue-200 transition-all cursor-pointer shadow-sm"
-              title="Open Gemini Studio (Veo Video, Nano Banana Image, Search Grounding)"
-            >
-              <Sparkles size={14} className="text-blue-400 animate-pulse" />
-              <span className="hidden md:inline">Gemini Studio</span>
-            </button>
-
-            {/* OpenRouter App Standalone Mode Button */}
-            <a
-              href="/openrouter"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1e293b] hover:bg-[#334155] border border-blue-400/40 text-xs font-semibold text-blue-300 transition-all cursor-pointer shadow-sm"
-              title="Open simple OpenRouter web app (Pure OpenRouter API only, no Google/Gemini calls)"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="hidden sm:inline">OpenRouter App</span>
-            </a>
-
-            {/* Model Selector Dropdown with Pro Gating */}
-            <select
-              value={model}
-              onChange={(e) => handleModelChange(e.target.value as any)}
-              className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] rounded-full px-4 py-1.5 text-sm text-[#e3e3e3] outline-none cursor-pointer transition-colors"
-            >
-              <option value="2.5 Flash">2.5 Flash</option>
-              <option value="2.5 Pro">2.5 Pro</option>
-            </select>
+            {/* Admin Switch Quick Button: strictly for verified admins */}
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveView('admin')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold transition-all cursor-pointer shadow-sm ${
+                  activeView === 'admin'
+                    ? 'bg-red-500/20 text-red-300 border-red-500/50'
+                    : 'bg-red-950/40 hover:bg-red-900/50 text-red-300 border-red-500/30'
+                }`}
+                title="Admin Feature Switch Portal (/admin)"
+              >
+                <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+                <span>Admin</span>
+              </button>
+            )}
 
             {/* Profile Avatar / Trigger */}
             <button
@@ -1260,8 +1455,28 @@ export function App() {
           </div>
         </header>
 
-        {/* 3. View Switch: Marketing Site vs Gemini Chat vs Infinite Flow Canvas */}
-        {activeView === 'marketing' ? (
+        {/* 3. View Switch: Marketing vs Admin vs Team vs Partners vs Image vs Video vs Chat vs Infinite Flow Canvas */}
+        {activeView === 'admin' ? (
+          <AdminPage
+            currentUser={currentUser as any}
+            features={features}
+            onBack={() => setActiveView('chat')}
+            onShowToast={addToast}
+          />
+        ) : activeView === 'team' ? (
+          <TeamDashboard
+            currentUser={currentUser as any}
+            teamId={userFirestore.teamId}
+            onBack={() => setActiveView('chat')}
+            onOpenPricing={() => setIsPricingModalOpen(true)}
+            onShowToast={addToast}
+          />
+        ) : activeView === 'partners' ? (
+          <PartnersPage
+            onBack={() => setActiveView('chat')}
+            onShowToast={addToast}
+          />
+        ) : activeView === 'marketing' ? (
           <div className="flex-1 overflow-y-auto scrollbar-thin">
             <MarketingSite
               onLaunchApp={() => setActiveView('chat')}
@@ -1270,6 +1485,46 @@ export function App() {
               currentUser={currentUser}
             />
           </div>
+        ) : activeView === 'image' ? (
+          features.imageGenerationEnabled ? (
+            <ImageStudio onShowToast={addToast} />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+                <Lock size={24} />
+              </div>
+              <h2 className="text-lg font-bold text-white">Image Generation Is Currently Disabled</h2>
+              <p className="text-xs text-[#9aa0a6] max-w-sm">
+                This feature has been switched off by the platform administrator.
+              </p>
+              <button
+                onClick={() => setActiveView('chat')}
+                className="px-4 py-2 rounded-xl bg-[#2d2e30] hover:bg-[#35363a] text-xs font-semibold text-white transition cursor-pointer"
+              >
+                Return to Notes
+              </button>
+            </div>
+          )
+        ) : activeView === 'video' ? (
+          features.videoGenerationEnabled ? (
+            <VideoStudio onShowToast={addToast} />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-400 flex items-center justify-center">
+                <Lock size={24} />
+              </div>
+              <h2 className="text-lg font-bold text-white">Video Generation Is Currently Disabled</h2>
+              <p className="text-xs text-[#9aa0a6] max-w-sm">
+                This feature has been switched off by the platform administrator.
+              </p>
+              <button
+                onClick={() => setActiveView('chat')}
+                className="px-4 py-2 rounded-xl bg-[#2d2e30] hover:bg-[#35363a] text-xs font-semibold text-white transition cursor-pointer"
+              >
+                Return to Notes
+              </button>
+            </div>
+          )
         ) : activeView === 'chat' ? (
           <div className="flex-1 flex flex-col overflow-y-auto px-4 sm:px-6 py-4 scrollbar-thin">
             {messages.length === 0 ? (
@@ -1281,17 +1536,31 @@ export function App() {
                   </span>
                 </h1>
 
-                {/* 4 Gemini Suggestion Cards */}
+                {/* Gemini Suggestion Cards (Strictly hide Image/Video when turned off) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-                  <div
-                    onClick={() => handleQuickAction('Create image')}
-                    className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
-                  >
-                    <span className="text-sm font-medium text-[#e3e3e3]">Create image</span>
-                    <div className="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center self-end">
-                      <ImageIcon size={18} />
+                  {features.imageGenerationEnabled && (
+                    <div
+                      onClick={() => setActiveView('image')}
+                      className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
+                    >
+                      <span className="text-sm font-medium text-[#e3e3e3]">Create image</span>
+                      <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center self-end">
+                        <ImageIcon size={18} />
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {features.videoGenerationEnabled && (
+                    <div
+                      onClick={() => setActiveView('video')}
+                      className="bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/30 p-4 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] shadow-sm flex flex-col justify-between h-[120px]"
+                    >
+                      <span className="text-sm font-medium text-[#e3e3e3]">Veo Video</span>
+                      <div className="w-8 h-8 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center self-end">
+                        <Film size={18} />
+                      </div>
+                    </div>
+                  )}
 
                   <div
                     onClick={() => handleQuickAction('Deep Research')}
@@ -1325,12 +1594,14 @@ export function App() {
                 </div>
               </div>
             ) : (
-              /* Chat Conversation Messages */
+              /* Chat Conversation Messages with Paywalled Downloads */
               <div className="max-w-[800px] w-full mx-auto space-y-6 flex-1 py-4">
                 {messages.map((m) => (
                   <ChatMessageBubble
                     key={m.id}
                     message={m}
+                    isPaidPlan={isPaidPlan}
+                    onOpenPricing={() => setIsPricingModalOpen(true)}
                     onAnimateImage={handleAnimateImage}
                     onShowToast={addToast}
                     onRetry={handleRetry}
@@ -1355,11 +1626,11 @@ export function App() {
                 isDeepResearch={isDeepResearch}
                 onToggleDeepResearch={() => setIsDeepResearch(!isDeepResearch)}
                 onToggleCanvas={() => setActiveView('canvas')}
-                onStartVoice={() => addToast('info', 'Voice speech input active. Speak into your microphone.')}
+                onStartVoice={() => addToast('info', 'Voice dictation active. Speak into your microphone.')}
                 onShowToast={addToast}
               />
               <p className="text-[11px] text-center text-[#9aa0a6] mt-2.5">
-                PulseNote AI can make mistakes, so double-check it
+                Built on Google Cloud. Do not enter patient-identifying information.
               </p>
             </div>
           </div>
@@ -1401,23 +1672,47 @@ export function App() {
       </div>
 
       {/* 4. Modals */}
-      {/* Pricing / Premium Upgrade Modal */}
+      {/* Pricing / Premium Upgrade Modal (Section 4 & 9) */}
       <PricingModal
         isOpen={isPricingModalOpen}
         onClose={() => setIsPricingModalOpen(false)}
-        usageState={usageState}
-        currentUser={currentUser}
-        onUpgradeSuccess={(plan: SubscriptionPlan) => {
+        currentPlan={userFirestore.plan}
+        currentCredits={userFirestore.credits}
+        notesUsedThisMonth={userFirestore.notesUsedThisMonth}
+        onUpgradeSuccess={(newPlan: PulseNotePlan) => {
+          setUserFirestore((prev) => ({ ...prev, plan: newPlan }));
           setUsageState((prev) => {
-            const updated: UserUsageState = { ...prev, isPro: true, activePlan: plan };
+            const updated: UserUsageState = { ...prev, isPro: true, activePlan: newPlan as any };
             try {
               localStorage.setItem('pulsenote_user_usage', JSON.stringify(updated));
             } catch {}
             return updated;
           });
           setIsPricingModalOpen(false);
-          addToast('success', `Upgraded to PulseNote AI ${plan.toUpperCase()}! Unlimited 2.5 Pro active.`);
+          addToast('success', `Upgraded to PulseNote AI ${newPlan.toUpperCase()}! Unlimited notes active.`);
         }}
+        onShowToast={addToast}
+      />
+
+      {/* Custom Template Builder Modal (Section 7) */}
+      <TemplateBuilderModal
+        isOpen={isTemplateBuilderOpen}
+        onClose={() => setIsTemplateBuilderOpen(false)}
+        userId={currentUser?.id || ''}
+        userPlan={userFirestore.plan}
+        customTemplatesCount={0}
+        teamId={userFirestore.teamId}
+        onOpenPricing={() => {
+          setIsTemplateBuilderOpen(false);
+          setIsPricingModalOpen(true);
+        }}
+        onShowToast={addToast}
+      />
+
+      {/* Legal & Trust Modal: Privacy, Terms, Testimonials, Demo (Section 9) */}
+      <LegalTrustModal
+        type={legalModalType}
+        onClose={() => setLegalModalType(null)}
       />
 
       {/* Auth Modal */}
@@ -1430,7 +1725,7 @@ export function App() {
           try {
             localStorage.setItem('pulsenote_user_profile', JSON.stringify(user));
           } catch {}
-          if (user.role === 'admin') {
+          if (user.role === 'admin' || isPulseNoteAdmin(user.email, (user as any).emailVerified)) {
             setUsageState((prev) => ({
               ...prev,
               isPro: true,

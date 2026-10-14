@@ -21,6 +21,7 @@ import {
   generateVideoFromText, 
   animateImageToVideo 
 } from '../lib/geminiMedia';
+import { generateImageWithImagen, generateVideoWithVeo } from '../services/mediaService';
 
 interface GeminiStudioModalProps {
   isOpen: boolean;
@@ -100,7 +101,6 @@ export function GeminiStudioModal({ isOpen, onClose, onInsertToChat }: GeminiStu
         const res = await editImageWithGemini({
           prompt: imagePrompt,
           imageBase64: uploadedImageBase64,
-          model: 'gemini-3.1-flash-image-preview',
         });
         if (res.imageUrl) {
           setGeneratedImageUrl(res.imageUrl);
@@ -108,15 +108,11 @@ export function GeminiStudioModal({ isOpen, onClose, onInsertToChat }: GeminiStu
           throw new Error(res.error || 'Failed to edit image');
         }
       } else {
-        const res = await generateImageWithGemini({
-          prompt: imagePrompt,
-          aspectRatio: imageAspectRatio,
-          model: 'gemini-3.1-flash-image-preview',
-        });
+        const res = await generateImageWithImagen(imagePrompt, imageAspectRatio as any);
         if (res.imageUrl) {
           setGeneratedImageUrl(res.imageUrl);
         } else {
-          throw new Error(res.error || 'Failed to generate image');
+          throw new Error('Failed to generate image');
         }
       }
     } catch (err: any) {
@@ -130,23 +126,20 @@ export function GeminiStudioModal({ isOpen, onClose, onInsertToChat }: GeminiStu
   const handleGenerateVideo = async () => {
     setIsVideoLoading(true);
     setVideoError(null);
-    setVideoStatusMsg('Submitting prompt to Veo 3 (veo-3.1-fast-generate-preview)...');
+    setVideoStatusMsg('Initiating Veo 3.0 (veo-3.0-generate-001)...');
     try {
-      const res = await generateVideoFromText({
-        prompt: videoPrompt,
-        aspectRatio: videoAspectRatio,
-        resolution: '720p',
-        model: 'veo-3.1-fast-generate-preview',
-      });
-      setVideoStatusMsg('Video rendering queued. Streaming sample output preview...');
-      setTimeout(() => {
-        setGeneratedVideoUrl('https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4');
-        setIsVideoLoading(false);
-        setVideoStatusMsg(null);
-      }, 2500);
-    } catch (err: any) {
-      setVideoError(err.message || 'Video generation failed');
+      const res = await generateVideoWithVeo(
+        videoPrompt,
+        (status) => setVideoStatusMsg(status),
+        videoAspectRatio as any
+      );
+      setGeneratedVideoUrl(res.blobUrl);
       setIsVideoLoading(false);
+      setVideoStatusMsg(null);
+    } catch (err: any) {
+      setVideoError(err.message || 'Video generation failed or was blocked by safety filters');
+      setIsVideoLoading(false);
+      setVideoStatusMsg(null);
     }
   };
 
@@ -163,7 +156,6 @@ export function GeminiStudioModal({ isOpen, onClose, onInsertToChat }: GeminiStu
         imageBase64: animatePhotoBase64,
         prompt: animatePrompt,
         aspectRatio: animateAspectRatio,
-        model: 'veo-3.1-fast-generate-preview',
       });
       setTimeout(() => {
         setAnimatedVideoUrl('https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4');

@@ -1,504 +1,601 @@
 import React, { useState } from 'react';
-import { SubscriptionPlan, UserUsageState, UserProfile } from '../types';
-import { 
-  X, 
-  Check, 
-  Zap, 
-  ShieldCheck, 
-  Copy, 
-  QrCode, 
-  CreditCard, 
-  Smartphone, 
-  Sparkles, 
-  ExternalLink,
+import {
+  X,
+  Check,
+  Zap,
+  Sparkles,
+  CreditCard,
   Lock,
-  ArrowRight,
-  Clock,
-  BadgePercent
+  Layers,
+  Users,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+import { PulseNotePlan } from '../types';
+import { auth } from '../lib/firebase';
 
 interface PricingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  usageState: UserUsageState;
-  onUpgradeSuccess: (plan: SubscriptionPlan, txnRef: string) => void;
-  initialSelectedPlan?: SubscriptionPlan;
-  currentUser?: UserProfile | null;
+  currentPlan?: PulseNotePlan;
+  currentCredits?: number;
+  notesUsedThisMonth?: number;
+  onUpgradeSuccess?: (plan: PulseNotePlan) => void;
+  onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
 }
 
 export const PricingModal: React.FC<PricingModalProps> = ({
   isOpen,
   onClose,
-  usageState,
+  currentPlan = 'free',
+  currentCredits = 0,
+  notesUsedThisMonth = 0,
   onUpgradeSuccess,
-  initialSelectedPlan = 'pro_annual',
-  currentUser,
+  onShowToast,
 }) => {
-  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(
-    initialSelectedPlan === 'free' ? 'pro_annual' : initialSelectedPlan
-  );
-  const [currency, setCurrency] = useState<'INR' | 'USD'>('INR');
-  const [activeTab, setActiveTab] = useState<'upi' | 'card' | 'netbanking'>('upi');
-  const [copiedVpa, setCopiedVpa] = useState(false);
-  const [transactionRef, setTransactionRef] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
-  const [selectedBank, setSelectedBank] = useState('SBI');
+  const [tab, setTab] = useState<'plans' | 'credits' | 'faq'>('plans');
+  const [teamSeats, setTeamSeats] = useState(3);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   if (!isOpen) return null;
 
-  const upiVpa = 'wagh.jayesh@oksbi';
-  const isAnnual = selectedPlan === 'pro_annual';
-  const amountINR = isAnnual ? 1999 : 299;
-  const amountUSD = isAnnual ? 24.99 : 3.99;
-  const displayAmount = currency === 'INR' ? `₹${amountINR}` : `$${amountUSD}`;
-
-  // Direct UPI Intent deep link for mobile devices
-  const upiIntentUrl = `upi://pay?pa=${upiVpa}&pn=PulseNote%20AI&am=${amountINR}&cu=INR&tn=PulseNote%20${isAnnual ? 'Annual' : 'Monthly'}%20Pro%20Upgrade`;
-
-  // Dynamic QR Code SVG service or URL
-  const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-    upiIntentUrl
-  )}&color=10b981&bgcolor=0f172a`;
-
-  const handleCopyVpa = () => {
-    navigator.clipboard.writeText(upiVpa);
-    setCopiedVpa(true);
-    setTimeout(() => setCopiedVpa(false), 2500);
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if ((window as any).Razorpay) return resolve(true);
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   };
 
-  const handleSimulatePayment = async () => {
-    setIsVerifying(true);
-    const mockRef = transactionRef.trim() || `PULSE_${Date.now().toString().slice(-6)}`;
-    
+  const handleSubscribePlan = async (plan: 'pro' | 'team') => {
+    setIsProcessing(true);
     try {
-      const response = await fetch('/api/payment/verify', {
+      await loadRazorpayScript();
+
+      let token = '';
+      if (auth.currentUser) {
+        token = await auth.currentUser.getIdToken();
+      }
+
+      const res = await fetch('/api/razorpay/create-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: `ORD_${Date.now()}`,
-          planId: selectedPlan,
-          paymentMethod: activeTab.toUpperCase(),
-          transactionRef: mockRef,
-          userId: currentUser?.id || 'usr_guest',
-          currency,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ plan, seats: teamSeats }),
       });
 
-      const data = await response.json();
-      if (data.success) {
-        onUpgradeSuccess(selectedPlan, mockRef);
-        onClose();
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to initiate Razorpay subscription');
       }
-    } catch (err) {
-      console.error('Payment error:', err);
-      // Fallback local upgrade
-      onUpgradeSuccess(selectedPlan, mockRef);
-      onClose();
-    } finally {
-      setIsVerifying(false);
+
+      // Check if Razorpay script loaded
+      if (!(window as any).Razorpay) {
+        // Fallback demo/verification flow
+        await verifyLocalPayment({ plan, subscriptionId: data.subscriptionId, token });
+        return;
+      }
+
+      const options = {
+        key: data.keyId,
+        amount: data.amount,
+        currency: 'INR',
+        name: 'PulseNote AI',
+        description: `${plan === 'pro' ? 'Pro Monthly Plan' : `Clinic Team Plan (${teamSeats} seats)`}`,
+        subscription_id: data.subscriptionId,
+        prefill: {
+          email: data.customerEmail || auth.currentUser?.email || '',
+        },
+        theme: {
+          color: '#4e8cff',
+        },
+        handler: async (response: any) => {
+          await verifyLocalPayment({
+            plan,
+            paymentId: response.razorpay_payment_id,
+            subscriptionId: response.razorpay_subscription_id,
+            signature: response.razorpay_signature,
+            token,
+          });
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', (resp: any) => {
+        onShowToast?.('error', resp.error?.description || 'Payment was cancelled or failed.');
+        setIsProcessing(false);
+      });
+      rzp.open();
+    } catch (err: any) {
+      console.error('Subscription error:', err);
+      onShowToast?.('error', err?.message || 'Payment initiation failed.');
+      setIsProcessing(false);
     }
   };
 
+  const handleBuyCredits = async (packId: 'credits_100' | 'credits_500') => {
+    setIsProcessing(true);
+    try {
+      await loadRazorpayScript();
+
+      let token = '';
+      if (auth.currentUser) {
+        token = await auth.currentUser.getIdToken();
+      }
+
+      const res = await fetch('/api/razorpay/create-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ packId }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to initiate credit order');
+      }
+
+      if (!(window as any).Razorpay) {
+        await verifyLocalPayment({ packId, orderId: data.orderId, token });
+        return;
+      }
+
+      const options = {
+        key: data.keyId,
+        amount: data.amount,
+        currency: 'INR',
+        name: 'PulseNote AI',
+        description: `${packId === 'credits_100' ? '100 Multimedia Credits' : '500 Multimedia Credits'}`,
+        order_id: data.orderId,
+        prefill: {
+          email: data.customerEmail || auth.currentUser?.email || '',
+        },
+        theme: {
+          color: '#10b981',
+        },
+        handler: async (response: any) => {
+          await verifyLocalPayment({
+            packId,
+            paymentId: response.razorpay_payment_id,
+            orderId: response.razorpay_order_id,
+            signature: response.razorpay_signature,
+            token,
+          });
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', (resp: any) => {
+        onShowToast?.('error', resp.error?.description || 'Payment was cancelled or failed.');
+        setIsProcessing(false);
+      });
+      rzp.open();
+    } catch (err: any) {
+      console.error('Credits error:', err);
+      onShowToast?.('error', err?.message || 'Credit purchase failed.');
+      setIsProcessing(false);
+    }
+  };
+
+  const verifyLocalPayment = async (payload: any) => {
+    try {
+      const res = await fetch('/api/razorpay/verify-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: payload.token ? `Bearer ${payload.token}` : '',
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        onShowToast?.('success', `Payment completed successfully!`);
+        if (payload.plan) {
+          onUpgradeSuccess?.(payload.plan);
+        }
+        onClose();
+      }
+    } catch (e) {
+      console.error('Verification notice:', e);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const faqs = [
+    {
+      q: 'How do the 5 free notes work on the Free plan?',
+      a: 'Free accounts receive 5 deterministic notes each calendar month. When you reach 5 notes, an upgrade dialog invites you to subscribe to Pro for unlimited notes.',
+    },
+    {
+      q: 'What do multimedia credits cover?',
+      a: 'Credits power advanced Google generative media models: 1 credit per Imagen 4.0 image generation, and 10 credits per Veo 3.0 cinematic video generation. Pro accounts receive 50 credits every month.',
+    },
+    {
+      q: 'How does Clinic/Team billing work?',
+      a: 'Teams start at ₹399 per seat per month (minimum 3 seats). The team owner manages invites and shared templates across all team members.',
+    },
+    {
+      q: 'Is GST included in the prices?',
+      a: 'Prices are listed in Indian Rupees (INR) with Razorpay checkout providing compliant digital receipts.',
+    },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-in fade-in overflow-y-auto">
-      <div className="relative w-full max-w-3xl bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden my-auto">
-        {/* Modal Top Bar */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <Zap className="w-4 h-4 fill-emerald-400" />
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-[#1e1f20] border border-[#3c4043] rounded-3xl max-w-4xl w-full p-5 sm:p-8 space-y-6 shadow-2xl my-6 max-h-[90vh] overflow-y-auto scrollbar-thin">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#2d2e30] pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-8 h-8 rounded-xl bg-[#4e8cff]/10 border border-[#4e8cff]/30 flex items-center justify-center text-[#4e8cff]">
+                <Sparkles size={18} />
+              </span>
+              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                Plans & Credit Packs
+              </h2>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                PulseNote Pro Upgrade
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  Affordable Alternative
-                </span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                Direct settlement via UPI ({upiVpa}), Cards, or Net Banking
-              </p>
-            </div>
+            <p className="text-xs text-[#9aa0a6] mt-1">
+              Deterministic documentation and multimodal intelligence built on Google Cloud.
+            </p>
           </div>
-
-          <div className="flex items-center gap-2">
-            {/* Currency Switcher */}
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
-              <button
-                onClick={() => setCurrency('INR')}
-                className={`px-2 py-0.5 rounded-lg transition-colors ${
-                  currency === 'INR' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                ₹ INR
-              </button>
-              <button
-                onClick={() => setCurrency('USD')}
-                className={`px-2 py-0.5 rounded-lg transition-colors ${
-                  currency === 'USD' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                $ USD
-              </button>
-            </div>
-
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl text-[#9aa0a6] hover:text-white hover:bg-[#2d2e30] transition cursor-pointer"
+          >
+            <X size={20} />
+          </button>
         </div>
 
-        {/* Modal Scroll Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-          {/* Comparison Cards: Market vs PulseNote Pricing */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Free Tier */}
+        {/* Tab Switcher */}
+        <div className="flex items-center gap-2 p-1 bg-[#131314] rounded-2xl border border-[#2d2e30] max-w-sm">
+          <button
+            type="button"
+            onClick={() => setTab('plans')}
+            className={`flex-1 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              tab === 'plans' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'
+            }`}
+          >
+            Subscription Plans
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('credits')}
+            className={`flex-1 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              tab === 'credits' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'
+            }`}
+          >
+            Credit Packs
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('faq')}
+            className={`flex-1 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+              tab === 'faq' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'
+            }`}
+          >
+            FAQ
+          </button>
+        </div>
+
+        {/* TAB 1: Subscription Plans */}
+        {tab === 'plans' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Free Plan */}
             <div
-              onClick={() => setSelectedPlan('free')}
-              className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
-                selectedPlan === 'free'
-                  ? 'bg-slate-950 border-slate-600 shadow-md ring-1 ring-slate-600'
-                  : 'bg-slate-950/40 border-slate-800/80 hover:border-slate-700'
+              className={`rounded-2xl p-5 border flex flex-col justify-between space-y-4 ${
+                currentPlan === 'free'
+                  ? 'bg-[#131314] border-[#4e8cff]/50 ring-1 ring-[#4e8cff]/30'
+                  : 'bg-[#131314]/70 border-[#2d2e30]'
               }`}
             >
-              <div>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Free Tier</div>
-                <div className="mt-2 text-2xl font-black text-white">
-                  {currency === 'INR' ? '₹0' : '$0'}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-white">Free Starter</h3>
+                  {currentPlan === 'free' && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                      CURRENT
+                    </span>
+                  )}
                 </div>
-                <div className="text-[11px] text-slate-500 font-medium">Free forever</div>
-
-                <ul className="mt-4 space-y-2 text-xs text-slate-300">
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span><strong>3 prompts / day</strong> (Resets every 24h)</span>
+                <div className="text-2xl font-black text-white">
+                  ₹0 <span className="text-xs text-[#9aa0a6] font-normal">/ month</span>
+                </div>
+                <p className="text-xs text-[#9aa0a6]">
+                  Ideal for solo clinicians exploring deterministic documentation output.
+                </p>
+                <ul className="space-y-2 text-xs text-[#c4c7c5] pt-2 border-t border-[#2d2e30]">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-[#4e8cff] shrink-0" />
+                    <span>5 notes per month</span>
                   </li>
-                  <li className="flex items-center gap-1.5 text-slate-400">
-                    <Check className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>All 4 Industry Templates</span>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-[#4e8cff] shrink-0" />
+                    <span>All 5 standard domain lenses</span>
                   </li>
-                  <li className="flex items-center gap-1.5 text-slate-500 line-through">
-                    <span>Priority Queue</span>
+                  <li className="flex items-center gap-2 text-[#70757a]">
+                    <Lock size={13} className="shrink-0" />
+                    <span>No exports (PDF/Word locked)</span>
+                  </li>
+                  <li className="flex items-center gap-2 text-[#70757a]">
+                    <Lock size={13} className="shrink-0" />
+                    <span>No Image or Video generation</span>
                   </li>
                 </ul>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-800/80 text-[10px] text-slate-500">
-                {usageState.isPro ? 'Switch to free' : 'Current Active Plan'}
-              </div>
+              <button
+                disabled
+                className="w-full py-2.5 rounded-xl bg-[#2d2e30] text-xs text-[#9aa0a6] font-medium"
+              >
+                {currentPlan === 'free' ? 'Active Plan' : 'Free Tier'}
+              </button>
             </div>
 
-            {/* Pro Monthly */}
+            {/* Pro Plan */}
             <div
-              onClick={() => setSelectedPlan('pro_monthly')}
-              className={`p-4 rounded-2xl border transition-all cursor-pointer relative flex flex-col justify-between ${
-                selectedPlan === 'pro_monthly'
-                  ? 'bg-slate-950 border-emerald-500 shadow-lg shadow-emerald-950/50 ring-2 ring-emerald-500/50'
-                  : 'bg-slate-950/40 border-slate-800/80 hover:border-slate-700'
+              className={`rounded-2xl p-5 border flex flex-col justify-between space-y-4 relative ${
+                currentPlan === 'pro'
+                  ? 'bg-gradient-to-b from-[#1c2438] to-[#131314] border-[#4e8cff] ring-2 ring-[#4e8cff]/40 shadow-xl'
+                  : 'bg-gradient-to-b from-[#1a2030] to-[#131314] border-[#4e8cff]/60 shadow-xl'
               }`}
             >
-              <div>
-                <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Pro Monthly</div>
-                <div className="mt-2 text-2xl font-black text-white">
-                  {currency === 'INR' ? '₹299' : '$3.99'}
-                  <span className="text-xs font-normal text-slate-400">/mo</span>
-                </div>
-                <div className="text-[11px] text-emerald-400 font-medium">
-                  vs Market $20/mo standard
-                </div>
+              <div className="absolute -top-3 right-4 bg-gradient-to-r from-[#4e8cff] to-indigo-500 text-white font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
+                Most Popular
+              </div>
 
-                <ul className="mt-4 space-y-2 text-xs text-slate-200">
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span><strong>Unlimited daily prompts</strong></span>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-white flex items-center gap-1.5">
+                    <Zap size={16} className="text-[#4e8cff]" /> Pro Practitioner
+                  </h3>
+                  {currentPlan === 'pro' && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                      CURRENT
+                    </span>
+                  )}
+                </div>
+                <div className="text-2xl font-black text-white">
+                  ₹499 <span className="text-xs text-[#9aa0a6] font-normal">/ month</span>
+                </div>
+                <p className="text-xs text-[#9aa0a6]">
+                  For active doctors, attorneys, and engineers demanding full deterministic volume and exports.
+                </p>
+                <ul className="space-y-2 text-xs text-[#c4c7c5] pt-2 border-t border-[#2d2e30]">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span className="font-semibold text-white">Unlimited notes & dictations</span>
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Audio dictation & upload</span>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span>PDF & Word (.docx) export</span>
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Priority fast-track processing</span>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span>Copy as FHIR / HL7-ready text</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span className="text-amber-300 font-medium">50 media credits / month</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span>Up to 10 custom templates</span>
                   </li>
                 </ul>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-800/80 text-[10px] text-slate-400">
-                Billed monthly • Cancel anytime
-              </div>
+              <button
+                type="button"
+                onClick={() => handleSubscribePlan('pro')}
+                disabled={isProcessing || currentPlan === 'pro'}
+                className="w-full py-2.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-blue-500/20 cursor-pointer"
+              >
+                {isProcessing
+                  ? 'Connecting to Razorpay...'
+                  : currentPlan === 'pro'
+                  ? 'Current Plan Active'
+                  : 'Upgrade to Pro (₹499/mo)'}
+              </button>
             </div>
 
-            {/* Pro Annual (Best Value) */}
+            {/* Clinic / Team Plan */}
             <div
-              onClick={() => setSelectedPlan('pro_annual')}
-              className={`p-4 rounded-2xl border transition-all cursor-pointer relative flex flex-col justify-between ${
-                selectedPlan === 'pro_annual'
-                  ? 'bg-slate-950 border-amber-400 shadow-xl shadow-amber-950/40 ring-2 ring-amber-400/60'
-                  : 'bg-slate-950/40 border-slate-800/80 hover:border-slate-700'
+              className={`rounded-2xl p-5 border flex flex-col justify-between space-y-4 ${
+                currentPlan === 'team'
+                  ? 'bg-[#131314] border-purple-500/60 ring-2 ring-purple-500/40'
+                  : 'bg-[#131314]/70 border-[#2d2e30]'
               }`}
             >
-              <div className="absolute -top-2.5 right-3 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full shadow-sm">
-                Save 45% (Best Value)
-              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-white flex items-center gap-1.5">
+                    <Users size={16} className="text-purple-400" /> Clinic / Team
+                  </h3>
+                  {currentPlan === 'team' && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                      CURRENT
+                    </span>
+                  )}
+                </div>
+                <div className="text-2xl font-black text-white">
+                  ₹399 <span className="text-xs text-[#9aa0a6] font-normal">/ seat / month</span>
+                </div>
+                <p className="text-xs text-[#9aa0a6]">
+                  For group practices, inspection firms, and enterprise teams with centralized management.
+                </p>
 
-              <div>
-                <div className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" />
-                  Pro Power Pack
-                </div>
-                <div className="mt-2 text-2xl font-black text-white">
-                  {currency === 'INR' ? '₹1,999' : '$24.99'}
-                  <span className="text-xs font-normal text-slate-400">/yr</span>
-                </div>
-                <div className="text-[11px] text-amber-400 font-medium">
-                  Equals ~{currency === 'INR' ? '₹166/month' : '$2.08/mo'}
+                <div className="p-2.5 rounded-xl bg-[#1e1f20] border border-[#2d2e30] space-y-1">
+                  <label className="text-[11px] text-[#9aa0a6] block">
+                    Seats (Minimum 3 seats):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={3}
+                      max={50}
+                      value={teamSeats}
+                      onChange={(e) => setTeamSeats(Math.max(3, Number(e.target.value)))}
+                      className="w-16 bg-[#131314] border border-[#3c4043] rounded-lg px-2 py-1 text-xs text-white text-center"
+                    />
+                    <span className="text-xs text-white font-mono font-medium">
+                      = ₹{teamSeats * 399}/mo
+                    </span>
+                  </div>
                 </div>
 
-                <ul className="mt-4 space-y-2 text-xs text-slate-200">
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span><strong>Everything in Pro Unlimited</strong></span>
+                <ul className="space-y-2 text-xs text-[#c4c7c5] pt-1 border-t border-[#2d2e30]">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-400 shrink-0" />
+                    <span>Everything in Pro for all seats</span>
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>1 Full Year of Uninterrupted Access</span>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-400 shrink-0" />
+                    <span>Unlimited shared team templates</span>
                   </li>
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Priority Support & New Templates</span>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-400 shrink-0" />
+                    <span>Team admin dashboard (/team)</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-400 shrink-0" />
+                    <span>Pooled credits across all members</span>
                   </li>
                 </ul>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-800/80 text-[10px] text-amber-400 font-medium">
-                Maximum savings for professionals
-              </div>
+              <button
+                type="button"
+                onClick={() => handleSubscribePlan('team')}
+                disabled={isProcessing || currentPlan === 'team'}
+                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-purple-600/20 cursor-pointer"
+              >
+                {isProcessing
+                  ? 'Connecting to Razorpay...'
+                  : currentPlan === 'team'
+                  ? 'Current Plan Active'
+                  : `Start Team Plan (₹${teamSeats * 399}/mo)`}
+              </button>
             </div>
           </div>
+        )}
 
-          {/* Payment Gateway Checkout Module */}
-          {selectedPlan !== 'free' && (
-            <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-6 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    Merchant Payment Gateway & Direct Settlement
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    Direct beneficiary VPA: <span className="font-mono text-emerald-400 font-semibold">{upiVpa}</span>
+        {/* TAB 2: Credit Packs */}
+        {tab === 'credits' && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-2xl bg-[#131314] border border-[#2d2e30] flex items-center justify-between text-xs">
+              <span className="text-[#9aa0a6]">Your current balance:</span>
+              <span className="font-mono text-emerald-400 font-bold text-sm">
+                {currentCredits} Credits
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 100 Credits */}
+              <div className="bg-[#131314] border border-[#2d2e30] rounded-2xl p-5 space-y-4 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono text-emerald-400 font-bold uppercase">
+                      Starter Pack
+                    </span>
+                    <span className="text-xs text-[#9aa0a6]">One-Time Order</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-white">100 Credits</h3>
+                  <div className="text-2xl font-black text-white">₹299</div>
+                  <p className="text-xs text-[#9aa0a6] leading-relaxed">
+                    Provides 100 Imagen 4.0 images or 10 Veo 3.0 cinematic videos. Never expires.
                   </p>
                 </div>
 
-                <div className="text-right">
-                  <div className="text-xs text-slate-400">Total Payable:</div>
-                  <div className="text-xl font-black text-emerald-400">{displayAmount}</div>
-                </div>
-              </div>
-
-              {/* Payment Method Tabs */}
-              <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-2xl border border-slate-800 text-xs font-semibold">
                 <button
-                  onClick={() => setActiveTab('upi')}
-                  className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
-                    activeTab === 'upi'
-                      ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
+                  type="button"
+                  onClick={() => handleBuyCredits('credits_100')}
+                  disabled={isProcessing}
+                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-bold transition cursor-pointer"
                 >
-                  <Smartphone className="w-4 h-4" />
-                  UPI & Instant QR
-                </button>
-                <button
-                  onClick={() => setActiveTab('card')}
-                  className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
-                    activeTab === 'card'
-                      ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  Credit / Debit Card
-                </button>
-                <button
-                  onClick={() => setActiveTab('netbanking')}
-                  className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
-                    activeTab === 'netbanking'
-                      ? 'bg-emerald-500 text-slate-950 shadow-md font-bold'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Lock className="w-4 h-4" />
-                  Net Banking
+                  Buy 100 Credits (₹299)
                 </button>
               </div>
 
-              {/* TAB 1: UPI & QR CODE */}
-              {activeTab === 'upi' && (
-                <div className="space-y-4 pt-1">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                    {/* QR Code Container */}
-                    <div className="flex flex-col items-center justify-center p-4 bg-slate-900 border border-slate-800 rounded-2xl text-center">
-                      <div className="p-2 bg-slate-950 rounded-xl border border-emerald-500/30 shadow-inner">
-                        <img
-                          src={qrCodeImageUrl}
-                          alt="UPI QR Code for Payment"
-                          className="w-40 h-40 rounded-lg object-contain"
-                        />
-                      </div>
-                      <span className="text-[11px] text-slate-400 mt-2.5 font-medium">
-                        Scan with Google Pay, PhonePe, Paytm, BHIM
-                      </span>
-                    </div>
-
-                    {/* VPA Copy & Mobile Deep Link */}
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-xs font-semibold text-slate-300 block mb-1">
-                          Direct Settlement UPI VPA:
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            readOnly
-                            value={upiVpa}
-                            className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-emerald-400 font-bold focus:outline-none"
-                          />
-                          <button
-                            onClick={handleCopyVpa}
-                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl flex items-center gap-1.5 transition-colors font-medium border border-slate-700"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            {copiedVpa ? 'Copied!' : 'Copy'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Mobile Intent Trigger */}
-                      <a
-                        href={upiIntentUrl}
-                        className="w-full py-2.5 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open Installed UPI App on Mobile
-                      </a>
-
-                      <div>
-                        <label className="text-xs font-semibold text-slate-300 block mb-1">
-                          Enter UPI UTR / Transaction Reference (Optional for Instant Verification):
-                        </label>
-                        <input
-                          type="text"
-                          value={transactionRef}
-                          onChange={(e) => setTransactionRef(e.target.value)}
-                          placeholder="e.g. 423985729103 or UPI Ref"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50 font-mono"
-                        />
-                      </div>
-                    </div>
-                  </div>
+              {/* 500 Credits */}
+              <div className="bg-[#131314] border border-emerald-500/40 rounded-2xl p-5 space-y-4 flex flex-col justify-between relative shadow-lg">
+                <div className="absolute -top-3 right-4 bg-emerald-500 text-black font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase">
+                  Best Value
                 </div>
-              )}
-
-              {/* TAB 2: CREDIT / DEBIT CARDS */}
-              {activeTab === 'card' && (
-                <div className="space-y-3 pt-1">
-                  <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-400 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>
-                      <strong>PCI-DSS Compliant:</strong> Card data is client-tokenized over TLS 1.3 encryption. Raw card numbers are never stored on application servers.
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono text-emerald-400 font-bold uppercase">
+                      Pro Power Pack
                     </span>
+                    <span className="text-xs text-[#9aa0a6]">One-Time Order</span>
                   </div>
-
-                  <div className="space-y-2">
-                    <div>
-                      <label className="text-xs font-semibold text-slate-300 block mb-1">Card Number</label>
-                      <input
-                        type="text"
-                        maxLength={19}
-                        value={cardNumber}
-                        onChange={(e) => setCardNumber(e.target.value)}
-                        placeholder="4532 •••• •••• 8892 (Visa / Mastercard / RuPay)"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500/50"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-semibold text-slate-300 block mb-1">Expiry (MM/YY)</label>
-                        <input
-                          type="text"
-                          maxLength={5}
-                          value={cardExpiry}
-                          onChange={(e) => setCardExpiry(e.target.value)}
-                          placeholder="12/28"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-300 block mb-1">CVV / 3D Secure</label>
-                        <input
-                          type="password"
-                          maxLength={4}
-                          value={cardCvv}
-                          onChange={(e) => setCardCvv(e.target.value)}
-                          placeholder="•••"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: NET BANKING */}
-              {activeTab === 'netbanking' && (
-                <div className="space-y-3 pt-1">
-                  <label className="text-xs font-semibold text-slate-300 block">Select Authorized Bank:</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {['SBI', 'HDFC Bank', 'ICICI Bank', 'Axis Bank', 'Kotak', 'PNB', 'Bank of Baroda', 'Other'].map(
-                      (bank) => (
-                        <button
-                          key={bank}
-                          onClick={() => setSelectedBank(bank)}
-                          className={`p-2.5 rounded-xl border text-xs font-medium transition-all text-center ${
-                            selectedBank === bank
-                              ? 'bg-emerald-500 text-slate-950 font-bold border-emerald-400'
-                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-                          }`}
-                        >
-                          {bank}
-                        </button>
-                      )
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Security Standards & Instant Activation Button */}
-              <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>256-bit Encrypted Checkout • Instant Token Provisioning</span>
+                  <h3 className="text-xl font-bold text-white">500 Credits</h3>
+                  <div className="text-2xl font-black text-white">₹1,199</div>
+                  <p className="text-xs text-[#9aa0a6] leading-relaxed">
+                    Provides 500 Imagen 4.0 images or 50 Veo 3.0 cinematic videos. Save over 20%.
+                  </p>
                 </div>
 
                 <button
-                  onClick={handleSimulatePayment}
-                  disabled={isVerifying}
-                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+                  type="button"
+                  onClick={() => handleBuyCredits('credits_500')}
+                  disabled={isProcessing}
+                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-bold transition cursor-pointer"
                 >
-                  <Zap className="w-4 h-4 fill-slate-950" />
-                  {isVerifying ? 'Verifying with Gateway...' : `Complete Upgrade (${displayAmount})`}
+                  Buy 500 Credits (₹1,199)
                 </button>
               </div>
             </div>
-          )}
+          </div>
+        )}
+
+        {/* TAB 3: FAQ */}
+        {tab === 'faq' && (
+          <div className="space-y-2.5">
+            {faqs.map((f, idx) => {
+              const isOpenItem = openFaq === idx;
+              return (
+                <div
+                  key={idx}
+                  className="bg-[#131314] border border-[#2d2e30] rounded-xl overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setOpenFaq(isOpenItem ? null : idx)}
+                    className="w-full p-4 flex items-center justify-between text-left text-xs font-semibold text-white hover:bg-[#1a1b1d] transition cursor-pointer"
+                  >
+                    <span>{f.q}</span>
+                    {isOpenItem ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+                  {isOpenItem && (
+                    <div className="p-4 pt-0 text-xs text-[#9aa0a6] leading-relaxed border-t border-[#2d2e30]/40">
+                      {f.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Trust Footer */}
+        <div className="pt-3 border-t border-[#2d2e30] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#9aa0a6]">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={16} className="text-emerald-400" />
+            <span>Secure Razorpay Checkout • Built on Google Cloud</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span>Do not enter patient-identifying information.</span>
+          </div>
         </div>
       </div>
     </div>
