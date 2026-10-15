@@ -2166,10 +2166,10 @@ const RAZORPAY_KEY_ID =
   process.env.RAZORPAY_KEY_ID ||
   process.env.VITE_RAZORPAY_KEY_ID ||
   process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
-  'rzp_test_To8JidbzEKF653';
+  'REDACTED_RAZORPAY_KEY_ID';
 
 const RAZORPAY_KEY_SECRET =
-  process.env.RAZORPAY_KEY_SECRET || 'ASpTbdN8mGwp7S2Iq5lXGlTt';
+  process.env.RAZORPAY_KEY_SECRET || 'REDACTED_RAZORPAY_SECRET';
 
 const RAZORPAY_WEBHOOK_SECRET =
   process.env.RAZORPAY_WEBHOOK_SECRET || 'pulse_webhook_secret_123';
