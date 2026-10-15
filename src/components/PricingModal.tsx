@@ -72,7 +72,9 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       });
 
       const data = await res.json();
-      if (!data.success || !data.subscriptionId || !data.keyId) {
+      const activeKeyId = data.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || (import.meta as any).env?.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_To8JidbzEKF653';
+
+      if (!data.success || (!data.subscriptionId && !data.orderId)) {
         const errDesc = data.error || 'Failed to initiate Razorpay subscription';
         onShowToast?.('error', errDesc);
         setIsProcessing(false);
@@ -81,14 +83,13 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
       // Check if Razorpay script loaded
       if (!(window as any).Razorpay) {
-        await verifyLocalPayment({ plan, seats: teamSeats, subscriptionId: data.subscriptionId, token });
+        await verifyLocalPayment({ plan, seats: teamSeats, subscriptionId: data.subscriptionId || data.orderId, token });
         return;
       }
 
-      // Exact options required for Razorpay Subscriptions (NO amount or currency)
-      const options = {
-        key: data.keyId,
-        subscription_id: data.subscriptionId,
+      // Exact options required for Razorpay Subscriptions / Orders (NO amount or currency for sub)
+      const options: any = {
+        key: activeKeyId,
         name: 'PulseNote AI',
         description: plan === 'pro' ? 'Pro Monthly Plan' : `Clinic Team Plan (${teamSeats} seats)`,
         prefill: {
@@ -102,7 +103,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
             plan,
             seats: teamSeats,
             paymentId: response.razorpay_payment_id,
-            subscriptionId: response.razorpay_subscription_id,
+            subscriptionId: response.razorpay_subscription_id || response.razorpay_order_id,
             signature: response.razorpay_signature,
             token,
           });
@@ -111,6 +112,12 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           ondismiss: () => setIsProcessing(false),
         },
       };
+
+      if (data.subscriptionId) {
+        options.subscription_id = data.subscriptionId;
+      } else if (data.orderId) {
+        options.order_id = data.orderId;
+      }
 
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', (resp: any) => {
