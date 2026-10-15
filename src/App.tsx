@@ -56,6 +56,8 @@ import { VideoStudio } from './components/VideoStudio';
 import { AdminPage } from './components/AdminPage';
 import { TeamDashboard } from './components/TeamDashboard';
 import { PartnersPage } from './components/PartnersPage';
+import { MyDocumentsView } from './components/MyDocumentsView';
+import { TemplateGalleryView } from './components/TemplateGalleryView';
 import { TemplateBuilderModal } from './components/TemplateBuilderModal';
 import { LegalTrustModal } from './components/LegalTrustModal';
 import { generateImageWithImagen, generateVideoWithVeo as generateVeo3Video } from './services/mediaService';
@@ -391,6 +393,10 @@ export function App() {
       setActiveView('team');
     } else if (path === '/partners') {
       setActiveView('partners');
+    } else if (path === '/documents' || path === '/my-documents') {
+      setActiveView('documents');
+    } else if (path.startsWith('/templates')) {
+      setActiveView('gallery');
     } else if (path === '/pricing') {
       setIsPricingModalOpen(true);
     } else if (path === '/privacy') {
@@ -963,6 +969,23 @@ export function App() {
               .join('\n\n');
           }
 
+          // Auto-save generated document to server store
+          fetch('/api/documents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: currentUser?.uid || 'user_guest',
+              userEmail: currentUser?.email || 'guest@pulsenoteai.in',
+              title: `${detectedTemplate.toUpperCase()} - ${userPrompt.slice(0, 30)}...`,
+              templateType: detectedTemplate,
+              rawInput: userPrompt,
+              sections: sectionsObj,
+              unverifiedTokens: noteData.verification?.unverifiedTokens || [],
+              clinicalNotice: noteData.clinicalNotice,
+              dataRetentionNotice: noteData.dataRetentionNotice,
+            }),
+          }).catch((e) => console.warn('Auto-save document failed:', e));
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
@@ -1471,10 +1494,22 @@ export function App() {
             onOpenPricing={() => setIsPricingModalOpen(true)}
             onShowToast={addToast}
           />
-        ) : activeView === 'partners' ? (
-          <PartnersPage
+        ) : activeView === 'documents' ? (
+          <MyDocumentsView
+            currentUser={currentUser as any}
+            isPaidPlan={isPaidPlan}
             onBack={() => setActiveView('chat')}
+            onOpenPricing={() => setIsPricingModalOpen(true)}
             onShowToast={addToast}
+            onSignOut={handleSignOut}
+          />
+        ) : activeView === 'gallery' ? (
+          <TemplateGalleryView
+            onSelectTemplate={(templateType, rawInput) => {
+              setUserPrompt(rawInput);
+              setActiveView('chat');
+            }}
+            onBack={() => setActiveView('chat')}
           />
         ) : activeView === 'marketing' ? (
           <div className="flex-1 overflow-y-auto scrollbar-thin">

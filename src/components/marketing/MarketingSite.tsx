@@ -40,92 +40,115 @@ interface MarketingSiteProps {
 }
 
 // -------------------------------------------------------------
-// Industry Modes Metadata & Realistic Sample Transformations
+// Audience Showcase Data (Clinics & Companies) - Requirement 1
 // -------------------------------------------------------------
-const INDUSTRY_SHOWCASE = [
+export const DEMO_LINK = 'https://cal.com/pulsenote-demo';
+
+export const CLINIC_AUDIENCE_SAMPLES = [
   {
-    id: 'medical',
-    name: 'Clinical & Medical',
-    shortName: 'SOAP Notes',
-    icon: Stethoscope,
-    tagline: 'Transform messy doctor-patient dictations into structured clinical SOAP documentation in seconds. Built on Google Cloud. Do not enter patient-identifying information.',
-    accentColor: '#10b981',
-    badge: 'Healthcare & EHR',
-    sampleInput: `Doctor: Patient is 58yo male presenting for follow-up of type 2 diabetes and hypertension. Reports mild bilateral lower extremity tingling over the past 2 months, worse at night. Taking Metformin 1000mg BID and Lisinopril 20mg daily. Admits he missed evening doses several times this month. No chest pain, SOB, or dizziness. Vitals today: BP 138/86, HR 74, BMI 29.4, SpO2 98%. Fasting fingerstick blood glucose is 168. Last HbA1c from 3 weeks ago was 8.2%. Monofilament exam reveals decreased sensation over 1st and 5th metatarsal heads bilaterally. Peripheral pulses 2+ intact.`,
-    outputSections: [
-      { label: 'Subjective', text: '58yo male with T2DM and HTN presenting for routine follow-up. Reports new-onset bilateral lower extremity paresthesias (tingling) over 2 months, nocturnally predominant. Medication adherence suboptimal (misses evening Metformin). Denies chest pain, dyspnea, or presyncope.' },
-      { label: 'Objective', text: 'BP 138/86 mmHg | HR 74 bpm | BMI 29.4 | SpO2 98% on room air. Point-of-care fasting glucose: 168 mg/dL. Recent HbA1c: 8.2%. Neuro: Decreased light-touch and 10g monofilament sensation over 1st & 5th metatarsal heads bilaterally. Vascular: Dorsalis pedis and posterior tibial pulses 2+ bilaterally.' },
-      { label: 'Assessment', text: '1. Type 2 diabetes mellitus with diabetic polyneuropathy, uncontrolled (ICD-10: E11.42).\n2. Essential hypertension, suboptimally controlled (ICD-10: I10).\n3. Medication non-compliance secondary to missed evening dosing.' },
-      { label: 'Plan', text: '1. Titrate Metformin to ER formulation 2000mg with breakfast to enhance adherence.\n2. Initiate Gabapentin 300mg QHS for neuropathic discomfort.\n3. Order comprehensive metabolic panel, urine microalbumin-to-creatinine ratio, and repeat HbA1c in 3 months.\n4. Diabetic foot care education provided; refer to podiatry and certified diabetes care educator.\n5. Follow-up clinic encounter in 6 weeks with home blood sugar log.' }
+    id: 'soap',
+    title: 'SOAP Note',
+    subtitle: 'Standardized clinical outpatient note',
+    badge: 'Outpatient Encounter',
+    before: '45M, acute onset substernal chest pain 2 days, worse on exertion. BP 150/95, HR 92. ECG normal. Started aspirin 75mg. Review in 1 week.',
+    sections: [
+      { label: 'Subjective', text: '45-year-old male presents with acute onset substernal chest pain for 2 days, worse on exertion. No other symptoms reported.' },
+      { label: 'Objective', text: 'Blood pressure: 150/95 mmHg, heart rate: 92 bpm. Electrocardiogram (ECG): normal.' },
+      { label: 'Assessment', text: 'Not documented' },
+      { label: 'Plan', text: 'Started aspirin 75mg orally. Review in 1 week.' },
     ],
-    features: ['ICD-10 code extraction', 'Vitals auto-flagging', 'EMR/EHR export format', 'Google Cloud infrastructure']
+    isClinical: true,
   },
   {
-    id: 'executive',
-    name: 'Executive & Strategy',
-    shortName: 'C-Suite Memos',
-    icon: Briefcase,
-    tagline: 'Synthesize complex corporate debates and stakeholder deliberations into high-stakes decision memos and risk matrices.',
-    accentColor: '#0ea5e9',
-    badge: 'Leadership & Board',
-    sampleInput: `Board Meeting Audio Transcript: We reviewed the Q3 enterprise expansion strategy. ARR is tracking at $14.2M, up 28% YoY, but CAC increased by 42% in EMEA. Sarah proposed pausing APAC go-to-market until the regional compliance audit concludes. Marcus raised concerns that our gross margin could dip from 78% to 71% if cloud compute costs aren't optimized before the LLM inference migration. Decision reached: allocate $450k towards GPU reserved instances, delay APAC hiring by one quarter, and mandate weekly burn reviews with the VP Finance.`,
-    outputSections: [
-      { label: 'Executive Summary', text: 'The executive committee resolved to prioritize unit economics over geographic expansion, maintaining gross margin targets >75% prior to the Q1 LLM infrastructure rollout while deferring APAC hiring.' },
-      { label: 'Key Decisions & Mandates', text: '• Approved $450,000 capital commitment for 1-year GPU reserved instances to stabilize gross margins.\n• Suspended APAC regional expansion pending ISO/SOC-2 compliance certification completion.\n• Instituted weekly executive burn-rate review led by VP Finance.' },
-      { label: 'Risk & Vulnerability Matrix', text: '• CAC Inflation (High Impact, Medium Likelihood): EMEA sales efficiency declining due to elongated 90-day sales cycles.\n• Cloud Compute Volatility (High Impact, High Likelihood): Model inference cost surge threatening gross margin cushion.' },
-      { label: 'Action Register & Deliverables', text: '1. Infrastructure Lead: Execute GPU reservation agreement by Friday (Target: $450k cap).\n2. VP Sales: Implement updated EMEA enterprise qualification framework by Oct 15.\n3. Legal Counsel: Finalize APAC jurisdictional compliance audit report by Nov 1.' }
+    id: 'discharge',
+    title: 'Discharge Summary',
+    subtitle: 'Inpatient hospital course & care transition',
+    badge: 'Inpatient Medicine',
+    before: 'Adm: 10-Oct, Disch: 14-Oct. 62F acute bacterial pneumonia. Sputum Strep pneumoniae. IV Ceftriaxone switched to oral Augmentin. Afebrile 48h, SpO2 98%. Meds: Augmentin 875/125 BID x 5d. F/u pulmonology in 3 weeks.',
+    sections: [
+      { label: 'Patient Demographics', text: '62-year-old female' },
+      { label: 'Admission Date', text: '10-Oct' },
+      { label: 'Discharge Date', text: '14-Oct' },
+      { label: 'Admission Diagnosis', text: 'Acute bacterial pneumonia' },
+      { label: 'Discharge Diagnosis', text: 'Resolved Streptococcus pneumoniae bacterial pneumonia' },
+      { label: 'Hospital Course', text: 'Treated with IV Ceftriaxone, transitioned to oral amoxicillin-clavulanate. Afebrile for 48 hours with ambient oxygen saturation 98%.' },
+      { label: 'Discharge Medications', text: 'Amoxicillin-clavulanate 875/125mg twice daily for 5 days.' },
+      { label: 'Follow-up Instructions', text: 'Follow up with pulmonology clinic in 3 weeks.' },
     ],
-    features: ['Board-ready memo generation', 'Dynamic risk prioritization matrix', 'Owner-tagged action register', 'ROI & margin impact summaries']
+    isClinical: true,
   },
   {
-    id: 'software',
-    name: 'Software & Engineering',
-    shortName: 'Architecture RFCs',
-    icon: Cpu,
-    tagline: 'Condense rapid engineering standups and architectural syncs into structured RFCs, Jira stories, and blocker registers.',
-    accentColor: '#6366f1',
-    badge: 'Tech & Architecture',
-    sampleInput: `Sprint Sync: Backend team discussion on migrating from polling to WebSockets for real-time collaboration. Dave flagged that redis pub/sub backplane will require Redis 7 cluster with TLS in Europe-West1. Maya is concerned about mobile battery drain with persistent sockets; recommended a fallback to HTTP long-polling with exponential backoff on backgrounding. We agreed to implement the WebSocket gateway using Node.js tsx with a 30s heartbeat ping. Jira tickets needed for cluster provisioning, client SDK reconnection logic, and stress tests for 50k concurrent rooms.`,
-    outputSections: [
-      { label: 'Architecture Decision Record (ADR)', text: 'Context: Real-time multi-user document collaboration requires sub-100ms synchronization across concurrent clients.\nDecision: Implement dedicated WebSocket gateway backed by Redis Cluster Pub/Sub (TLS enabled in europe-west1) with client heartbeat pings at 30-second intervals.' },
-      { label: 'Technical Specifications', text: '• Protocol: WSS with bi-directional JSON frame protocol\n• Fallback Strategy: Mobile clients fall back to HTTP long-polling with exponential backoff upon background suspension\n• Backplane: Redis 7 Cluster with TLS encryption in-transit\n• Concurrency Target: 50,000 simultaneous active rooms' },
-      { label: 'Identified Blockers & Mitigations', text: '• Mobile Battery Drain: Resolved via automatic socket termination after 180s in background with push wakeup.\n• Cold Start Latency: Pre-warmed connection pool in primary cloud region.' },
-      { label: 'Sprint Backlog & Jira Epics', text: '1. [INFRA-402] Provision Redis 7 TLS Cluster in europe-west1\n2. [GATE-108] Build WebSocket server with 30s heartbeat & auth handshake\n3. [SDK-215] Implement exponential backoff reconnection & mobile background handler\n4. [QA-331] Run 50k concurrent room load test via k6' }
+    id: 'referral',
+    title: 'Referral Letter',
+    subtitle: 'Specialist consultation transfer',
+    badge: 'Specialist Referral',
+    before: 'Ref from Dr. Jayesh to Dr. Sharma (Endocrinology). 58M Ramesh Patel. Type 2 diabetes HbA1c 9.4% on Metformin 1000 BID, Glimepiride 4mg daily. Burning feet 3 months. Requesting evaluation for GLP-1 and neuropathy.',
+    sections: [
+      { label: 'Referring Provider', text: 'Dr. Jayesh, Internal Medicine' },
+      { label: 'Receiving Specialist', text: 'Dr. Sharma, Endocrinology' },
+      { label: 'Patient Information', text: 'Ramesh Patel, 58-year-old male' },
+      { label: 'Reason for Referral', text: 'Uncontrolled Type 2 Diabetes Mellitus with neuropathic symptoms' },
+      { label: 'Clinical Summary', text: '58yo male with poorly controlled T2DM (HbA1c 9.4%) and bilateral lower extremity neuropathic burning for 3 months.' },
+      { label: 'Current Medications', text: 'Metformin 1000mg twice daily, Glimepiride 4mg daily.' },
+      { label: 'Requested Action', text: 'Specialist consultation for GLP-1 receptor agonist therapy and peripheral neuropathy management.' },
     ],
-    features: ['ADR template compliance', 'Instant Jira/Linear story drafting', 'Security & latency edge analysis', 'Markdown & GitHub issue format']
+    isClinical: true,
+  },
+];
+
+export const COMPANY_AUDIENCE_SAMPLES = [
+  {
+    id: 'rfc',
+    title: 'Engineering RFC',
+    subtitle: 'Architecture request for comments',
+    badge: 'Engineering & Tech',
+    before: 'Move login to Google sign-in to cut password resets. Risk: users without Google. Rollout in 2 weeks.',
+    sections: [
+      { label: 'Title', text: 'Migrate Primary Login Flow to Google Sign-In' },
+      { label: 'Summary', text: 'Move login to Google sign-in to cut password resets.' },
+      { label: 'Motivation', text: 'Cut password resets and streamline employee access.' },
+      { label: 'Proposal', text: 'Move login to Google sign-in as primary identity provider.' },
+      { label: 'Alternatives', text: 'Not documented' },
+      { label: 'Risks', text: 'Users without Google accounts may be unable to authenticate.' },
+      { label: 'Rollout', text: 'Rollout in 2 weeks.' },
+      { label: 'Open Questions', text: 'Not documented' },
+    ],
+    isClinical: false,
   },
   {
-    id: 'real_estate',
-    name: 'Real Estate & Property',
-    shortName: 'Property Inspection',
-    icon: Building2,
-    tagline: 'Convert on-site voice walk-throughs into standardized property condition reports with defect grading and remediation scopes.',
-    accentColor: '#f59e0b',
-    badge: 'Commercial & Appraisal',
-    sampleInput: `Inspector Audio: Commercial warehouse inspection, Building B, North elevation. Foundation perimeter shows step-cracking approximately 3mm width along the northwest corner, likely caused by poor gutter drainage from the adjacent downspout. Roof membrane on the south corner has minor ponding water and granule loss over an area of roughly 120 sq ft. HVAC unit 3 on the rooftop has heavy corrosion on the compressor coils and emits abnormal vibration during startup. Electrical main panel has two double-tapped 20-amp breakers in subpanel C. Recommended urgent remediation on electrical and structural drainage.`,
-    outputSections: [
-      { label: 'Property Overview', text: 'Asset: Commercial Warehouse, Building B. Location Inspected: Northwest foundation, South roof elevation, Rooftop mechanical platform, Electrical subpanel C.' },
-      { label: 'Defect Register & Severity Grading', text: '1. Northwest Foundation Step-Cracking (Severity: High)\n   • Finding: 3mm continuous stair-step foundation crack along grade beam.\n   • Root Cause: Inadequate stormwater redirection from gutter downspout.\n   • Remediation: Extend downspout discharge 10ft from foundation; structural engineer review.\n\n2. Electrical Subpanel C Double-Taps (Severity: High / Life Safety)\n   • Finding: Two double-tapped 20-amp breakers observed.\n   • Remediation: Install approved tandem breakers or auxiliary junction box by licensed electrician.\n\n3. Mechanical HVAC Unit 3 Vibration (Severity: Medium)\n   • Finding: Compressor coil corrosion and abnormal bearing vibration.\n   • Remediation: HVAC technician servicing and vibration dampener replacement.' },
-      { label: 'Remediation Budget Estimate', text: '• Urgent (Life Safety & Water Intrusion): $4,200 – $6,500\n• Mechanical & Deferred Maintenance: $3,000 – $5,200\n• Estimated Total Capital Expenditure: $7,200 – $11,700' }
+    id: 'memo',
+    title: 'Executive Decision Memo',
+    subtitle: 'Leadership decision & alignment brief',
+    badge: 'Operations & Strategy',
+    before: 'From Ops to all staff: office closed Friday for maintenance. Work from home.',
+    sections: [
+      { label: 'To', text: 'All staff' },
+      { label: 'From', text: 'Ops' },
+      { label: 'Date', text: 'Not documented' },
+      { label: 'Subject', text: 'Office closed Friday for maintenance' },
+      { label: 'Purpose', text: 'Office closed Friday for scheduled maintenance' },
+      { label: 'Background', text: 'Not documented' },
+      { label: 'Recommendation', text: 'Work from home' },
+      { label: 'Next Steps', text: 'Not documented' },
     ],
-    features: ['Defect severity classification (Low/Med/High)', 'Cost estimation scaffolding', 'Location tag grouping', 'Lender & insurance ready formatting']
+    isClinical: false,
   },
   {
-    id: 'general',
-    name: 'Universal Multimodal',
-    shortName: 'Multimodal Research',
-    icon: Sparkles,
-    tagline: 'Open-domain intelligence synthesizing complex queries with live web grounding, high-res visual generation, and video planning.',
-    accentColor: '#8b5cf6',
-    badge: 'Enterprise Intelligence',
-    sampleInput: `Research prompt: Evaluate current commercial bottlenecks in scaling solid-state lithium-sulfur battery manufacturing. Analyze lithium dendrite growth across solid electrolyte membranes, cost parity versus LFP chemistry, and projected automotive adoption timelines through 2030. Provide an immediate strategic executive plan.`,
-    outputSections: [
-      { label: 'Direct Executive Synthesis', text: 'Solid-state lithium-sulfur (Li-S) cells offer 2.5x energy density (400-500 Wh/kg) over commercial LFP cells, but commercialization before 2028 is bottlenecked by polysulfide dissolution, dendrite-induced ceramic separator cracking, and low volumetric efficiency.' },
-      { label: 'Technical & Commercial Bottlenecks', text: '• Membrane Degradation: Sulfide-based solid electrolytes suffer severe interfacial resistance and volumetric expansion up to 80% during cycling.\n• Cost Parity vs LFP: LFP sits at ~$65-75/kWh pack level; Li-S prototyping remains above $280/kWh due to low-yield dry electrode coating processes.\n• Supply Chain Readiness: Lack of continuous roll-to-roll ultra-thin lithium foil manufacturing (<20 microns).' },
-      { label: 'Actionable Strategic Roadmap (2026-2030)', text: '1. Phase 1 (2026-2027): Focus on high-value niche segments (drones, stratospheric UAVs, eVTOL) tolerant of higher cost thresholds.\n2. Phase 2 (2028-2029): Pilot roll-to-roll sulfide composite electrolytes with hybrid polymer interlayers to suppress dendrites.\n3. Phase 3 (2030): Achieve automotive cell pack pilot qualification with target cost parity of $90/kWh.' }
+    id: 'incident',
+    title: 'Incident Report',
+    subtitle: 'Outage post-mortem & root cause record',
+    badge: 'DevOps & SRE',
+    before: 'Incident on 14-Oct 14:15 UTC. DB CPU 100%, 504 errors for 18 mins. On-call switched read replica, killed slow query. Restored 14:33. Root cause: unindexed query on orders table from manual export. Action: add index, lint in CI.',
+    sections: [
+      { label: 'Date & Time of Incident', text: '14-Oct, 14:15 UTC to 14:33 UTC (18 minutes total)' },
+      { label: 'Location & Parties Involved', text: 'Production Database Cluster, On-call engineer' },
+      { label: 'Description of Incident', text: 'Production database CPU reached 100%, causing 504 gateway timeout errors for 18 minutes.' },
+      { label: 'Immediate Actions Taken', text: 'On-call engineer switched read traffic to replica and terminated long-running blocking query.' },
+      { label: 'Root Cause / Findings', text: 'Unindexed query executed on orders table triggered by manual export script.' },
+      { label: 'Corrective & Preventive Actions', text: 'Add composite index on orders table; enforce SQL query index linting in CI pipeline.' },
     ],
-    features: ['Live web-grounded insights', 'Structured markdown outputs', 'Text-to-Image & Veo video integration', 'Zero-slop executive summaries']
-  }
+    isClinical: false,
+  },
 ];
 
 // -------------------------------------------------------------
@@ -155,8 +178,10 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
   usageState,
   currentUser,
 }) => {
-  // Active industry tab
-  const [selectedIndustry, setSelectedIndustry] = useState(INDUSTRY_SHOWCASE[0]);
+  // Audience tabs (For Clinics & For Companies)
+  const [audienceTab, setAudienceTab] = useState<'clinics' | 'companies'>('clinics');
+  const [activeClinicSample, setActiveClinicSample] = useState(0);
+  const [activeCompanySample, setActiveCompanySample] = useState(0);
 
   // SOAP Demo interactive state
   const [activeSoapPreset, setActiveSoapPreset] = useState(0);
@@ -282,41 +307,42 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
 =======================================`;
 
   // FAQs Data
+  // FAQs Data (Requirement 7)
   const FAQ_LIST = [
     {
       category: 'clinical',
+      question: 'Is it a medical device?',
+      answer: 'No — documentation aid only. Pulse Note AI is an administrative transcription and formatting aid. It does not diagnose, provide treatment plans, or dispense clinical advice. All generated documents are AI-assisted drafts that a licensed professional must review before use.'
+    },
+    {
+      category: 'security',
+      question: 'Who owns my notes?',
+      answer: 'Your notes stay in your account. You can delete them at any time. You retain 100% intellectual property ownership over your raw transcripts, formatted notes, and exports. We never sell your data or train foundation models on private customer notes.'
+    },
+    {
+      category: 'pricing',
+      question: 'Can I cancel anytime?',
+      answer: 'Yes, you can cancel anytime. There are no long-term lock-ins or cancellation fees. You can manage or cancel your subscription directly from your Billing settings, and your plan features will remain active until the end of your billing cycle.'
+    },
+    {
+      category: 'clinical',
       question: 'How does Pulse Note AI handle patient data privacy?',
-      answer: 'Pulse Note AI is built on Google Cloud. Do not enter patient-identifying information. Clinical dictations and patient data are processed deterministically. All users are responsible for ensuring notes do not contain direct patient identifiers before submission.'
+      answer: 'Your notes stay in your account. You can delete them at any time. All transmission is encrypted via HTTPS/TLS, and data is stored securely on Google Cloud infrastructure. As a best practice, do not enter direct patient-identifying information into dictation fields.'
     },
     {
       category: 'clinical',
       question: 'Can Pulse Note AI output into our clinic’s specific EHR or EMR templates?',
-      answer: 'Yes. Pulse Note AI provides standardized SOAP exports formatted for direct copy-paste or API injection into Epic, Cerner, AthenaHealth, Elation, and NextGen. You can toggle between human-readable clinical notes, raw text, and structured JSON schemas.'
-    },
-    {
-      category: 'models',
-      question: 'Which AI foundation models power Pulse Note AI?',
-      answer: 'Pulse Note AI utilizes a dual-engine architecture: Google Gemini 2.5/Pro via the official @google/genai SDK for real-time clinical reasoning, multimodality, and Veo video synthesis; coupled with OpenRouter API integration for high-throughput model flexibility including GPT-4o-mini and Claude 3.5.'
-    },
-    {
-      category: 'models',
-      question: 'How do the 5 industry-specific formatting modes work?',
-      answer: 'Each industry mode (Clinical SOAP, C-Suite Executive Memos, Software Architecture RFCs, Real Estate Defect Inspections, and Universal Multimodal) uses tuned domain prompts and deterministic JSON output schemas. Rather than returning rambling chatbot text, Pulse Note AI guarantees structured, actionable sections with dedicated key registers.'
-    },
-    {
-      category: 'security',
-      question: 'Is my corporate or healthcare intellectual property retained or reused?',
-      answer: 'Never. In accordance with enterprise terms on pulsenoteai.in, all enterprise inputs belong exclusively to your organization. Zero customer data is retained for training purposes. We adhere strictly to confidential data boundaries.'
+      answer: 'Yes. Pulse Note AI provides standardized SOAP, Discharge Summary, and Referral Letter formats designed for quick copy-paste or PDF/Word download. You can also order custom template builds matching your exact clinic workflow.'
     },
     {
       category: 'pricing',
-      question: 'What is included in the Free tier versus the Pro subscription?',
-      answer: 'The Free tier grants 3 full multimodal transformations per day with standard queue priority. Pro (₹299/mo or ₹1,999/yr) unlocks unlimited high-speed prompt transformations across all 5 industry modes, priority GPU queuing, multi-minute audio transcription, and Veo 3.1 video generation.'
+      question: 'What is included in the Free tier versus the Pro and Team subscriptions?',
+      answer: 'The Free tier includes 5 documents a month with 3 basic templates and watermark. Pro (₹499/mo or ₹4,999/yr) unlocks unlimited documents, all templates, PDF and Word downloads without watermarks, and version history. Clinic / Team (₹399/seat/mo, min 3 seats) adds shared team templates, team admin dashboard, and clinic logo letterheads.'
     },
     {
       category: 'pricing',
-      question: 'What payment methods do you support for Pro upgrades in India and globally?',
-      answer: 'For users in India, we support instant zero-fee UPI payments via any UPI app (Google Pay, PhonePe, Paytm, BHIM) to our registered merchant VPA wagh.jayesh@oksbi, plus Net Banking and Rupay/Mastercard/Visa cards. For international users, we accept all major credit cards and PayPal in USD.'
+      question: 'What payment methods do you support for Pro and Team upgrades?',
+      answer: 'We accept all major payment methods via Razorpay: UPI (Google Pay, PhonePe, Paytm, BHIM), Net Banking, RuPay, Visa, Mastercard, and international credit cards. GST invoices are automatically generated and emailed after each payment.'
     }
   ];
 
@@ -354,9 +380,8 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
 
           {/* Navigation Anchors */}
           <nav className="hidden md:flex items-center gap-8 text-sm text-[#c4c7c5]">
-            <a href="#industries" className="hover:text-white transition-colors">5 Industry Modes</a>
+            <a href="#audiences" className="hover:text-white transition-colors">Audiences</a>
             <a href="#soap-demo" className="hover:text-white transition-colors">Clinical SOAP Demo</a>
-            <a href="#architecture" className="hover:text-white transition-colors">Architecture</a>
             <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
             <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
             <a href="#about" className="hover:text-white transition-colors">About</a>
@@ -364,19 +389,20 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
 
           {/* Header Action CTAs */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={onOpenPricing}
+            <a
+              href={DEMO_LINK}
+              target="_blank"
+              rel="noreferrer"
               className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-[#3c4043] bg-[#1e1f20] hover:bg-[#2d2e30] text-xs font-medium text-white transition-colors"
             >
-              <Zap className="w-3.5 h-3.5 text-[#ff5757]" />
-              Upgrade to Pro
-            </button>
+              <span>Book a demo</span>
+            </a>
 
             <button
               onClick={onLaunchApp}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-xs font-semibold text-white shadow-lg shadow-[#4e8cff]/20 transition-all cursor-pointer"
             >
-              <span>Launch Studio</span>
+              <span>Start free</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -385,7 +411,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
       </header>
 
       {/* ------------------------------------------------------------- */}
-      {/* 2. Hero Section */}
+      {/* 2. Hero Section (Requirement 1) */}
       {/* ------------------------------------------------------------- */}
       <section className="relative pt-20 pb-24 px-6 overflow-hidden">
         {/* Subtle Ambient Background Gradients */}
@@ -396,186 +422,228 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
           {/* Top Kicker Label */}
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1e1f20] border border-[#3c4043]/50 text-xs text-[#c4c7c5] mb-8">
             <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse" />
-            <span>Next-Generation Intelligent Documentation Engine</span>
+            <span>Deterministic Documentation Engine</span>
             <span className="text-[#9aa0a6]">·</span>
             <span className="text-white font-medium">pulsenoteai.in</span>
           </div>
 
-          {/* High-Impact Main Heading */}
-          <h1 className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-white mb-6 leading-[1.1]">
-            Turn Messy Conversation Into{' '}
+          {/* Exact User Headline */}
+          <h1 className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-white mb-6 leading-[1.15]">
+            Structured clinical and enterprise documents in seconds —{' '}
             <span className="bg-gradient-to-r from-[#4e8cff] via-[#d96570] to-[#ff5757] bg-clip-text text-transparent">
-              Mission-Critical Documentation
+              same input, same output.
             </span>
           </h1>
 
-          {/* Subtitle */}
+          {/* Exact User Sub-headline */}
           <p className="text-lg sm:text-xl text-[#9aa0a6] max-w-3xl mx-auto mb-10 leading-relaxed font-normal">
-            Eliminate hours of manual note-taking. Pulse Note AI extracts structured SOAP notes, executive memos, engineering RFCs, and property defect registers with verified clinical and enterprise schemas.
+            SOAP notes, RFCs, memos, discharge summaries and incident reports. Fixed templates, no made-up details.
           </p>
 
-          {/* CTA Group */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+          {/* Main buttons: Start free & Book a demo */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14">
             <button
               onClick={onLaunchApp}
-              className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-semibold text-sm shadow-xl shadow-[#4e8cff]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-bold text-sm shadow-xl shadow-[#4e8cff]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>Try Live AI Studio Free</span>
+              <span>Start free</span>
               <ArrowRight className="w-4 h-4" />
             </button>
 
             <a
-              href="#soap-demo"
-              className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] text-white font-medium text-sm transition-colors flex items-center justify-center gap-2"
+              href={DEMO_LINK}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043] text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2"
             >
-              <Stethoscope className="w-4 h-4 text-[#10b981]" />
-              <span>Interactive SOAP Demo</span>
+              <Users className="w-4 h-4 text-[#4e8cff]" />
+              <span>Book a demo</span>
             </a>
           </div>
 
-          {/* Trust Metric Badges */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto pt-8 border-t border-[#3c4043]/30 text-left">
-            <div className="p-4 rounded-xl bg-[#1e1f20]/50 border border-[#3c4043]/30">
-              <div className="text-2xl font-bold text-white mb-0.5">85% Faster</div>
-              <div className="text-xs text-[#9aa0a6]">Documentation turnover time</div>
-            </div>
-            <div className="p-4 rounded-xl bg-[#1e1f20]/50 border border-[#3c4043]/30">
-              <div className="text-base sm:text-lg font-bold text-[#10b981] mb-0.5">Google Cloud</div>
-              <div className="text-xs text-[#9aa0a6]">Do not enter patient identifiers</div>
-            </div>
-            <div className="p-4 rounded-xl bg-[#1e1f20]/50 border border-[#3c4043]/30">
-              <div className="text-2xl font-bold text-[#4e8cff] mb-0.5">5 Modes</div>
-              <div className="text-xs text-[#9aa0a6]">Tailored industry schemas</div>
-            </div>
-            <div className="p-4 rounded-xl bg-[#1e1f20]/50 border border-[#3c4043]/30">
-              <div className="text-2xl font-bold text-[#ff5757] mb-0.5">&lt; 3.2s</div>
-              <div className="text-xs text-[#9aa0a6]">Average turnaround per note</div>
-            </div>
+          {/* Verified Trust Statements */}
+          <div className="p-4 rounded-2xl bg-[#1e1f20]/60 border border-[#3c4043]/40 max-w-2xl mx-auto flex items-center justify-center gap-3 text-xs sm:text-sm text-[#10b981]">
+            <ShieldCheck className="w-5 h-5 shrink-0" />
+            <span className="font-medium text-[#e3e3e3]">
+              Your notes stay in your account. You can delete them at any time.
+            </span>
           </div>
 
         </div>
       </section>
 
       {/* ------------------------------------------------------------- */}
-      {/* 3. The 5 Industry Modes Section */}
+      {/* 3. Two Clear Audience Tabs: For Clinics & For Companies */}
       {/* ------------------------------------------------------------- */}
-      <section id="industries" className="py-24 px-6 bg-[#18191a]/60 border-y border-[#3c4043]/30">
+      <section id="audiences" className="py-20 px-6 bg-[#18191a]/60 border-y border-[#3c4043]/30">
         <div className="max-w-7xl mx-auto">
           
-          <div className="text-center max-w-3xl mx-auto mb-14">
+          <div className="text-center max-w-3xl mx-auto mb-12">
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#4e8cff] uppercase tracking-wider mb-2">
               <Layers className="w-4 h-4" />
-              <span>Precision Schemas</span>
+              <span>Two Clear Audiences</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
-              5 Tailored Industry Modes. Zero Generic Chatbot Slop.
+              Designed For Clinics. Built For Companies.
             </h2>
             <p className="text-sm sm:text-base text-[#9aa0a6]">
-              A doctor does not need a Jira ticket, and an architect does not need a medical diagnosis. Pulse Note AI activates deterministic documentation engines for each domain.
+              Compare raw unstructured input against the verified, structured output across 3 sample documents each.
             </p>
           </div>
 
-          {/* Interactive Mode Switcher Tabs */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-10 p-1.5 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/50 max-w-3xl mx-auto">
-            {INDUSTRY_SHOWCASE.map((mode) => {
-              const Icon = mode.icon;
-              const isActive = selectedIndustry.id === mode.id;
+          {/* Two Audience Main Switcher Tabs */}
+          <div className="flex items-center justify-center gap-3 mb-8">
+            <button
+              onClick={() => {
+                setAudienceTab('clinics');
+                setActiveClinicSample(0);
+              }}
+              className={`flex items-center gap-2.5 px-6 py-3 rounded-2xl text-sm font-bold transition-all cursor-pointer border ${
+                audienceTab === 'clinics'
+                  ? 'bg-emerald-500/15 border-emerald-500/60 text-white shadow-lg shadow-emerald-500/10'
+                  : 'bg-[#1e1f20] border-[#3c4043]/60 text-[#9aa0a6] hover:text-white'
+              }`}
+            >
+              <Stethoscope className={`w-4 h-4 ${audienceTab === 'clinics' ? 'text-emerald-400' : 'text-[#9aa0a6]'}`} />
+              <span>For Clinics</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setAudienceTab('companies');
+                setActiveCompanySample(0);
+              }}
+              className={`flex items-center gap-2.5 px-6 py-3 rounded-2xl text-sm font-bold transition-all cursor-pointer border ${
+                audienceTab === 'companies'
+                  ? 'bg-blue-500/15 border-blue-500/60 text-white shadow-lg shadow-blue-500/10'
+                  : 'bg-[#1e1f20] border-[#3c4043]/60 text-[#9aa0a6] hover:text-white'
+              }`}
+            >
+              <Briefcase className={`w-4 h-4 ${audienceTab === 'companies' ? 'text-blue-400' : 'text-[#9aa0a6]'}`} />
+              <span>For Companies</span>
+            </button>
+          </div>
+
+          {/* 3 Sample Document Selector Pills */}
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-10 max-w-2xl mx-auto">
+            {(audienceTab === 'clinics' ? CLINIC_AUDIENCE_SAMPLES : COMPANY_AUDIENCE_SAMPLES).map((doc, idx) => {
+              const isSelected = (audienceTab === 'clinics' ? activeClinicSample : activeCompanySample) === idx;
               return (
                 <button
-                  key={mode.id}
-                  onClick={() => setSelectedIndustry(mode)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-[#2d2e30] text-white shadow-md border border-[#3c4043]'
-                      : 'text-[#9aa0a6] hover:text-white hover:bg-[#282a2c]/50'
+                  key={doc.id}
+                  onClick={() => {
+                    if (audienceTab === 'clinics') {
+                      setActiveClinicSample(idx);
+                    } else {
+                      setActiveCompanySample(idx);
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-all cursor-pointer border ${
+                    isSelected
+                      ? 'bg-[#2d2e30] text-white border-[#4e8cff]/60 shadow-md'
+                      : 'bg-[#1e1f20] text-[#9aa0a6] border-[#3c4043]/40 hover:text-white'
                   }`}
                 >
-                  <Icon className="w-4 h-4" style={{ color: isActive ? mode.accentColor : undefined }} />
-                  <span>{mode.shortName}</span>
+                  <FileText className="w-3.5 h-3.5 text-[#4e8cff]" />
+                  <span>{doc.title}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/40 text-[#9aa0a6]">
+                    {doc.badge}
+                  </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Tab Showcase Card */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start bg-[#1e1f20] border border-[#3c4043]/50 rounded-2xl p-6 sm:p-10 shadow-2xl">
-            
-            {/* Left Column: Context & Raw Input */}
-            <div className="lg:col-span-5 space-y-6">
-              <div>
-                <div className="flex items-center gap-2 text-xs text-[#9aa0a6] mb-2">
-                  <span>Industry Engine</span>
-                  <span>·</span>
-                  <span className="text-white font-medium">{selectedIndustry.name}</span>
-                </div>
-                <h3 className="text-2xl font-bold text-white mb-3 flex items-center gap-2.5">
-                  <selectedIndustry.icon className="w-6 h-6" style={{ color: selectedIndustry.accentColor }} />
-                  {selectedIndustry.name}
-                </h3>
-                <p className="text-sm text-[#9aa0a6] leading-relaxed">
-                  {selectedIndustry.tagline}
-                </p>
-              </div>
+          {/* Active Sample Before vs After Card */}
+          {(() => {
+            const currentSample = audienceTab === 'clinics' 
+              ? CLINIC_AUDIENCE_SAMPLES[activeClinicSample]
+              : COMPANY_AUDIENCE_SAMPLES[activeCompanySample];
 
-              <div>
-                <div className="text-xs font-semibold text-[#c4c7c5] uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-[#4e8cff]" />
-                  <span>Raw Audio / Dictation Input</span>
-                </div>
-                <div className="p-4 rounded-xl bg-[#131314] border border-[#3c4043]/40 text-xs text-[#c4c7c5] leading-relaxed font-mono max-h-56 overflow-y-auto">
-                  {selectedIndustry.sampleInput}
-                </div>
-              </div>
-
-              {/* Engine Highlights */}
-              <div className="space-y-2 pt-2">
-                <div className="text-xs font-semibold text-[#9aa0a6] uppercase tracking-wider">Engine Highlights</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {selectedIndustry.features.map((feat, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5 text-xs text-[#c4c7c5]">
-                      <Check className="w-3.5 h-3.5 text-[#10b981]" />
-                      <span>{feat}</span>
+            return (
+              <div className="bg-[#1e1f20] border border-[#3c4043]/60 rounded-3xl p-6 sm:p-10 shadow-2xl space-y-6">
+                
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3c4043]/40 pb-5">
+                  <div>
+                    <div className="flex items-center gap-2 text-xs text-[#9aa0a6] mb-1">
+                      <span>{audienceTab === 'clinics' ? 'Clinical Document' : 'Enterprise Document'}</span>
+                      <span>•</span>
+                      <span className="text-[#4e8cff] font-semibold">{currentSample.badge}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                onClick={onLaunchApp}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-semibold text-xs transition-opacity flex items-center justify-center gap-2"
-              >
-                <span>Launch {selectedIndustry.shortName} in Studio</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Right Column: Structured Transformation Output */}
-            <div className="lg:col-span-7 bg-[#131314] rounded-xl border border-[#3c4043]/40 p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-[#3c4043]/30 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
-                  <span className="text-xs font-semibold text-white">Automated Structured Synthesis</span>
-                </div>
-                <div className="text-[11px] text-[#9aa0a6]">
-                  Turnaround: <span className="text-white font-medium">1.8s</span> · Deterministic
-                </div>
-              </div>
-
-              <div className="space-y-3.5">
-                {selectedIndustry.outputSections.map((sec, idx) => (
-                  <div key={idx} className="p-3.5 rounded-lg bg-[#1e1f20]/60 border border-[#3c4043]/20">
-                    <div className="text-xs font-semibold text-[#4e8cff] uppercase tracking-wider mb-1">
-                      {sec.label}
-                    </div>
-                    <div className="text-xs text-[#e3e3e3] whitespace-pre-line leading-relaxed font-sans">
-                      {sec.text}
-                    </div>
+                    <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                      <span>{currentSample.title}</span>
+                      <span className="text-xs font-normal text-[#9aa0a6]">— {currentSample.subtitle}</span>
+                    </h3>
                   </div>
-                ))}
-              </div>
-            </div>
 
-          </div>
+                  <button
+                    onClick={onLaunchApp}
+                    className="self-start sm:self-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-semibold text-xs flex items-center gap-2 cursor-pointer shadow-md shadow-[#4e8cff]/20"
+                  >
+                    <span>Try this template free</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Split: Before (Raw Notes) vs After (Structured Output) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                  
+                  {/* Left: Before = Raw Notes */}
+                  <div className="lg:col-span-5 space-y-3">
+                    <div className="flex items-center justify-between text-xs font-bold text-amber-300 uppercase tracking-wider">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-400" />
+                        <span>Before: Raw Notes / Dictation</span>
+                      </div>
+                      <span className="text-[11px] font-mono text-[#9aa0a6]">Unstructured Input</span>
+                    </div>
+                    <div className="p-5 rounded-2xl bg-[#131314] border border-[#3c4043]/50 text-xs sm:text-sm text-[#c4c7c5] leading-relaxed font-mono whitespace-pre-wrap">
+                      {currentSample.before}
+                    </div>
+                    <p className="text-[11px] text-[#9aa0a6]">
+                      Notice: Grammatically rough, fragmented speech, non-standard abbreviations, unorganized observations.
+                    </p>
+                  </div>
+
+                  {/* Right: After = Structured Output */}
+                  <div className="lg:col-span-7 bg-[#131314] rounded-2xl border border-[#3c4043]/60 p-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-[#3c4043]/40 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">After: Structured Output</span>
+                      </div>
+                      <span className="text-[11px] font-mono text-emerald-400">
+                        Fixed Order · No Hallucinations
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {currentSample.sections.map((sec, sIdx) => (
+                        <div key={sIdx} className="p-3.5 rounded-xl bg-[#1e1f20]/70 border border-[#3c4043]/30 space-y-1">
+                          <div className="text-[11px] font-bold text-[#4e8cff] uppercase tracking-wider">
+                            {sec.label}
+                          </div>
+                          <div className="text-xs sm:text-sm text-[#e3e3e3] leading-relaxed whitespace-pre-line font-sans">
+                            {sec.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Short line under every generated clinical document */}
+                    {currentSample.isClinical && (
+                      <div className="pt-3 border-t border-[#3c4043]/40 flex items-center gap-2 text-xs text-amber-300 bg-amber-500/10 px-3.5 py-2 rounded-xl border border-amber-500/20">
+                        <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
+                        <span>AI-assisted draft. A licensed professional must review before use.</span>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+
+              </div>
+            );
+          })()}
 
         </div>
       </section>
@@ -875,18 +943,18 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
       {/* 6. Pricing Section */}
       {/* ------------------------------------------------------------- */}
       <section id="pricing" className="py-24 px-6 relative">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto space-y-16">
           
-          <div className="text-center max-w-3xl mx-auto mb-14">
+          <div className="text-center max-w-3xl mx-auto">
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#4e8cff] uppercase tracking-wider mb-2">
               <Zap className="w-4 h-4" />
               <span>Transparent Plans</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
-              Simple, Transparent Pricing For Professionals
+              Predictable Pricing For Clinicians & Enterprises
             </h2>
             <p className="text-sm sm:text-base text-[#9aa0a6]">
-              Start completely free with 3 daily transformations. Upgrade anytime for unlimited high-priority intelligence and multimodal synthesis.
+              Start free with 5 documents a month. Upgrade to Pro or Team for unlimited documents, Word and PDF downloads, version history, and custom clinic letterheads.
             </p>
 
             {/* Currency & Annual Toggle */}
@@ -895,15 +963,15 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <div className="flex items-center bg-[#1e1f20] p-1 rounded-xl border border-[#3c4043]/50 text-xs font-medium">
                 <button
                   onClick={() => setPricingCurrency('INR')}
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${pricingCurrency === 'INR' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'}`}
+                  className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${pricingCurrency === 'INR' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'}`}
                 >
-                  ₹ INR (UPI / India)
+                  ₹ INR (India)
                 </button>
                 <button
                   onClick={() => setPricingCurrency('USD')}
-                  className={`px-3 py-1.5 rounded-lg transition-colors ${pricingCurrency === 'USD' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'}`}
+                  className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${pricingCurrency === 'USD' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'}`}
                 >
-                  $ USD (Global Cards)
+                  $ USD (Overseas)
                 </button>
               </div>
 
@@ -917,146 +985,360 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 </button>
                 <span className="text-[#e3e3e3] font-medium">Annual Billing</span>
                 <span className="text-[10px] font-bold text-[#10b981] bg-[#10b981]/15 px-2 py-0.5 rounded border border-[#10b981]/30">
-                  SAVE 45%
+                  SAVE UP TO 20%
                 </span>
               </div>
             </div>
 
           </div>
 
-          {/* Pricing Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto items-stretch">
+          {/* Pricing Cards Grid (4 Plans) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
             
-            {/* Plan 1: Free Tier */}
-            <div className="p-8 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/50 flex flex-col justify-between">
+            {/* Plan 1: Free */}
+            <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/50 flex flex-col justify-between">
               <div>
-                <div className="text-xs font-bold text-[#9aa0a6] uppercase tracking-wider mb-2">Free Starter</div>
-                <div className="text-3xl font-extrabold text-white mb-2">
+                <div className="text-xs font-bold text-[#9aa0a6] uppercase tracking-wider mb-2">Free</div>
+                <div className="text-3xl font-extrabold text-white mb-1">
                   {pricingCurrency === 'INR' ? '₹0' : '$0'}
-                  <span className="text-xs font-normal text-[#9aa0a6]"> / forever</span>
+                  <span className="text-xs font-normal text-[#9aa0a6]"> / month</span>
                 </div>
                 <p className="text-xs text-[#9aa0a6] mb-6">
-                  For students, evaluators, and occasional medical note drafting.
+                  For individual testing and light personal documentation.
                 </p>
 
                 <div className="space-y-3 pt-4 border-t border-[#3c4043]/30 text-xs text-[#c4c7c5]">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>3 prompt transformations daily</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>5 documents a month</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>All 5 industry formatting modes</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>3 basic templates (SOAP, RFC, Memo)</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>Standard queue processing speed</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>Copy text only</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>Clipboard & PDF exports</span>
+                  <div className="flex items-start gap-2 text-[#9aa0a6]">
+                    <span className="text-amber-400 font-bold">•</span>
+                    <span>Watermark "Made with PulseNote AI"</span>
                   </div>
                 </div>
               </div>
 
               <button
                 onClick={onLaunchApp}
-                className="mt-8 w-full py-3 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-white font-medium text-xs transition-colors cursor-pointer"
+                className="mt-8 w-full py-2.5 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-white font-medium text-xs transition-colors cursor-pointer"
               >
-                Start Free Now
+                Start free
               </button>
             </div>
 
             {/* Plan 2: Pro (Featured) */}
-            <div className="p-8 rounded-2xl bg-gradient-to-b from-[#1e1f20] to-[#17181a] border-2 border-[#4e8cff] relative flex flex-col justify-between shadow-2xl shadow-[#4e8cff]/10">
-              <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-[#4e8cff] to-[#ff5757] text-white text-[10px] font-extrabold uppercase tracking-wider">
+            <div className="p-6 rounded-2xl bg-gradient-to-b from-[#1e1f20] to-[#17181a] border-2 border-[#4e8cff] relative flex flex-col justify-between shadow-xl shadow-[#4e8cff]/10">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-gradient-to-r from-[#4e8cff] to-[#ff5757] text-white text-[10px] font-extrabold uppercase tracking-wider">
                 Most Popular
               </div>
 
               <div>
-                <div className="text-xs font-bold text-[#4e8cff] uppercase tracking-wider mb-2">
-                  Pro {pricingAnnual ? 'Annual' : 'Monthly'}
-                </div>
-                <div className="text-3xl font-extrabold text-white mb-2">
-                  {pricingCurrency === 'INR' ? (pricingAnnual ? '₹1,999' : '₹299') : (pricingAnnual ? '$24.99' : '$3.99')}
+                <div className="text-xs font-bold text-[#4e8cff] uppercase tracking-wider mb-2">Pro</div>
+                <div className="text-3xl font-extrabold text-white mb-1">
+                  {pricingCurrency === 'INR' 
+                    ? (pricingAnnual ? '₹4,999' : '₹499')
+                    : (pricingAnnual ? '$59.00' : '$6.99')}
                   <span className="text-xs font-normal text-[#9aa0a6]">{pricingAnnual ? ' / year' : ' / month'}</span>
                 </div>
                 <p className="text-xs text-[#9aa0a6] mb-6">
-                  {pricingAnnual ? 'Equivalent to ~₹166/mo. Unlimited high-speed clinical & technical synthesis.' : 'Billed monthly. Cancel anytime.'}
+                  {pricingAnnual ? 'Equivalent to ~₹416/mo. Unlimited clinical & enterprise documents.' : 'Billed monthly. Cancel anytime.'}
                 </p>
 
                 <div className="space-y-3 pt-4 border-t border-[#3c4043]/30 text-xs text-[#c4c7c5]">
-                  <div className="flex items-center gap-2 font-medium text-white">
-                    <Check className="w-4 h-4 text-[#4e8cff]" />
-                    <span>Unlimited daily transformations</span>
+                  <div className="flex items-start gap-2 font-medium text-white">
+                    <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
+                    <span>Unlimited documents</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#4e8cff]" />
-                    <span>Priority high-speed queue execution</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
+                    <span>All templates unlocked</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#4e8cff]" />
-                    <span>Full Google Veo 3.1 & Imagen generation</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
+                    <span>PDF and Word (.docx) download</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#4e8cff]" />
-                    <span>Instant zero-fee UPI (wagh.jayesh@oksbi)</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
+                    <span>No watermark</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#4e8cff]" />
-                    <span>Multi-minute voice recording & transcription</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
+                    <span>Complete version history</span>
                   </div>
                 </div>
               </div>
 
               <button
                 onClick={onOpenPricing}
-                className="mt-8 w-full py-3.5 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-bold text-xs shadow-lg shadow-[#4e8cff]/25 transition-all cursor-pointer"
+                className="mt-8 w-full py-2.5 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-bold text-xs shadow-lg shadow-[#4e8cff]/25 transition-all cursor-pointer"
               >
                 Upgrade to Pro
               </button>
             </div>
 
-            {/* Plan 3: Enterprise & Clinic */}
-            <div className="p-8 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/50 flex flex-col justify-between">
+            {/* Plan 3: Clinic / Team */}
+            <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#10b981]/50 relative flex flex-col justify-between shadow-xl shadow-[#10b981]/5">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-[#10b981] text-slate-950 text-[10px] font-extrabold uppercase tracking-wider">
+                For Teams & Clinics
+              </div>
+
               <div>
-                <div className="text-xs font-bold text-[#10b981] uppercase tracking-wider mb-2">Clinic & Enterprise</div>
-                <div className="text-3xl font-extrabold text-white mb-2">
-                  Custom
-                  <span className="text-xs font-normal text-[#9aa0a6]"> / organization</span>
+                <div className="text-xs font-bold text-[#10b981] uppercase tracking-wider mb-2">Clinic / Team</div>
+                <div className="text-3xl font-extrabold text-white mb-1">
+                  {pricingCurrency === 'INR' 
+                    ? (pricingAnnual ? '₹3,999' : '₹399')
+                    : (pricingAnnual ? '$49.00' : '$5.49')}
+                  <span className="text-xs font-normal text-[#9aa0a6]">{pricingAnnual ? ' / seat / year' : ' / seat / mo'}</span>
                 </div>
                 <p className="text-xs text-[#9aa0a6] mb-6">
-                  For multi-provider clinics, hospital departments, and engineering teams.
+                  Minimum 3 seats ({pricingCurrency === 'INR' ? '₹1,197/mo' : '$16.47/mo'}). Full clinic administration.
                 </p>
 
                 <div className="space-y-3 pt-4 border-t border-[#3c4043]/30 text-xs text-[#c4c7c5]">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>Multi-seat provider management</span>
+                  <div className="flex items-start gap-2 font-medium text-white">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>Everything in Pro</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>Custom EHR & EMR API webhooks</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>Shared template library (admin locked)</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>Dedicated Business Associate Agreement (BAA)</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>Team admin dashboard & member invites</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#10b981]" />
-                    <span>Dedicated account engineering support</span>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>Weekly documents usage reports</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
+                    <span>Clinic logo and letterhead on PDFs</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={onOpenPricing}
+                className="mt-8 w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer"
+              >
+                Get Clinic / Team
+              </button>
+            </div>
+
+            {/* Plan 4: Enterprise */}
+            <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/50 flex flex-col justify-between">
+              <div>
+                <div className="text-xs font-bold text-[#9aa0a6] uppercase tracking-wider mb-2">Enterprise</div>
+                <div className="text-3xl font-extrabold text-white mb-1">
+                  Contact us
+                </div>
+                <p className="text-xs text-[#9aa0a6] mb-6">
+                  For multi-hospital networks, health systems, and high-concurrency enterprises.
+                </p>
+
+                <div className="space-y-3 pt-4 border-t border-[#3c4043]/30 text-xs text-[#c4c7c5]">
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#9aa0a6] shrink-0 mt-0.5" />
+                    <span>Custom templates built for your workflows</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#9aa0a6] shrink-0 mt-0.5" />
+                    <span>Dedicated onboarding and staff training</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#9aa0a6] shrink-0 mt-0.5" />
+                    <span>GST-compliant invoice billing with purchase orders</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#9aa0a6] shrink-0 mt-0.5" />
+                    <span>SLA guarantees & dedicated account manager</span>
                   </div>
                 </div>
               </div>
 
               <a
-                href="mailto:contact@pulsenoteai.in?subject=Pulse%20Note%20AI%20Clinic%20Inquiry"
-                className="mt-8 w-full py-3 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-white font-medium text-xs transition-colors text-center inline-block"
+                href={DEMO_LINK}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-8 w-full py-2.5 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-white font-medium text-xs transition-colors text-center inline-block cursor-pointer"
               >
-                Contact Enterprise Sales
+                Contact us
               </a>
             </div>
 
+          </div>
+
+          {/* Add-on Banner: Custom Template Build (Requirement 4) */}
+          <div className="p-6 rounded-2xl bg-gradient-to-r from-[#1e1f20] via-[#242528] to-[#1e1f20] border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Professional Service Add-On</span>
+              </div>
+              <h4 className="text-lg font-bold text-white">Custom Template Build</h4>
+              <p className="text-xs text-[#c4c7c5]">
+                Have a specialized EMR or corporate form? Our engineering team builds a deterministic JSON schema matching your exact section order and verification rules.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-4 shrink-0">
+              <div className="text-right">
+                <div className="text-xl font-extrabold text-white">
+                  {pricingCurrency === 'INR' ? '₹2,999' : '$39'}
+                </div>
+                <div className="text-[10px] text-[#9aa0a6]">One-time per template</div>
+              </div>
+              <button
+                onClick={onOpenPricing}
+                className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs font-semibold transition cursor-pointer"
+              >
+                Order Custom Build
+              </button>
+            </div>
+          </div>
+
+          {/* Plan Comparison Table (Requirement 7) */}
+          <div className="space-y-6">
+            <div className="text-center">
+              <h3 className="text-2xl font-bold text-white">Detailed Plan Comparison</h3>
+              <p className="text-xs text-[#9aa0a6] mt-1">Everything you need to select the right tier for your clinical or enterprise team.</p>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-[#3c4043]/50 bg-[#1e1f20]">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[#3c4043]/50 bg-[#131314]/80 text-[#9aa0a6]">
+                    <th className="p-4 font-semibold">Features</th>
+                    <th className="p-4 font-semibold text-white">Free</th>
+                    <th className="p-4 font-semibold text-[#4e8cff]">Pro</th>
+                    <th className="p-4 font-semibold text-[#10b981]">Clinic / Team</th>
+                    <th className="p-4 font-semibold text-white">Enterprise</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#3c4043]/30 text-[#c4c7c5]">
+                  <tr>
+                    <td className="p-4 font-medium text-white">Monthly Documents</td>
+                    <td className="p-4">5 docs / month</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Unlimited</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Unlimited</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Unlimited</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Template Access</td>
+                    <td className="p-4">3 basic templates</td>
+                    <td className="p-4">All standard templates</td>
+                    <td className="p-4">All templates + Shared team library</td>
+                    <td className="p-4">Custom bespoke schemas</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Export Formats</td>
+                    <td className="p-4">Copy text only</td>
+                    <td className="p-4">PDF & Word (.docx)</td>
+                    <td className="p-4">PDF & Word with Letterhead</td>
+                    <td className="p-4">PDF, Word, EHR API</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Watermark</td>
+                    <td className="p-4 text-amber-300">Made with PulseNote AI</td>
+                    <td className="p-4 text-emerald-400">None</td>
+                    <td className="p-4 text-emerald-400">None (Clinic Logo)</td>
+                    <td className="p-4 text-emerald-400">None (Custom Branding)</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Version History</td>
+                    <td className="p-4 text-[#9aa0a6]">—</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Audit logs included</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Fact-Checking Against Input</td>
+                    <td className="p-4 text-emerald-400">Included</td>
+                    <td className="p-4 text-emerald-400">Included</td>
+                    <td className="p-4 text-emerald-400">Included</td>
+                    <td className="p-4 text-emerald-400">Included</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Team Admin Dashboard</td>
+                    <td className="p-4 text-[#9aa0a6]">—</td>
+                    <td className="p-4 text-[#9aa0a6]">—</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included (Min 3 seats)</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Multi-clinic admin</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">Clinic Letterhead & Logo</td>
+                    <td className="p-4 text-[#9aa0a6]">—</td>
+                    <td className="p-4 text-[#9aa0a6]">—</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Testimonials Section (Requirement 7 - clearly marked placeholders) */}
+          <div className="space-y-6 pt-8 border-t border-[#3c4043]/30">
+            <div className="text-center max-w-2xl mx-auto">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-semibold mb-2">
+                <span>Verified Feedback Preview</span>
+              </div>
+              <h3 className="text-2xl font-bold text-white">What Early Teams Are Saying</h3>
+              <p className="text-xs text-[#9aa0a6] mt-1">
+                Clearly marked sample review placeholders until ongoing clinic and enterprise case study interviews conclude.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3 relative">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                  Placeholder — Clinic Case Study
+                </span>
+                <p className="text-xs text-[#c4c7c5] italic leading-relaxed">
+                  "The deterministic output schema changed our workflow. The fact that empty sections explicitly say 'Not documented' instead of fabricating lab results gives our attending physicians complete confidence."
+                </p>
+                <div className="pt-2 border-t border-[#3c4043]/20">
+                  <div className="text-xs font-bold text-white">Dr. A. Mehta, MD</div>
+                  <div className="text-[11px] text-[#9aa0a6]">Medical Director, Cardiology Group</div>
+                </div>
+              </div>
+
+              <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3 relative">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                  Placeholder — Enterprise Engineering
+                </span>
+                <p className="text-xs text-[#c4c7c5] italic leading-relaxed">
+                  "Our engineers draft architectural RFCs in 3 minutes after standup. The fixed 8-section layout forces clear risk analysis and rollout planning without repetitive formatting."
+                </p>
+                <div className="pt-2 border-t border-[#3c4043]/20">
+                  <div className="text-xs font-bold text-white">R. Sharma</div>
+                  <div className="text-[11px] text-[#9aa0a6]">VP Engineering, Cloud Platform</div>
+                </div>
+              </div>
+
+              <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3 relative">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                  Placeholder — Ambulatory Clinic
+                </span>
+                <p className="text-xs text-[#c4c7c5] italic leading-relaxed">
+                  "We process 30 patient visits daily across 4 providers. The team admin dashboard, shared clinic templates, and letterhead exports on PDF save each doctor over 90 minutes of charting every day."
+                </p>
+                <div className="pt-2 border-t border-[#3c4043]/20">
+                  <div className="text-xs font-bold text-white">Dr. K. Swaminathan</div>
+                  <div className="text-[11px] text-[#9aa0a6]">Lead Clinician, Family Health Center</div>
+                </div>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -1323,34 +1605,35 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             </div>
 
             <div>
-              <div className="text-white font-semibold mb-3">5 Industry Modes</div>
+              <div className="text-white font-semibold mb-3">Document Templates</div>
               <ul className="space-y-2 text-[11px]">
-                <li><a href="#industries" className="hover:text-white transition-colors">Clinical SOAP Notes</a></li>
-                <li><a href="#industries" className="hover:text-white transition-colors">Executive Decision Memos</a></li>
-                <li><a href="#industries" className="hover:text-white transition-colors">Software Architecture RFCs</a></li>
-                <li><a href="#industries" className="hover:text-white transition-colors">Property Defect Inspection</a></li>
-                <li><a href="#industries" className="hover:text-white transition-colors">Universal Intelligence</a></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Clinical SOAP Notes</button></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Discharge Summaries</button></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Referral Letters</button></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Engineering RFCs</button></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Executive Decision Memos</button></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Incident Reports</button></li>
               </ul>
             </div>
 
             <div>
-              <div className="text-white font-semibold mb-3">Product & Tools</div>
+              <div className="text-white font-semibold mb-3">Product & Pricing</div>
               <ul className="space-y-2 text-[11px]">
-                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Live AI Studio</button></li>
+                <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Start Free (5 Docs/Mo)</button></li>
                 <li><a href="#soap-demo" className="hover:text-white transition-colors">Interactive SOAP Demo</a></li>
-                <li><a href="/video" target="_blank" className="hover:text-white transition-colors flex items-center gap-1">AI Video Generator <ExternalLink className="w-3 h-3" /></a></li>
-                <li><a href="/openrouter" target="_blank" className="hover:text-white transition-colors flex items-center gap-1">OpenRouter Portal <ExternalLink className="w-3 h-3" /></a></li>
-                <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Pro Upgrade (UPI & Card)</button></li>
+                <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Pro Plan (₹499/mo)</button></li>
+                <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Clinic / Team (₹399/seat)</button></li>
+                <li><a href={DEMO_LINK} target="_blank" rel="noreferrer" className="hover:text-white transition-colors">Book a Demo</a></li>
               </ul>
             </div>
 
             <div>
-              <div className="text-white font-semibold mb-3">Compliance & Legal</div>
+              <div className="text-white font-semibold mb-3">Compliance & Security</div>
               <p className="text-[11px] leading-relaxed mb-3">
-                Pulse Note AI is an assistive productivity tool. All clinical notes, legal contracts, and engineering documents must be reviewed by certified professionals prior to execution.
+                Your notes stay in your account. You can delete them at any time. AI-assisted draft — a licensed professional must review before use.
               </p>
-              <div className="text-[11px]">
-                UPI Settlement: <span className="font-mono text-[#10b981]">wagh.jayesh@oksbi</span>
+              <div className="text-[11px] text-[#c4c7c5]">
+                Contact: <a href="mailto:contact@pulsenoteai.in" className="text-[#4e8cff] hover:underline">contact@pulsenoteai.in</a>
               </div>
             </div>
           </div>
@@ -1359,10 +1642,12 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             <div>
               © {new Date().getFullYear()} Pulse Note AI (pulsenoteai.in). All rights reserved.
             </div>
-            <div className="flex items-center gap-6">
-              <a href="#about" className="hover:text-white transition-colors">Security Architecture</a>
+            <div className="flex flex-wrap items-center gap-6">
               <a href="#privacy" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="mailto:contact@pulsenoteai.in" className="hover:text-white transition-colors">Enterprise Support</a>
+              <a href="#terms" className="hover:text-white transition-colors">Terms of Use</a>
+              <a href="#refund" className="hover:text-white transition-colors">Refund Policy</a>
+              <a href="#about" className="hover:text-white transition-colors">Security</a>
+              <a href="mailto:contact@pulsenoteai.in" className="hover:text-white transition-colors">Contact</a>
             </div>
           </div>
 

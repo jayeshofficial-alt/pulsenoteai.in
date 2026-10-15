@@ -26,7 +26,9 @@ export type AppActiveView =
   | 'admin'
   | 'team'
   | 'partners'
-  | 'pricing';
+  | 'pricing'
+  | 'documents'
+  | 'gallery';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -185,6 +187,32 @@ export default function Sidebar({
               <span>Custom Templates</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => onToggleView('documents')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+              activeView === 'documents'
+                ? 'bg-[#2d2e30] text-white font-medium'
+                : 'text-[#c4c7c5] hover:text-white hover:bg-[#2d2e30]'
+            }`}
+          >
+            <MessageSquare size={14} className="text-[#4e8cff]" />
+            <span>My Documents (/documents)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onToggleView('gallery')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+              activeView === 'gallery'
+                ? 'bg-[#2d2e30] text-white font-medium'
+                : 'text-[#c4c7c5] hover:text-white hover:bg-[#2d2e30]'
+            }`}
+          >
+            <Layers size={14} className="text-amber-400" />
+            <span>Template Gallery (/templates)</span>
+          </button>
 
           <button
             type="button"

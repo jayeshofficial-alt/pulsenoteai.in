@@ -27,6 +27,30 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   return hash === verify;
 }
 
+export interface DocumentVersion {
+  version: number;
+  changedBy: string;
+  changedAt: number;
+  summary: string;
+  sections: Record<string, string>;
+}
+
+export interface StoredDocument {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  title: string;
+  templateType: string;
+  rawInput: string;
+  sections: Record<string, string>;
+  unverifiedTokens: string[];
+  clinicalNotice?: string;
+  dataRetentionNotice?: string;
+  createdAt: number;
+  updatedAt: number;
+  versions: DocumentVersion[];
+}
+
 interface DatabaseSchema {
   adminEmail: string;
   adminPasswordHash: string;
@@ -37,6 +61,7 @@ interface DatabaseSchema {
   activityLogs: UserActivityLog[];
   emails: SystemEmailNotification[];
   settings: AppInterfaceSettings;
+  documents?: StoredDocument[];
 }
 
 const DEFAULT_SETTINGS: AppInterfaceSettings = {
@@ -942,6 +967,192 @@ class Store {
     };
     this.saveDatabase();
     return this.db.settings;
+  }
+
+  // ==========================================
+  // DOCUMENT MANAGEMENT & VERSION HISTORY (Requirement 2 & 3)
+  // ==========================================
+  private getDocsArray(): StoredDocument[] {
+    if (!this.db.documents) {
+      this.db.documents = [];
+    }
+    return this.db.documents;
+  }
+
+  public getUserDocuments(userIdOrEmail: string): StoredDocument[] {
+    const docs = this.getDocsArray();
+    const clean = (userIdOrEmail || '').trim().toLowerCase();
+    return docs.filter(
+      (d) =>
+        d.userId === userIdOrEmail ||
+        (d.userEmail && d.userEmail.toLowerCase() === clean)
+    );
+  }
+
+  public getDocumentById(docId: string): StoredDocument | undefined {
+    return this.getDocsArray().find((d) => d.id === docId);
+  }
+
+  public saveDocument(
+    userId: string,
+    data: {
+      title: string;
+      templateType: string;
+      rawInput: string;
+      sections: Record<string, string>;
+      unverifiedTokens?: string[];
+      clinicalNotice?: string;
+      dataRetentionNotice?: string;
+    },
+    userEmail?: string
+  ): StoredDocument {
+    const docs = this.getDocsArray();
+    const now = Date.now();
+    const id = `doc_${now}_${Math.random().toString(36).substring(2, 7)}`;
+
+    const initialVersion: DocumentVersion = {
+      version: 1,
+      changedBy: userEmail || userId,
+      changedAt: now,
+      summary: 'Initial draft generated',
+      sections: { ...data.sections },
+    };
+
+    const newDoc: StoredDocument = {
+      id,
+      userId,
+      userEmail,
+      title: data.title || `${data.templateType.toUpperCase()} Record`,
+      templateType: data.templateType,
+      rawInput: data.rawInput,
+      sections: { ...data.sections },
+      unverifiedTokens: data.unverifiedTokens || [],
+      clinicalNotice: data.clinicalNotice,
+      dataRetentionNotice: data.dataRetentionNotice,
+      createdAt: now,
+      updatedAt: now,
+      versions: [initialVersion],
+    };
+
+    docs.unshift(newDoc);
+    this.saveDatabase();
+    return newDoc;
+  }
+
+  public updateDocument(
+    userId: string,
+    docId: string,
+    updates: {
+      title?: string;
+      sections?: Record<string, string>;
+      summary?: string;
+      unverifiedTokens?: string[];
+    },
+    userEmail?: string
+  ): StoredDocument {
+    const docs = this.getDocsArray();
+    const doc = docs.find((d) => d.id === docId);
+    if (!doc) {
+      throw new Error('Document not found');
+    }
+
+    const now = Date.now();
+    if (updates.title) {
+      doc.title = updates.title;
+    }
+
+    if (updates.sections) {
+      doc.sections = { ...updates.sections };
+      const nextVersionNum = doc.versions.length + 1;
+      doc.versions.unshift({
+        version: nextVersionNum,
+        changedBy: userEmail || userId,
+        changedAt: now,
+        summary: updates.summary || `Updated section content (v${nextVersionNum})`,
+        sections: { ...doc.sections },
+      });
+    }
+
+    if (updates.unverifiedTokens) {
+      doc.unverifiedTokens = updates.unverifiedTokens;
+    }
+
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+
+  public duplicateDocument(userId: string, docId: string, userEmail?: string): StoredDocument {
+    const orig = this.getDocumentById(docId);
+    if (!orig) {
+      throw new Error('Original document not found');
+    }
+
+    return this.saveDocument(
+      userId,
+      {
+        title: `${orig.title} (Copy)`,
+        templateType: orig.templateType,
+        rawInput: orig.rawInput,
+        sections: { ...orig.sections },
+        unverifiedTokens: orig.unverifiedTokens,
+        clinicalNotice: orig.clinicalNotice,
+        dataRetentionNotice: orig.dataRetentionNotice,
+      },
+      userEmail
+    );
+  }
+
+  public deleteDocument(userId: string, docId: string): boolean {
+    const docs = this.getDocsArray();
+    const idx = docs.findIndex((d) => d.id === docId);
+    if (idx !== -1) {
+      docs.splice(idx, 1);
+      this.saveDatabase();
+      return true;
+    }
+    return false;
+  }
+
+  // Complete Account Deletion (Requirement 3: Delete account button that removes all the user's data)
+  public deleteUserAccountAndData(userIdOrEmail: string): { success: boolean; deletedDocumentsCount: number } {
+    const clean = (userIdOrEmail || '').trim().toLowerCase();
+    
+    // Find user
+    const userIndex = this.db.users.findIndex(
+      (u) => u.id === userIdOrEmail || u.email.toLowerCase() === clean
+    );
+
+    let userId = userIdOrEmail;
+    if (userIndex !== -1) {
+      const u = this.db.users[userIndex];
+      const emailLower = (u.email || '').toLowerCase().trim();
+
+      if (this.isStrictAdminEmail(emailLower) || u.role === 'admin') {
+        throw new Error('Cannot delete super-administrator account.');
+      }
+
+      userId = u.id;
+      this.db.users.splice(userIndex, 1);
+      delete this.db.userPasswords[userId];
+      delete this.db.passwordResetOtps[emailLower];
+    }
+
+    // Delete all user documents
+    const docs = this.getDocsArray();
+    const initialDocCount = docs.length;
+    this.db.documents = docs.filter(
+      (d) => d.userId !== userId && (!d.userEmail || d.userEmail.toLowerCase() !== clean)
+    );
+    const deletedDocumentsCount = initialDocCount - this.db.documents.length;
+
+    // Remove user payments & activity logs
+    this.db.payments = this.db.payments.filter((p) => p.userId !== userId);
+    this.db.activityLogs = this.db.activityLogs.filter((a) => a.userId !== userId);
+
+    this.saveDatabase();
+    console.log(`[Store] Permanently deleted user account ${userIdOrEmail} and ${deletedDocumentsCount} documents.`);
+    return { success: true, deletedDocumentsCount };
   }
 }
 
