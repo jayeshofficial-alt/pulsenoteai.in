@@ -436,6 +436,14 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             </button>
           </div>
         )}
+
+        {/* Clinical / Legal Disclaimer Line */}
+        {!message.isStreaming && message.content && message.role === 'model' && (
+          <div className="mt-2 text-[11px] text-[#9aa0a6] flex items-center gap-1.5 italic border-t border-[#2d2e30]/40 pt-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+            <span>AI-assisted draft. A licensed professional must review before use.</span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -72,24 +72,25 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       });
 
       const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to initiate Razorpay subscription');
+      if (!data.success || !data.subscriptionId || !data.keyId) {
+        const errDesc = data.error || 'Failed to initiate Razorpay subscription';
+        onShowToast?.('error', errDesc);
+        setIsProcessing(false);
+        return;
       }
 
       // Check if Razorpay script loaded
       if (!(window as any).Razorpay) {
-        // Fallback demo/verification flow
-        await verifyLocalPayment({ plan, subscriptionId: data.subscriptionId, token });
+        await verifyLocalPayment({ plan, seats: teamSeats, subscriptionId: data.subscriptionId, token });
         return;
       }
 
+      // Exact options required for Razorpay Subscriptions (NO amount or currency)
       const options = {
         key: data.keyId,
-        amount: data.amount,
-        currency: 'INR',
-        name: 'PulseNote AI',
-        description: `${plan === 'pro' ? 'Pro Monthly Plan' : `Clinic Team Plan (${teamSeats} seats)`}`,
         subscription_id: data.subscriptionId,
+        name: 'PulseNote AI',
+        description: plan === 'pro' ? 'Pro Monthly Plan' : `Clinic Team Plan (${teamSeats} seats)`,
         prefill: {
           email: data.customerEmail || auth.currentUser?.email || '',
         },
@@ -99,17 +100,29 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         handler: async (response: any) => {
           await verifyLocalPayment({
             plan,
+            seats: teamSeats,
             paymentId: response.razorpay_payment_id,
             subscriptionId: response.razorpay_subscription_id,
             signature: response.razorpay_signature,
             token,
           });
         },
+        modal: {
+          ondismiss: () => setIsProcessing(false),
+        },
       };
 
       const rzp = new (window as any).Razorpay(options);
       rzp.on('payment.failed', (resp: any) => {
-        onShowToast?.('error', resp.error?.description || 'Payment was cancelled or failed.');
+        console.error('[Razorpay Payment Failed]', {
+          code: resp.error?.code,
+          description: resp.error?.description,
+          source: resp.error?.source,
+          step: resp.error?.step,
+          reason: resp.error?.reason,
+          metadata: resp.error?.metadata,
+        });
+        onShowToast?.('error', resp.error?.description || 'Payment process failed or was cancelled.');
         setIsProcessing(false);
       });
       rzp.open();

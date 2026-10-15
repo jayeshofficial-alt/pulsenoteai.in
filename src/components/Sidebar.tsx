@@ -16,6 +16,7 @@ import {
   Handshake,
   Layers,
 } from 'lucide-react';
+import UserNavMenu from './UserNavMenu';
 
 export type AppActiveView =
   | 'marketing'
@@ -46,6 +47,8 @@ interface SidebarProps {
   videoGenerationEnabled?: boolean;
   isAdmin?: boolean;
   onOpenTemplates?: () => void;
+  currentUser?: { email?: string | null; name?: string } | null;
+  onLogout?: () => void;
 }
 
 export default function Sidebar({
@@ -64,6 +67,8 @@ export default function Sidebar({
   videoGenerationEnabled = false,
   isAdmin = false,
   onOpenTemplates,
+  currentUser,
+  onLogout,
 }: SidebarProps) {
   return (
     <aside
@@ -326,6 +331,14 @@ export default function Sidebar({
           <Settings size={18} className="shrink-0 text-[#9aa0a6]" />
           {!collapsed && <span>Settings & Profile</span>}
         </button>
+
+        {!collapsed && currentUser && (
+          <UserNavMenu
+            userEmail={currentUser.email}
+            onLogout={onLogout}
+            className="mt-2"
+          />
+        )}
       </div>
     </aside>
   );

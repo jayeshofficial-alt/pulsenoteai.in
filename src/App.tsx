@@ -974,7 +974,7 @@ export function App() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              userId: currentUser?.uid || 'user_guest',
+              userId: (currentUser as any)?.uid || currentUser?.id || 'user_guest',
               userEmail: currentUser?.email || 'guest@pulsenoteai.in',
               title: `${detectedTemplate.toUpperCase()} - ${userPrompt.slice(0, 30)}...`,
               templateType: detectedTemplate,
@@ -1302,6 +1302,8 @@ export function App() {
         videoGenerationEnabled={features.videoGenerationEnabled}
         isAdmin={isSuperAdmin}
         onOpenTemplates={() => setIsTemplateBuilderOpen(true)}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* 2. Main Center Body */}
@@ -1501,12 +1503,12 @@ export function App() {
             onBack={() => setActiveView('chat')}
             onOpenPricing={() => setIsPricingModalOpen(true)}
             onShowToast={addToast}
-            onSignOut={handleSignOut}
+            onSignOut={handleLogout}
           />
         ) : activeView === 'gallery' ? (
           <TemplateGalleryView
             onSelectTemplate={(templateType, rawInput) => {
-              setUserPrompt(rawInput);
+              setInput(rawInput);
               setActiveView('chat');
             }}
             onBack={() => setActiveView('chat')}
