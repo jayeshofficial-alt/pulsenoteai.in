@@ -3,6 +3,7 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
+import Razorpay from 'razorpay';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
 import { store } from './server/store.js';
@@ -1197,6 +1198,26 @@ export let currentFeatureSettings: ServerFeatureSettings = {
   updatedAt: new Date().toISOString(),
 };
 
+// Server-side admin email authorization check helper & middleware (Requirement 9)
+function checkAdminAccess(req: express.Request): boolean {
+  const auth = req.headers.authorization || '';
+  const adminEmail = (req.headers['x-admin-email'] || req.query.adminEmail || req.body?.adminEmail || '') as string;
+  return auth.includes('ADMIN_TOKEN') || store.isStrictAdminEmail(adminEmail);
+}
+
+app.use('/api/admin', (req, res, next) => {
+  if (req.path === '/features' && req.method === 'GET') {
+    return next();
+  }
+  if (!checkAdminAccess(req)) {
+    return res.status(403).json({
+      error: 'FORBIDDEN',
+      message: 'Admin access restricted to jayeshofficial@gmail.com and contact@pulsenoteai.in',
+    });
+  }
+  next();
+});
+
 // Admin Feature Switch endpoints
 app.get('/api/admin/features', (_req, res) => {
   return res.json({
@@ -1621,24 +1642,28 @@ app.post('/api/notes/generate', async (req, res) => {
 
   const user = await verifyServerFirebaseUser(req);
   const isAdmin = isAuthorizedAdmin(user);
+  const userKey = user ? user.uid : (req.headers.authorization || req.ip || 'guest_user');
 
   // Enforce Free user limit: 5 notes per month
-  if (user && !isAdmin) {
-    const acc = getUserState(user.uid);
+  if (!isAdmin) {
+    const acc = getUserState(userKey);
     if (acc.plan === 'free' && acc.notesUsedThisMonth >= 5) {
       return res.status(403).json({
         error: 'NOTE_LIMIT_REACHED',
         message: 'You have used your 5 free notes for this month. Upgrade to Pro for unlimited notes.',
       });
     }
+    acc.notesUsedThisMonth += 1;
   }
 
   const systemInstruction =
-    "You are a documentation formatter. Use ONLY facts present in the input. Never invent vitals, diagnoses, medications, dosages, dates or names. If a section has no information, write 'Not documented'. Do not give medical advice beyond restating the clinician's input.";
+    "You are a structured documentation formatter. Use ONLY facts in the input. Never invent names, values, drugs, doses, dates or numbers. If a section has no information, write 'Not documented'. Output JSON matching the requested schema strictly.";
 
   // Define strict responseSchema per template type
   let responseSchema: any;
-  if (templateType === 'soap') {
+  const normalizedType = String(templateType).toLowerCase().replace(/[-_\s]/g, '');
+
+  if (normalizedType === 'soap') {
     responseSchema = {
       type: 'OBJECT',
       properties: {
@@ -1649,30 +1674,115 @@ app.post('/api/notes/generate', async (req, res) => {
       },
       required: ['subjective', 'objective', 'assessment', 'plan'],
     };
-  } else if (templateType === 'rfc') {
+  } else if (normalizedType === 'rfc') {
     responseSchema = {
       type: 'OBJECT',
       properties: {
+        title: { type: 'STRING' },
         summary: { type: 'STRING' },
         motivation: { type: 'STRING' },
         proposal: { type: 'STRING' },
+        alternatives: { type: 'STRING' },
         risks: { type: 'STRING' },
-        timeline: { type: 'STRING' },
+        rollout: { type: 'STRING' },
+        openQuestions: { type: 'STRING' },
       },
-      required: ['summary', 'motivation', 'proposal', 'risks', 'timeline'],
+      required: ['title', 'summary', 'motivation', 'proposal', 'alternatives', 'risks', 'rollout', 'openQuestions'],
     };
-  } else if (templateType === 'memo') {
+  } else if (normalizedType === 'memo') {
     responseSchema = {
       type: 'OBJECT',
       properties: {
-        context: { type: 'STRING' },
-        decision: { type: 'STRING' },
-        rationale: { type: 'STRING' },
+        to: { type: 'STRING' },
+        from: { type: 'STRING' },
+        date: { type: 'STRING' },
+        subject: { type: 'STRING' },
+        purpose: { type: 'STRING' },
+        background: { type: 'STRING' },
+        recommendation: { type: 'STRING' },
+        nextSteps: { type: 'STRING' },
+      },
+      required: ['to', 'from', 'date', 'subject', 'purpose', 'background', 'recommendation', 'nextSteps'],
+    };
+  } else if (normalizedType === 'dischargesummary') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        patientDemographics: { type: 'STRING' },
+        admissionDate: { type: 'STRING' },
+        dischargeDate: { type: 'STRING' },
+        admissionDiagnosis: { type: 'STRING' },
+        dischargeDiagnosis: { type: 'STRING' },
+        hospitalCourse: { type: 'STRING' },
+        dischargeMedications: { type: 'STRING' },
+        followUpInstructions: { type: 'STRING' },
+      },
+      required: ['patientDemographics', 'admissionDate', 'dischargeDate', 'admissionDiagnosis', 'dischargeDiagnosis', 'hospitalCourse', 'dischargeMedications', 'followUpInstructions'],
+    };
+  } else if (normalizedType === 'referralletter') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        referringProvider: { type: 'STRING' },
+        receivingSpecialist: { type: 'STRING' },
+        patientInformation: { type: 'STRING' },
+        reasonForReferral: { type: 'STRING' },
+        clinicalSummary: { type: 'STRING' },
+        currentMedications: { type: 'STRING' },
+        requestedAction: { type: 'STRING' },
+      },
+      required: ['referringProvider', 'receivingSpecialist', 'patientInformation', 'reasonForReferral', 'clinicalSummary', 'currentMedications', 'requestedAction'],
+    };
+  } else if (normalizedType === 'progressnote') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        intervalHistory: { type: 'STRING' },
+        physicalExamination: { type: 'STRING' },
+        currentMedications: { type: 'STRING' },
+        clinicalImpression: { type: 'STRING' },
+        continuedPlan: { type: 'STRING' },
+      },
+      required: ['intervalHistory', 'physicalExamination', 'currentMedications', 'clinicalImpression', 'continuedPlan'],
+    };
+  } else if (normalizedType === 'incidentreport') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        dateTime: { type: 'STRING' },
+        locationAndPersonnel: { type: 'STRING' },
+        descriptionOfIncident: { type: 'STRING' },
+        immediateActionsTaken: { type: 'STRING' },
+        rootCauseAnalysis: { type: 'STRING' },
+        correctiveActions: { type: 'STRING' },
+      },
+      required: ['dateTime', 'locationAndPersonnel', 'descriptionOfIncident', 'immediateActionsTaken', 'rootCauseAnalysis', 'correctiveActions'],
+    };
+  } else if (normalizedType === 'meetingminutes') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        titleAndDate: { type: 'STRING' },
+        attendees: { type: 'STRING' },
+        agendaItems: { type: 'STRING' },
+        discussionAndDecisions: { type: 'STRING' },
         actionItems: { type: 'STRING' },
       },
-      required: ['context', 'decision', 'rationale', 'actionItems'],
+      required: ['titleAndDate', 'attendees', 'agendaItems', 'discussionAndDecisions', 'actionItems'],
     };
-  } else if (templateType === 'inspection') {
+  } else if (normalizedType === 'sop') {
+    responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        titleAndPurpose: { type: 'STRING' },
+        scope: { type: 'STRING' },
+        responsibilities: { type: 'STRING' },
+        procedure: { type: 'STRING' },
+        qualityControls: { type: 'STRING' },
+      },
+      required: ['titleAndPurpose', 'scope', 'responsibilities', 'procedure', 'qualityControls'],
+    };
+  } else if (normalizedType === 'inspection') {
     responseSchema = {
       type: 'OBJECT',
       properties: {
@@ -1710,7 +1820,7 @@ app.post('/api/notes/generate', async (req, res) => {
           config: {
             systemInstruction,
             temperature: 0,
-            topP: 1,
+            topP: 0.1,
             responseMimeType: 'application/json',
             responseSchema,
           },
@@ -1725,7 +1835,7 @@ app.post('/api/notes/generate', async (req, res) => {
     if (!parsed && process.env.OPENROUTER_API_KEY) {
       // Build JSON schema prompt instruction
       const schemaKeys = responseSchema?.required || ['subjective', 'objective', 'assessment', 'plan'];
-      const systemWithSchema = `${systemInstruction} Output ONLY a valid JSON object with the following required string keys: ${JSON.stringify(schemaKeys)}. Output raw JSON only.`;
+      const systemWithSchema = `${systemInstruction} Output ONLY a valid JSON object with the following required string keys in exact order: ${JSON.stringify(schemaKeys)}. Never return free text or markdown outside the JSON.`;
 
       const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -1742,6 +1852,7 @@ app.post('/api/notes/generate', async (req, res) => {
             { role: 'user', content: rawInput.trim() },
           ],
           temperature: 0,
+          top_p: 0.1,
           response_format: { type: 'json_object' },
         }),
       });
@@ -1768,9 +1879,60 @@ app.post('/api/notes/generate', async (req, res) => {
     // Ensure all required keys exist, else fill with 'Not documented'
     const requiredKeys = responseSchema?.required || Object.keys(responseSchema?.properties || {});
     for (const key of requiredKeys) {
-      if (!parsed[key] || typeof parsed[key] !== 'string') {
-        parsed[key] = parsed[key] ? String(parsed[key]) : 'Not documented';
+      if (!parsed[key] || typeof parsed[key] !== 'string' || !parsed[key].trim()) {
+        parsed[key] = parsed[key] && typeof parsed[key] === 'string' && parsed[key].trim() ? parsed[key].trim() : 'Not documented';
       }
+    }
+
+    // Fact-check post verification:
+    // Every number, drug name and date in the output must appear in the input.
+    // If not, flag it with "Check this — not found in your input".
+    const lowerInput = rawInput.toLowerCase();
+    const verificationWarnings: Array<{ section: string; token: string; reason: string }> = [];
+    const highlightedSections: Record<string, string> = {};
+
+    const knownDrugSuffixes = /(statin|sartan|pril|olol|ipine|cillin|mycin|oxacin|azole|prazole|tidine|terol|mab|cept|sone|olone|formin|gliptin|gliflozin|glitazone|dopa|pam|lam|pine|done|pramine|triptan|setron|afil|xaban|parin|caine|aspirin|paracetamol|ibuprofen|tylenol|advil|insulin|metformin|gabapentin|lisinopril|atorvastatin|amlodipine|metoprolol|losartan|albuterol|omeprazole|levothyroxine)/i;
+
+    for (const key of requiredKeys) {
+      const sectionText = String(parsed[key] || '');
+      if (sectionText === 'Not documented') {
+        highlightedSections[key] = sectionText;
+        continue;
+      }
+
+      // Check numbers (e.g., 75mg, 150/95, 92, 45, 1000mg, 10%)
+      const numberMatches = sectionText.match(/\b\d+(?:[\.,/]\d+)?(?:\s*(?:mg|mcg|g|ml|mmhg|bpm|lbs|kg|%|f|c|weeks?|days?|months?|years?))?\b/gi) || [];
+      // Check date patterns
+      const dateMatches = sectionText.match(/\b(?:\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{0,4})\b/gi) || [];
+      // Check drug matches
+      const words = sectionText.split(/[\s,;:()\.]+/);
+      const drugMatches = words.filter(w => w.length >= 4 && knownDrugSuffixes.test(w));
+
+      const tokensToCheck = [...new Set([...numberMatches, ...dateMatches, ...drugMatches])];
+      let sectionHtml = sectionText;
+
+      for (const token of tokensToCheck) {
+        const cleanToken = token.trim().toLowerCase();
+        if (!cleanToken) continue;
+        // Check if cleanToken or its base numbers exist in rawInput
+        const numbersOnly = cleanToken.replace(/[^\d]/g, '');
+        const existsInInput = lowerInput.includes(cleanToken) || (numbersOnly.length > 0 && lowerInput.includes(numbersOnly));
+
+        if (!existsInInput) {
+          verificationWarnings.push({
+            section: key,
+            token,
+            reason: 'Check this — not found in your input',
+          });
+          // Highlight in HTML
+          const regex = new RegExp(`\\b(${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'gi');
+          sectionHtml = sectionHtml.replace(
+            regex,
+            '<mark class="pn-unverified-fact" title="Check this — not found in your input" style="background-color: #fef08a; color: #854d0e; padding: 2px 4px; border-radius: 4px; font-weight: 600;">$1 <span style="font-size: 10px; background-color: #fde047; padding: 1px 4px; border-radius: 3px;">⚠️ Check this — not found in your input</span></mark>'
+          );
+        }
+      }
+      highlightedSections[key] = sectionHtml;
     }
 
     // Increment notes count for user
@@ -1780,12 +1942,18 @@ app.post('/api/notes/generate', async (req, res) => {
       console.log(`[Notes] User ${user.uid} generated note #${acc.notesUsedThisMonth}`);
     }
 
+    const isClinical = ['soap', 'dischargesummary', 'referralletter', 'progressnote'].includes(normalizedType);
+
     return res.json({
       success: true,
       templateType,
       data: parsed,
+      highlightedSections,
+      verificationWarnings,
       modelUsed,
-      complianceNotice: 'Built on Google Cloud. Do not enter patient-identifying information.',
+      clinicalNotice: isClinical ? 'AI-assisted draft. A licensed professional must review before use.' : undefined,
+      retentionNotice: 'Your notes stay in your account. You can delete them at any time.',
+      complianceNotice: 'Your notes stay in your account. You can delete them at any time.',
     });
   } catch (err: any) {
     console.error('[DeterministicEngine] Error:', err);
@@ -1796,128 +1964,371 @@ app.post('/api/notes/generate', async (req, res) => {
   }
 });
 
+// Regenerate single section
+app.post('/api/notes/regenerate-section', async (req, res) => {
+  const { input: rawInput, templateType = 'soap', sectionKey } = req.body;
+  if (!rawInput || !sectionKey) {
+    return res.status(400).json({ error: 'input and sectionKey are required.' });
+  }
+
+  const systemInstruction = `You are a structured documentation formatter. For the section '${sectionKey}', use ONLY facts present in the input. Never invent names, values, drugs, doses, dates or numbers. If there is no information in the input for this section, output 'Not documented'. Output only the updated section content text, no extra commentary or markdown header.`;
+
+  try {
+    let newContent = '';
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const response = await googleAi.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: rawInput.trim(),
+          config: {
+            systemInstruction,
+            temperature: 0,
+            topP: 0.1,
+          },
+        });
+        newContent = (response.text || '').trim();
+      } catch (e: any) {
+        console.warn('Gemini regenerate-section failed, trying OpenRouter fallback:', e?.message);
+      }
+    }
+
+    if (!newContent && process.env.OPENROUTER_API_KEY) {
+      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': process.env.APP_URL || 'https://pulsenoteai.in',
+          'X-Title': 'PulseNote AI',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: rawInput.trim() },
+          ],
+          temperature: 0,
+          top_p: 0.1,
+        }),
+      });
+
+      if (orRes.ok) {
+        const orData = await orRes.json();
+        newContent = (orData.choices?.[0]?.message?.content || '').trim();
+      }
+    }
+
+    if (!newContent) {
+      newContent = 'Not documented';
+    }
+
+    return res.json({
+      success: true,
+      sectionKey,
+      content: newContent,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'FAILED_REGENERATE', message: err.message });
+  }
+});
+
+// ==========================================
+// MY DOCUMENTS & VERSION HISTORY API (Requirement 2 & 3)
+// ==========================================
+
+// GET /api/documents - List user saved documents
+app.get('/api/documents', (req, res) => {
+  const userId = (req.query.userId || req.headers['x-user-id'] || 'user_guest') as string;
+  const userEmail = (req.query.userEmail || req.headers['x-user-email'] || '') as string;
+  const docs = store.getUserDocuments(userEmail || userId);
+  return res.json({ success: true, documents: docs });
+});
+
+// GET /api/documents/:id - Get single document with full version history
+app.get('/api/documents/:id', (req, res) => {
+  const doc = store.getDocumentById(req.params.id);
+  if (!doc) {
+    return res.status(404).json({ error: 'DOCUMENT_NOT_FOUND', message: 'Document not found' });
+  }
+  return res.json({ success: true, document: doc });
+});
+
+// POST /api/documents - Save new document
+app.post('/api/documents', (req, res) => {
+  const { userId = 'user_guest', userEmail, title, templateType, rawInput, sections, unverifiedTokens, clinicalNotice, dataRetentionNotice } = req.body;
+  if (!templateType || !sections) {
+    return res.status(400).json({ error: 'INVALID_DATA', message: 'templateType and sections are required' });
+  }
+
+  const doc = store.saveDocument(
+    userId,
+    {
+      title: title || `${templateType.toUpperCase()} Record`,
+      templateType,
+      rawInput: rawInput || '',
+      sections,
+      unverifiedTokens,
+      clinicalNotice,
+      dataRetentionNotice,
+    },
+    userEmail
+  );
+
+  return res.json({ success: true, document: doc });
+});
+
+// PUT /api/documents/:id - Update document sections or title, appending to version history
+app.put('/api/documents/:id', (req, res) => {
+  const { userId = 'user_guest', userEmail, title, sections, summary, unverifiedTokens } = req.body;
+  try {
+    const updated = store.updateDocument(
+      userId,
+      req.params.id,
+      { title, sections, summary, unverifiedTokens },
+      userEmail
+    );
+    return res.json({ success: true, document: updated });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'UPDATE_FAILED', message: err?.message || 'Failed to update document' });
+  }
+});
+
+// POST /api/documents/:id/duplicate - Duplicate document
+app.post('/api/documents/:id/duplicate', (req, res) => {
+  const { userId = 'user_guest', userEmail } = req.body;
+  try {
+    const duplicated = store.duplicateDocument(userId, req.params.id, userEmail);
+    return res.json({ success: true, document: duplicated });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'DUPLICATION_FAILED', message: err?.message || 'Failed to duplicate document' });
+  }
+});
+
+// DELETE /api/documents/:id - Delete document
+app.delete('/api/documents/:id', (req, res) => {
+  const { userId = 'user_guest' } = req.body || {};
+  const ok = store.deleteDocument(userId, req.params.id);
+  if (ok) {
+    return res.json({ success: true, message: 'Document deleted successfully' });
+  }
+  return res.status(404).json({ error: 'DOCUMENT_NOT_FOUND', message: 'Document not found or already deleted' });
+});
+
+// POST /api/user/delete-account - Permanently delete user account and all saved data (Requirement 3)
+app.post(['/api/user/delete-account', '/api/user/account/delete'], (req, res) => {
+  const { userId, email } = req.body || {};
+  const identifier = email || userId || (req.headers['x-user-email'] as string) || (req.headers['x-user-id'] as string);
+
+  if (!identifier) {
+    return res.status(400).json({ error: 'MISSING_IDENTIFIER', message: 'User ID or Email is required to delete account.' });
+  }
+
+  try {
+    const result = store.deleteUserAccountAndData(identifier);
+    return res.json({
+      success: true,
+      message: 'Your PulseNote AI account, saved documents, and all data have been permanently deleted.',
+      deletedDocumentsCount: result.deletedDocumentsCount,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'DELETION_FAILED', message: err?.message || 'Failed to delete user account.' });
+  }
+});
+
 // ==========================================
 // RAZORPAY PAYMENTS & WEBHOOK (Section 4)
 // Subscriptions (Pro ₹499/mo, Team ₹399/seat/mo)
 // Credit packs (100 credits ₹299, 500 credits ₹1199, Template Setup ₹2999)
 // ==========================================
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_PulseNoteAI';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'rzp_secret_PulseNoteAI_Test';
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_To6Gn2xSO5KDui';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'He2gokLsxHVTPl1eqEv0bfPu';
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'pulse_webhook_secret_123';
 
-app.post('/api/razorpay/create-subscription', async (req, res) => {
-  const { plan = 'pro', seats = 3 } = req.body;
-  const user = await verifyServerFirebaseUser(req);
-  if (!user) {
-    return res.status(401).json({ error: 'Authentication required to subscribe.' });
-  }
-
-  // Calculate amount in INR
-  // Pro: ₹499/mo
-  // Team: ₹399/seat/mo (min 3 seats)
-  let amountINR = 499;
-  if (plan === 'team') {
-    const seatCount = Math.max(3, Number(seats) || 3);
-    amountINR = seatCount * 399;
-  }
-
-  const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  return res.json({
-    success: true,
-    subscriptionId,
-    keyId: RAZORPAY_KEY_ID,
-    plan,
-    amount: amountINR * 100, // paise
-    currency: 'INR',
-    customerEmail: user.email,
-  });
+const razorpayClient = new Razorpay({
+  key_id: RAZORPAY_KEY_ID,
+  key_secret: RAZORPAY_KEY_SECRET,
 });
 
-app.post('/api/razorpay/create-order', async (req, res) => {
-  const { packId = 'credits_100' } = req.body;
-  const user = await verifyServerFirebaseUser(req);
-  if (!user) {
-    return res.status(401).json({ error: 'Authentication required.' });
-  }
+// STEP 1: BACKEND - Create Order (POST /api/create-order)
+app.post(['/api/create-order', '/api/razorpay/create-order'], async (req, res) => {
+  try {
+    const { amount, currency = 'INR', receipt, packId, plan, seats = 3 } = req.body || {};
 
-  let amountINR = 299;
-  let credits = 100;
+    let amountInPaise = Number(amount);
 
-  if (packId === 'credits_500') {
-    amountINR = 1199;
-    credits = 500;
-  } else if (packId === 'template_setup') {
-    amountINR = 2999;
-    credits = 0;
-  }
-
-  const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  return res.json({
-    success: true,
-    orderId,
-    keyId: RAZORPAY_KEY_ID,
-    packId,
-    credits,
-    amount: amountINR * 100, // in paise
-    currency: 'INR',
-    customerEmail: user.email,
-  });
-});
-
-app.post('/api/razorpay/verify-payment', async (req, res) => {
-  const { paymentId, orderId, subscriptionId, signature, plan, packId, seats = 3 } = req.body;
-  const user = await verifyServerFirebaseUser(req);
-  if (!user) {
-    return res.status(401).json({ error: 'Authentication required.' });
-  }
-
-  console.log('[Razorpay] Verifying payment for user', user.email, { paymentId, orderId, subscriptionId, plan, packId });
-
-  // Update user state authoritatively
-  const acc = getUserState(user.uid);
-
-  if (plan === 'pro') {
-    acc.plan = 'pro';
-    acc.credits += 50; // 50 credits/month
-    console.log(`[Razorpay] Upgraded user ${user.uid} to Pro plan. Granted 50 credits.`);
-  } else if (plan === 'team') {
-    acc.plan = 'team';
-    acc.credits += 150; // Team pool
-    console.log(`[Razorpay] Upgraded user ${user.uid} to Team plan.`);
-  } else if (packId === 'credits_100') {
-    acc.credits += 100;
-    console.log(`[Razorpay] Added 100 credits to user ${user.uid}. Total: ${acc.credits}`);
-  } else if (packId === 'credits_500') {
-    acc.credits += 500;
-    console.log(`[Razorpay] Added 500 credits to user ${user.uid}. Total: ${acc.credits}`);
-  }
-
-  // Check if user was referred by another user (award 50 credits to referrer)
-  if (acc.referralCode) {
-    // If referrer exists in store, reward with 50 credits
-    for (const [rUid, rAcc] of Object.entries(userAccountState)) {
-      if (rAcc.referralCode === (req.body.referredBy || '')) {
-        rAcc.credits += 50;
-        console.log(`[Referral] Awarded 50 credits to referrer ${rUid}`);
-        break;
+    // Support packId/plan presets if amount is not passed explicitly
+    if (!amountInPaise || isNaN(amountInPaise)) {
+      if (plan === 'pro') {
+        amountInPaise = 49900; // ₹499
+      } else if (plan === 'team') {
+        const seatCount = Math.max(3, Number(seats) || 3);
+        amountInPaise = seatCount * 39900; // ₹399/seat
+      } else if (packId === 'credits_100') {
+        amountInPaise = 29900; // ₹299
+      } else if (packId === 'credits_500') {
+        amountInPaise = 119900; // ₹1199
+      } else if (packId === 'template_setup') {
+        amountInPaise = 299900; // ₹2999
+      } else {
+        amountInPaise = 49900; // Default ₹499
       }
     }
-  }
 
-  return res.json({
-    success: true,
-    plan: acc.plan,
-    credits: acc.credits,
-    notesUsedThisMonth: acc.notesUsedThisMonth,
-  });
+    // Minimum amount validation: 100 paise (₹1.00)
+    if (!amountInPaise || amountInPaise < 100) {
+      return res.status(400).json({
+        error: 'INVALID_AMOUNT',
+        message: 'Amount must be at least 100 paise (₹1.00).',
+      });
+    }
+
+    const options = {
+      amount: Math.round(amountInPaise),
+      currency: currency || 'INR',
+      receipt: receipt || `rcpt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    };
+
+    const order = await razorpayClient.orders.create(options);
+
+    return res.json({
+      success: true,
+      order_id: order.id,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      receipt: order.receipt,
+      key_id: RAZORPAY_KEY_ID,
+      keyId: RAZORPAY_KEY_ID,
+      packId,
+      plan,
+    });
+  } catch (err: any) {
+    console.error('[Razorpay] Create order failed:', err);
+    return res.status(500).json({
+      error: 'RAZORPAY_ORDER_ERROR',
+      message: err.message || 'Failed to create Razorpay order.',
+    });
+  }
 });
 
-// Razorpay Webhook endpoint (Section 4)
+// Helper route for Razorpay subscription initiation
+app.post('/api/razorpay/create-subscription', async (req, res) => {
+  try {
+    const { plan = 'pro', seats = 3 } = req.body || {};
+    let amountINR = 499;
+    if (plan === 'team') {
+      amountINR = Math.max(3, Number(seats) || 3) * 399;
+    }
+
+    const amountInPaise = amountINR * 100;
+    const order = await razorpayClient.orders.create({
+      amount: amountInPaise,
+      currency: 'INR',
+      receipt: `sub_rcpt_${Date.now()}`,
+    });
+
+    return res.json({
+      success: true,
+      subscriptionId: order.id,
+      orderId: order.id,
+      order_id: order.id,
+      keyId: RAZORPAY_KEY_ID,
+      key_id: RAZORPAY_KEY_ID,
+      plan,
+      amount: order.amount,
+      currency: 'INR',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'RAZORPAY_SUBSCRIPTION_ERROR', message: err.message });
+  }
+});
+
+// STEP 3: BACKEND - Verify Signature (POST /api/verify-payment)
+app.post(['/api/verify-payment', '/api/razorpay/verify-payment'], async (req, res) => {
+  try {
+    const {
+      razorpay_payment_id,
+      razorpay_order_id,
+      razorpay_signature,
+      paymentId,
+      orderId,
+      signature,
+      plan,
+      packId,
+      userId,
+    } = req.body || {};
+
+    const pId = razorpay_payment_id || paymentId;
+    const oId = razorpay_order_id || orderId;
+    const sig = razorpay_signature || signature;
+
+    // Validate required fields
+    if (!pId || !oId || !sig) {
+      return res.status(400).json({
+        error: 'MISSING_FIELDS',
+        message: 'Missing required parameters: razorpay_payment_id, razorpay_order_id, and razorpay_signature are required.',
+      });
+    }
+
+    // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)
+    const generatedSignature = crypto
+      .createHmac('sha256', RAZORPAY_KEY_SECRET)
+      .update(`${oId}|${pId}`)
+      .digest('hex');
+
+    if (generatedSignature !== sig) {
+      console.error('[Razorpay] Signature mismatch:', { generatedSignature, sig, oId, pId });
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_SIGNATURE',
+        message: 'Payment verification failed: Signature mismatch.',
+      });
+    }
+
+    console.log(`[Razorpay] Signature Verified Successfully for Order: ${oId}, Payment: ${pId}`);
+
+    // Update user state if user is logged in
+    const user = await verifyServerFirebaseUser(req);
+    const targetUid = user?.uid || userId;
+
+    if (targetUid) {
+      const acc = getUserState(targetUid);
+      if (plan === 'pro') {
+        acc.plan = 'pro';
+        acc.credits += 50;
+      } else if (plan === 'team') {
+        acc.plan = 'team';
+        acc.credits += 150;
+      } else if (packId === 'credits_100') {
+        acc.credits += 100;
+      } else if (packId === 'credits_500') {
+        acc.credits += 500;
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'Payment verified successfully.',
+      payment_id: pId,
+      order_id: oId,
+      razorpay_payment_id: pId,
+      razorpay_order_id: oId,
+    });
+  } catch (err: any) {
+    console.error('[Razorpay] Verification error:', err);
+    return res.status(500).json({
+      error: 'VERIFICATION_ERROR',
+      message: err.message || 'Payment verification failed.',
+    });
+  }
+});
+
+// Razorpay Webhook endpoint (Section 4 & 5)
 app.post(['/razorpayWebhook', '/api/razorpay/webhook'], (req, res) => {
   const signature = req.headers['x-razorpay-signature'] as string;
   const payload = JSON.stringify(req.body);
 
-  if (signature && RAZORPAY_WEBHOOK_SECRET) {
+  if (RAZORPAY_WEBHOOK_SECRET && signature) {
     try {
       const expectedSignature = crypto
         .createHmac('sha256', RAZORPAY_WEBHOOK_SECRET)
@@ -1925,25 +2336,63 @@ app.post(['/razorpayWebhook', '/api/razorpay/webhook'], (req, res) => {
         .digest('hex');
 
       if (signature !== expectedSignature) {
-        console.warn('[RazorpayWebhook] Signature mismatch warning');
+        console.warn('[RazorpayWebhook] Signature mismatch verification warning');
       }
     } catch (sigErr) {
-      console.warn('[RazorpayWebhook] Signature check notice:', sigErr);
+      console.warn('[RazorpayWebhook] Signature check error:', sigErr);
     }
   }
 
   const event = req.body?.event;
   console.log('[RazorpayWebhook] Received event:', event);
 
+  const subEntity = req.body?.payload?.subscription?.entity;
+  const paymentEntity = req.body?.payload?.payment?.entity;
+  const email = (subEntity?.customer_email || paymentEntity?.email || subEntity?.notes?.email || '').toLowerCase();
+  const planType = (subEntity?.notes?.plan || (subEntity?.plan_id?.includes('team') ? 'team' : 'pro')).toLowerCase();
+
   if (event === 'subscription.activated' || event === 'subscription.charged') {
-    const email = req.body?.payload?.subscription?.entity?.customer_email;
-    console.log(`[RazorpayWebhook] Subscription active for ${email}`);
-  } else if (event === 'payment.captured') {
-    const email = req.body?.payload?.payment?.entity?.email;
-    console.log(`[RazorpayWebhook] Payment captured for ${email}`);
+    if (email) {
+      let matched = false;
+      for (const [uid, acc] of Object.entries(userAccountState)) {
+        if (acc.email?.toLowerCase() === email) {
+          acc.plan = planType === 'team' ? 'team' : 'pro';
+          acc.subscriptionStatus = 'active';
+          acc.nextBillingDate = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+          matched = true;
+          console.log(`[RazorpayWebhook] Updated ${email} (${uid}) to ${acc.plan}`);
+          break;
+        }
+      }
+      if (!matched) {
+        // If user document not yet indexed in memory, store by email
+        userAccountState[`email_${email}`] = {
+          email,
+          plan: planType === 'team' ? 'team' : 'pro',
+          credits: 100,
+          notesUsedThisMonth: 0,
+          createdAt: new Date().toISOString(),
+          subscriptionStatus: 'active',
+          nextBillingDate: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        };
+      }
+    }
+  } else if (event === 'subscription.cancelled') {
+    if (email) {
+      for (const acc of Object.values(userAccountState)) {
+        if (acc.email?.toLowerCase() === email) {
+          acc.plan = 'free';
+          acc.subscriptionStatus = 'cancelled';
+          console.log(`[RazorpayWebhook] Downgraded ${email} to free on cancellation.`);
+          break;
+        }
+      }
+    }
+  } else if (event === 'payment.failed') {
+    console.warn(`[RazorpayWebhook] Payment failed for ${email}`);
   }
 
-  return res.json({ status: 'ok' });
+  return res.json({ status: 'ok', eventReceived: event });
 });
 
 
@@ -4303,13 +4752,6 @@ app.post('/api/cron/check-expirations', (_req, res) => {
 // ==========================================
 // 5. COMPREHENSIVE SUPER ADMIN MODULE
 // ==========================================
-
-// Middleware check or helper for Admin
-function checkAdminAccess(req: express.Request): boolean {
-  const auth = req.headers.authorization || '';
-  const adminEmail = (req.headers['x-admin-email'] || req.query.adminEmail || '') as string;
-  return auth.includes('ADMIN_TOKEN') || store.isStrictAdminEmail(adminEmail);
-}
 
 // User Directory: Name, Email, Mobile, Password management, Privacy Policy consent status with timestamp
 app.get('/api/admin/users', (req, res) => {
