@@ -1252,7 +1252,18 @@ app.post('/api/admin/features', async (req, res) => {
 // In-memory credit and note counter store for server-enforced transactions
 const userAccountState: Record<
   string,
-  { plan: 'free' | 'pro' | 'team'; notesUsedThisMonth: number; credits: number; teamId?: string; referralCode?: string }
+  {
+    plan: 'free' | 'pro' | 'team';
+    notesUsedThisMonth: number;
+    credits: number;
+    teamId?: string;
+    teamSeats?: number;
+    referralCode?: string;
+    email?: string;
+    subscriptionStatus?: string;
+    nextBillingDate?: string;
+    createdAt?: string;
+  }
 > = {};
 
 function getUserState(uid: string) {
@@ -2135,6 +2146,17 @@ app.post(['/api/user/delete-account', '/api/user/account/delete'], (req, res) =>
   }
 });
 
+// POST /api/auth/logout - Invalidate user session & cookies
+app.post(['/api/auth/logout', '/api/logout'], (req, res) => {
+  res.clearCookie('session');
+  res.clearCookie('auth_token');
+  res.clearCookie('pulsenote_auth_token');
+  return res.json({
+    success: true,
+    message: 'Logged out successfully',
+  });
+});
+
 // ==========================================
 // RAZORPAY PAYMENTS & WEBHOOK (Section 4)
 // Subscriptions (Pro ₹499/mo, Team ₹399/seat/mo)
@@ -2211,73 +2233,152 @@ app.post(['/api/create-order', '/api/razorpay/create-order'], async (req, res) =
   }
 });
 
-// Helper route for Razorpay subscription initiation
+// Server /api/razorpay/create-subscription
 app.post('/api/razorpay/create-subscription', async (req, res) => {
   try {
-    const { plan = 'pro', seats = 3 } = req.body || {};
-    let amountINR = 499;
-    if (plan === 'team') {
-      amountINR = Math.max(3, Number(seats) || 3) * 399;
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    const planPro = process.env.RAZORPAY_PLAN_PRO;
+    const planTeam = process.env.RAZORPAY_PLAN_TEAM;
+
+    if (!keyId) {
+      return res.status(500).json({ success: false, error: 'Payment configuration missing: RAZORPAY_KEY_ID' });
+    }
+    if (!keySecret) {
+      return res.status(500).json({ success: false, error: 'Payment configuration missing: RAZORPAY_KEY_SECRET' });
     }
 
-    const amountInPaise = amountINR * 100;
-    const order = await razorpayClient.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
-      receipt: `sub_rcpt_${Date.now()}`,
-    });
+    const { plan = 'pro', seats = 3 } = req.body || {};
+    const planId = plan === 'team' ? planTeam : planPro;
 
-    return res.json({
-      success: true,
-      subscriptionId: order.id,
-      orderId: order.id,
-      order_id: order.id,
-      keyId: RAZORPAY_KEY_ID,
-      key_id: RAZORPAY_KEY_ID,
-      plan,
-      amount: order.amount,
-      currency: 'INR',
-    });
+    if (!planId) {
+      const missingName = plan === 'team' ? 'RAZORPAY_PLAN_TEAM' : 'RAZORPAY_PLAN_PRO';
+      return res.status(500).json({ success: false, error: `Payment configuration missing: ${missingName}` });
+    }
+
+    const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+
+    // Validate that the plan ID exists
+    let validPlanId = planId;
+    try {
+      await client.plans.fetch(planId);
+    } catch (planErr: any) {
+      console.warn(`[Razorpay] Plan fetch failed for ${planId}:`, planErr?.error?.description || planErr?.message);
+      // Attempt to auto-create plan in test mode if fetch fails
+      try {
+        const createdPlan = await client.plans.create({
+          period: 'monthly',
+          interval: 1,
+          item: {
+            name: plan === 'team' ? 'PulseNote AI Clinic Team Plan' : 'PulseNote AI Pro Plan',
+            amount: plan === 'team' ? 39900 : 49900,
+            currency: 'INR',
+            description: plan === 'team' ? '₹399 per seat monthly' : '₹499 monthly subscription',
+          },
+        });
+        validPlanId = createdPlan.id;
+      } catch (autoCreateErr: any) {
+        console.error('[Razorpay] Auto-create plan also failed:', autoCreateErr?.error?.description || autoCreateErr?.message);
+        return res.status(500).json({
+          success: false,
+          error: 'Plan not found in this Razorpay mode (test vs live). Check plan IDs.',
+        });
+      }
+    }
+
+    const user = await verifyServerFirebaseUser(req);
+    const uid = user?.uid || req.body?.userId || 'guest';
+    const seatCount = plan === 'team' ? Math.max(3, Number(seats) || 3) : 1;
+
+    try {
+      const sub = await client.subscriptions.create({
+        plan_id: validPlanId,
+        total_count: 120,
+        quantity: seatCount,
+        customer_notify: 1,
+        notes: {
+          uid,
+          plan,
+          seats: seatCount,
+        },
+      });
+
+      return res.json({
+        success: true,
+        subscriptionId: sub.id,
+        keyId,
+      });
+    } catch (subErr: any) {
+      const desc = subErr?.error?.description || subErr?.message || 'Razorpay subscription creation failed.';
+      console.error('[Razorpay] Subscription creation failed server-side:', desc);
+      return res.status(500).json({
+        success: false,
+        error: desc,
+      });
+    }
   } catch (err: any) {
-    return res.status(500).json({ error: 'RAZORPAY_SUBSCRIPTION_ERROR', message: err.message });
+    console.error('[Razorpay] create-subscription unhandled error:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Failed to create subscription.',
+    });
   }
 });
 
-// STEP 3: BACKEND - Verify Signature (POST /api/verify-payment)
-app.post(['/api/verify-payment', '/api/razorpay/verify-payment'], async (req, res) => {
+// Payment verification (/api/razorpay/verify-subscription and /api/verify-payment)
+app.post(['/api/verify-payment', '/api/razorpay/verify-payment', '/api/razorpay/verify-subscription'], async (req, res) => {
   try {
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'He2gokLsxHVTPl1eqEv0bfPu';
+
     const {
       razorpay_payment_id,
       razorpay_order_id,
+      razorpay_subscription_id,
       razorpay_signature,
       paymentId,
       orderId,
+      subscriptionId,
       signature,
       plan,
       packId,
       userId,
+      seats,
     } = req.body || {};
 
     const pId = razorpay_payment_id || paymentId;
-    const oId = razorpay_order_id || orderId;
+    const subIdOrOrderId = razorpay_subscription_id || subscriptionId || razorpay_order_id || orderId;
     const sig = razorpay_signature || signature;
 
-    // Validate required fields
-    if (!pId || !oId || !sig) {
+    if (!pId || !subIdOrOrderId || !sig) {
       return res.status(400).json({
+        success: false,
         error: 'MISSING_FIELDS',
-        message: 'Missing required parameters: razorpay_payment_id, razorpay_order_id, and razorpay_signature are required.',
+        message: 'Missing required parameters for signature verification.',
       });
     }
 
-    // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)
-    const generatedSignature = crypto
-      .createHmac('sha256', RAZORPAY_KEY_SECRET)
-      .update(`${oId}|${pId}`)
+    // Determine payload string for HMAC-SHA256 signature verification
+    // Razorpay subscription signature: razorpay_payment_id + "|" + razorpay_subscription_id
+    // Razorpay order signature: razorpay_order_id + "|" + razorpay_payment_id
+    let expectedSignature = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${pId}|${subIdOrOrderId}`)
       .digest('hex');
 
-    if (generatedSignature !== sig) {
-      console.error('[Razorpay] Signature mismatch:', { generatedSignature, sig, oId, pId });
+    if (expectedSignature !== sig) {
+      // Also check order format order_id|payment_id
+      const orderFormatSig = crypto
+        .createHmac('sha256', keySecret)
+        .update(`${subIdOrOrderId}|${pId}`)
+        .digest('hex');
+
+      if (orderFormatSig === sig) {
+        expectedSignature = orderFormatSig;
+      }
+    }
+
+    if (expectedSignature !== sig) {
+      console.error('[Razorpay] Signature mismatch:', { sig, expectedSignature, pId, subIdOrOrderId });
       return res.status(400).json({
         success: false,
         error: 'INVALID_SIGNATURE',
@@ -2285,9 +2386,9 @@ app.post(['/api/verify-payment', '/api/razorpay/verify-payment'], async (req, re
       });
     }
 
-    console.log(`[Razorpay] Signature Verified Successfully for Order: ${oId}, Payment: ${pId}`);
+    console.log(`[Razorpay] Signature Verified Successfully for ID: ${subIdOrOrderId}, Payment: ${pId}`);
 
-    // Update user state if user is logged in
+    // Update user state in database/memory store
     const user = await verifyServerFirebaseUser(req);
     const targetUid = user?.uid || userId;
 
@@ -2295,30 +2396,32 @@ app.post(['/api/verify-payment', '/api/razorpay/verify-payment'], async (req, re
       const acc = getUserState(targetUid);
       if (plan === 'pro') {
         acc.plan = 'pro';
-        acc.credits += 50;
+        acc.credits = Math.max(acc.credits || 0, 500);
       } else if (plan === 'team') {
         acc.plan = 'team';
-        acc.credits += 150;
+        acc.teamSeats = Math.max(3, Number(seats) || 3);
+        acc.credits = Math.max(acc.credits || 0, 1000);
       } else if (packId === 'credits_100') {
-        acc.credits += 100;
+        acc.credits = (acc.credits || 0) + 100;
       } else if (packId === 'credits_500') {
-        acc.credits += 500;
+        acc.credits = (acc.credits || 0) + 500;
       }
+      userAccountState[targetUid] = acc;
     }
 
     return res.json({
       success: true,
       message: 'Payment verified successfully.',
       payment_id: pId,
-      order_id: oId,
+      subscription_id: subIdOrOrderId,
       razorpay_payment_id: pId,
-      razorpay_order_id: oId,
     });
   } catch (err: any) {
     console.error('[Razorpay] Verification error:', err);
     return res.status(500).json({
+      success: false,
       error: 'VERIFICATION_ERROR',
-      message: err.message || 'Payment verification failed.',
+      message: err?.message || 'Payment verification failed.',
     });
   }
 });
