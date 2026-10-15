@@ -405,10 +405,6 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   </li>
                   <li className="flex items-center gap-2">
                     <Check size={14} className="text-emerald-400 shrink-0" />
-                    <span className="text-amber-300 font-medium">50 media credits / month</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={14} className="text-emerald-400 shrink-0" />
                     <span>Up to 10 custom templates</span>
                   </li>
                 </ul>
