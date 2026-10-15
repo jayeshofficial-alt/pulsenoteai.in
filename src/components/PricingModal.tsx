@@ -72,7 +72,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       });
 
       const data = await res.json();
-      const activeKeyId = data.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || (import.meta as any).env?.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_To8JidbzEKF653';
+      const activeKeyId = data.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || (import.meta as any).env?.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_live_To8VhLeb57Fbsw';
 
       if (!data.success || (!data.subscriptionId && !data.orderId)) {
         const errDesc = data.error || 'Failed to initiate Razorpay subscription';

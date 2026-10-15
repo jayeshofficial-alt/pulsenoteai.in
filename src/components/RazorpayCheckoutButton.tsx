@@ -80,7 +80,7 @@ export const RazorpayCheckoutButton: React.FC<RazorpayCheckoutButtonProps> = ({
         throw new Error(orderData.message || orderData.error || 'Failed to create order on server.');
       }
 
-      const keyId = orderData.key_id || orderData.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || (import.meta as any).env?.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_To8JidbzEKF653';
+      const keyId = orderData.key_id || orderData.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || (import.meta as any).env?.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_live_To8VhLeb57Fbsw';
 
       // 3. Open Razorpay Standard Checkout Modal
       const options = {
