@@ -237,8 +237,8 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       a: 'Free accounts receive 5 deterministic notes each calendar month. When you reach 5 notes, an upgrade dialog invites you to subscribe to Pro for unlimited notes.',
     },
     {
-      q: 'What do multimedia credits cover?',
-      a: 'Credits power advanced Google generative media models: 1 credit per Imagen 4.0 image generation, and 10 credits per Veo 3.0 cinematic video generation. Pro accounts receive 50 credits every month.',
+      q: 'How does subscription billing work?',
+      a: 'Subscriptions are billed monthly via Razorpay. Pro Practitioner includes unlimited clinical notes and standard exports, while Clinic/Team allows managing seats across your group.',
     },
     {
       q: 'How does Clinic/Team billing work?',
@@ -261,7 +261,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 <Sparkles size={18} />
               </span>
               <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                Plans & Credit Packs
+                Subscription Plans
               </h2>
             </div>
             <p className="text-xs text-[#9aa0a6] mt-1">
@@ -277,7 +277,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-2 p-1 bg-[#131314] rounded-2xl border border-[#2d2e30] max-w-sm">
+        <div className="flex items-center gap-2 p-1 bg-[#131314] rounded-2xl border border-[#2d2e30] max-w-xs">
           <button
             type="button"
             onClick={() => setTab('plans')}
@@ -286,15 +286,6 @@ export const PricingModal: React.FC<PricingModalProps> = ({
             }`}
           >
             Subscription Plans
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('credits')}
-            className={`flex-1 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
-              tab === 'credits' ? 'bg-[#2d2e30] text-white shadow-sm' : 'text-[#9aa0a6] hover:text-white'
-            }`}
-          >
-            Credit Packs
           </button>
           <button
             type="button"
@@ -345,10 +336,6 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   <li className="flex items-center gap-2 text-[#70757a]">
                     <Lock size={13} className="shrink-0" />
                     <span>No exports (PDF/Word locked)</span>
-                  </li>
-                  <li className="flex items-center gap-2 text-[#70757a]">
-                    <Lock size={13} className="shrink-0" />
-                    <span>No Image or Video generation</span>
                   </li>
                 </ul>
               </div>
@@ -484,7 +471,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   </li>
                   <li className="flex items-center gap-2">
                     <Check size={14} className="text-purple-400 shrink-0" />
-                    <span>Pooled credits across all members</span>
+                    <span>Centralized billing & member management</span>
                   </li>
                 </ul>
               </div>
@@ -505,76 +492,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           </div>
         )}
 
-        {/* TAB 2: Credit Packs */}
-        {tab === 'credits' && (
-          <div className="space-y-4">
-            <div className="p-4 rounded-2xl bg-[#131314] border border-[#2d2e30] flex items-center justify-between text-xs">
-              <span className="text-[#9aa0a6]">Your current balance:</span>
-              <span className="font-mono text-emerald-400 font-bold text-sm">
-                {currentCredits} Credits
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* 100 Credits */}
-              <div className="bg-[#131314] border border-[#2d2e30] rounded-2xl p-5 space-y-4 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-emerald-400 font-bold uppercase">
-                      Starter Pack
-                    </span>
-                    <span className="text-xs text-[#9aa0a6]">One-Time Order</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-white">100 Credits</h3>
-                  <div className="text-2xl font-black text-white">₹299</div>
-                  <p className="text-xs text-[#9aa0a6] leading-relaxed">
-                    Provides 100 Imagen 4.0 images or 10 Veo 3.0 cinematic videos. Never expires.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleBuyCredits('credits_100')}
-                  disabled={isProcessing}
-                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-bold transition cursor-pointer"
-                >
-                  Buy 100 Credits (₹299)
-                </button>
-              </div>
-
-              {/* 500 Credits */}
-              <div className="bg-[#131314] border border-emerald-500/40 rounded-2xl p-5 space-y-4 flex flex-col justify-between relative shadow-lg">
-                <div className="absolute -top-3 right-4 bg-emerald-500 text-black font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase">
-                  Best Value
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-emerald-400 font-bold uppercase">
-                      Pro Power Pack
-                    </span>
-                    <span className="text-xs text-[#9aa0a6]">One-Time Order</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-white">500 Credits</h3>
-                  <div className="text-2xl font-black text-white">₹1,199</div>
-                  <p className="text-xs text-[#9aa0a6] leading-relaxed">
-                    Provides 500 Imagen 4.0 images or 50 Veo 3.0 cinematic videos. Save over 20%.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleBuyCredits('credits_500')}
-                  disabled={isProcessing}
-                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-bold transition cursor-pointer"
-                >
-                  Buy 500 Credits (₹1,199)
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: FAQ */}
+        {/* TAB 2: FAQ */}
         {tab === 'faq' && (
           <div className="space-y-2.5">
             {faqs.map((f, idx) => {
