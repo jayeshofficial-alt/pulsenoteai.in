@@ -74,7 +74,13 @@ export const RazorpayCheckoutButton: React.FC<RazorpayCheckoutButtonProps> = ({
         }),
       });
 
-      const orderData = await response.json();
+      const orderText = await response.text();
+      let orderData: any;
+      try {
+        orderData = JSON.parse(orderText);
+      } catch {
+        throw new Error(response.status >= 500 ? `Server error (${response.status}). Please retry.` : `Unexpected server response (${response.status}). Please retry.`);
+      }
 
       if (!response.ok || !orderData.order_id) {
         throw new Error(orderData.message || orderData.error || 'Failed to create order on server.');
@@ -117,7 +123,13 @@ export const RazorpayCheckoutButton: React.FC<RazorpayCheckoutButtonProps> = ({
               }),
             });
 
-            const verifyData = await verifyResponse.json();
+            const verifyText = await verifyResponse.text();
+            let verifyData: any;
+            try {
+              verifyData = JSON.parse(verifyText);
+            } catch {
+              throw new Error(verifyResponse.status >= 500 ? `Verification server error (${verifyResponse.status}). If money was debited, your plan activates on confirmation.` : `Unexpected verification response (${verifyResponse.status}). If money was debited, your plan activates on confirmation.`);
+            }
 
             if (verifyResponse.ok && verifyData.success) {
               setPaymentStatus('success');

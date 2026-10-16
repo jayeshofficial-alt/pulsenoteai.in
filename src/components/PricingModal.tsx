@@ -36,8 +36,50 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 }) => {
   const [tab, setTab] = useState<'plans' | 'credits' | 'faq'>('plans');
   const [teamSeats, setTeamSeats] = useState(3);
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [mandateStatus, setMandateStatus] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+
+  // ---- Pricing matrix (single source of truth, mirrors server BILLING_MATRIX) ----
+  const PRO_MONTHLY = 699; // month-to-month, cancel anytime
+  const PRO_MANDATE_MO = 499; // yearly commitment, billed monthly via mandate
+  const PRO_UPFRONT_TOTAL = 5508; // ₹459 × 12, one-time yearly payment
+  const PRO_UPFRONT_MO = 459;
+  const TEAM_MO_PER_SEAT = 399; // monthly mandate
+  const TEAM_UPFRONT_MO_PER_SEAT = 299; // yearly upfront, per seat
+
+  const proYearlyMandateSaving = (PRO_MONTHLY - PRO_MANDATE_MO) * 12; // 2400
+  const proUpfrontSaving = (PRO_MONTHLY - PRO_UPFRONT_MO) * 12; // 2880
+  const teamMonthlyRunRate = (seats: number) => seats * TEAM_MO_PER_SEAT * 12; // 3 seats → 14364
+  const teamUpfrontTotal = (seats: number) => seats * TEAM_UPFRONT_MO_PER_SEAT * 12; // 3 seats → 10764
+  const teamSaving = (seats: number) => teamMonthlyRunRate(seats) - teamUpfrontTotal(seats); // 3600 @3
+
+  const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+
+  // Safe JSON: never throw "Unexpected token '<'" on HTML gateway pages
+  const safeJson = async (res: Response): Promise<any> => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(
+        res.status >= 500
+          ? `Server error (${res.status}). Please retry in a moment.`
+          : `Unexpected server response (${res.status}). Please retry.`
+      );
+    }
+  };
+
+  const fetchTimeout = async (url: string, options: any, ms = 60000): Promise<Response> => {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), ms);
+    try {
+      return await fetch(url, { ...options, signal: c.signal });
+    } finally {
+      clearTimeout(t);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -52,8 +94,12 @@ export const PricingModal: React.FC<PricingModalProps> = ({
     });
   };
 
-  const handleSubscribePlan = async (plan: 'pro' | 'team') => {
+  const handleSubscribePlan = async (
+    plan: 'pro' | 'team',
+    mode: 'mandate' | 'upfront' = 'mandate'
+  ) => {
     setIsProcessing(true);
+    setMandateStatus(null);
     try {
       await loadRazorpayScript();
 
@@ -62,17 +108,56 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         token = await auth.currentUser.getIdToken();
       }
 
-      const res = await fetch('/api/razorpay/create-subscription', {
+      if (mode === 'upfront') {
+        // ONE-TIME yearly payment: Pro ₹5,508 | Team seats×₹299×12
+        const expectedTotal = plan === 'pro' ? PRO_UPFRONT_TOTAL : teamUpfrontTotal(teamSeats);
+        const res = await fetchTimeout('/api/create-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: token ? `Bearer ${token}` : '',
+          },
+          body: JSON.stringify({
+            plan,
+            billing: 'yearly_upfront',
+            seats: teamSeats,
+            currency: 'INR',
+          }),
+        });
+        const data = await safeJson(res);
+        if (!data.success || !data.orderId) {
+          throw new Error(data.message || data.error || 'Failed to create yearly order.');
+        }
+        if (Math.round(Number(data.amount) / 100) !== expectedTotal) {
+          throw new Error(`Amount mismatch: expected ${inr(expectedTotal)}. Please retry.`);
+        }
+        await openCheckout({
+          key: data.keyId,
+          orderId: data.orderId,
+          amount: data.amount,
+          plan,
+          billing: 'yearly_upfront',
+          token,
+          description:
+            plan === 'pro'
+              ? `Pro Yearly Upfront — ${inr(PRO_UPFRONT_TOTAL)} (₹459/mo effective)`
+              : `Team Yearly Upfront — ${teamSeats} seats × 12 mo (${inr(expectedTotal)})`,
+        });
+        return;
+      }
+
+      // MANDATE path (monthly deductions via UPI AutoPay / cards)
+      const billing = billingPeriod === 'yearly' ? 'yearly_mandate' : 'monthly';
+      const res = await fetchTimeout('/api/razorpay/create-subscription', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ plan, seats: teamSeats }),
+        body: JSON.stringify({ plan, seats: teamSeats, billing }),
       });
 
-      const data = await res.json();
-      const activeKeyId = data.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || (import.meta as any).env?.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_live_To8VhLeb57Fbsw';
+      const data = await safeJson(res);
 
       if (!data.success || (!data.subscriptionId && !data.orderId)) {
         const errDesc = data.error || 'Failed to initiate Razorpay subscription';
@@ -83,61 +168,97 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
       // Check if Razorpay script loaded
       if (!(window as any).Razorpay) {
-        await verifyLocalPayment({ plan, seats: teamSeats, subscriptionId: data.subscriptionId || data.orderId, token });
+        await verifyLocalPayment({ plan, seats: teamSeats, billing, subscriptionId: data.subscriptionId || data.orderId, token });
         return;
       }
 
-      // Exact options required for Razorpay Subscriptions / Orders (NO amount or currency for sub)
-      const options: any = {
-        key: activeKeyId,
-        name: 'PulseNote AI',
-        description: plan === 'pro' ? 'Pro Monthly Plan' : `Clinic Team Plan (${teamSeats} seats)`,
-        prefill: {
-          email: data.customerEmail || auth.currentUser?.email || '',
-        },
-        theme: {
-          color: '#4e8cff',
-        },
-        handler: async (response: any) => {
-          await verifyLocalPayment({
-            plan,
-            seats: teamSeats,
-            paymentId: response.razorpay_payment_id,
-            subscriptionId: response.razorpay_subscription_id || response.razorpay_order_id,
-            signature: response.razorpay_signature,
-            token,
-          });
-        },
-        modal: {
-          ondismiss: () => setIsProcessing(false),
-        },
-      };
-
-      if (data.subscriptionId) {
-        options.subscription_id = data.subscriptionId;
-      } else if (data.orderId) {
-        options.order_id = data.orderId;
-      }
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.on('payment.failed', (resp: any) => {
-        console.error('[Razorpay Payment Failed]', {
-          code: resp.error?.code,
-          description: resp.error?.description,
-          source: resp.error?.source,
-          step: resp.error?.step,
-          reason: resp.error?.reason,
-          metadata: resp.error?.metadata,
-        });
-        onShowToast?.('error', resp.error?.description || 'Payment process failed or was cancelled.');
-        setIsProcessing(false);
+      const perCycleInr = plan === 'pro'
+        ? (billing === 'yearly_mandate' ? PRO_MANDATE_MO : PRO_MONTHLY)
+        : TEAM_MO_PER_SEAT;
+      await openCheckout({
+        key: data.keyId,
+        subscriptionId: data.subscriptionId,
+        plan,
+        billing,
+        token,
+        perCycleInr,
+        seats: teamSeats,
+        description: plan === 'pro'
+          ? (billing === 'yearly_mandate' ? `Pro Yearly — ${inr(PRO_MANDATE_MO)}/mo billed monthly` : `Pro Monthly — ${inr(PRO_MONTHLY)}/mo`)
+          : `Team Monthly — ${teamSeats} seats × ${inr(TEAM_MO_PER_SEAT)}/mo`,
       });
-      rzp.open();
     } catch (err: any) {
       console.error('Subscription error:', err);
       onShowToast?.('error', err?.message || 'Payment initiation failed.');
       setIsProcessing(false);
     }
+  };
+
+  // Shared Razorpay checkout opener for mandate (subscription) and upfront (order) flows
+  const openCheckout = async (opts: {
+    key: string;
+    subscriptionId?: string;
+    orderId?: string;
+    amount?: number;
+    plan: 'pro' | 'team';
+    billing: string;
+    token: string;
+    perCycleInr?: number;
+    seats?: number;
+    description: string;
+  }) => {
+    const activeKeyId = opts.key || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || 'rzp_live_To8VhLeb57Fbsw';
+    const checkoutOptions: any = {
+      key: activeKeyId,
+      name: 'PulseNote AI',
+      description: opts.description,
+      prefill: { email: auth.currentUser?.email || '' },
+      theme: { color: '#4e8cff' },
+      handler: async (response: any) => {
+        await verifyLocalPayment({
+          plan: opts.plan,
+          seats: opts.seats ?? teamSeats,
+          billing: opts.billing,
+          paymentId: response.razorpay_payment_id,
+          subscriptionId: response.razorpay_subscription_id || response.razorpay_order_id,
+          signature: response.razorpay_signature,
+          token: opts.token,
+        });
+      },
+      modal: { ondismiss: () => { setIsProcessing(false); setMandateStatus(null); } },
+    };
+    if (opts.subscriptionId) checkoutOptions.subscription_id = opts.subscriptionId;
+    if (opts.orderId) {
+      checkoutOptions.order_id = opts.orderId;
+      if (opts.amount) checkoutOptions.amount = opts.amount;
+      checkoutOptions.currency = 'INR';
+    }
+    const rzp = new (window as any).Razorpay(checkoutOptions);
+    rzp.on('payment.failed', (resp: any) => {
+      console.error('[Razorpay Payment Failed]', resp?.error);
+      onShowToast?.('error', resp?.error?.description || 'Payment process failed or was cancelled.');
+      setIsProcessing(false);
+      setMandateStatus(null);
+    });
+    rzp.open();
+  };
+
+  // Poll mandate status — UPI AutoPay authorizations settle asynchronously
+  const pollMandateStatus = async (subscriptionId: string, token: string): Promise<boolean> => {
+    setMandateStatus('Mandate authorized. Waiting for bank approval…');
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        const res = await fetchTimeout(`/api/razorpay/subscription/${subscriptionId}`, { method: 'GET' }, 20000);
+        const data = await safeJson(res);
+        if (data.success && data.active) return true;
+        setMandateStatus(`Waiting for bank approval… (status: ${data.status || 'pending'})`);
+      } catch {
+        /* keep polling */
+      }
+    }
+    return false;
   };
 
   const handleBuyCredits = async (packId: 'credits_100' | 'credits_500') => {
@@ -150,7 +271,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         token = await auth.currentUser.getIdToken();
       }
 
-      const res = await fetch('/api/razorpay/create-order', {
+      const res = await fetchTimeout('/api/razorpay/create-order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -159,7 +280,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         body: JSON.stringify({ packId }),
       });
 
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!data.success) {
         throw new Error(data.error || 'Failed to initiate credit order');
       }
@@ -208,26 +329,42 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
   const verifyLocalPayment = async (payload: any) => {
     try {
-      const res = await fetch('/api/razorpay/verify-payment', {
+      const res = await fetchTimeout('/api/razorpay/verify-payment', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: payload.token ? `Bearer ${payload.token}` : '',
         },
         body: JSON.stringify(payload),
-      });
-      const data = await res.json();
+      }, 45000);
+      const data = await safeJson(res);
       if (data.success) {
+        // UPI mandates settle asynchronously: confirm the subscription is active
+        if (payload.subscriptionId && String(payload.subscriptionId).startsWith('sub_')) {
+          const confirmed = await pollMandateStatus(payload.subscriptionId, payload.token);
+          if (!confirmed) {
+            onShowToast?.('info', 'Payment received — bank mandate approval pending. Your plan activates automatically once approved.');
+            setIsProcessing(false);
+            setMandateStatus(null);
+            if (payload.plan) onUpgradeSuccess?.(payload.plan);
+            onClose();
+            return;
+          }
+        }
         onShowToast?.('success', `Payment completed successfully!`);
         if (payload.plan) {
           onUpgradeSuccess?.(payload.plan);
         }
         onClose();
+      } else {
+        onShowToast?.('error', data.message || 'Payment verification failed. Please contact support with your payment ID.');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Verification notice:', e);
+      onShowToast?.('error', e?.message || 'Verification failed. If money was debited, your plan activates automatically on confirmation.');
     } finally {
       setIsProcessing(false);
+      setMandateStatus(null);
     }
   };
 
@@ -238,11 +375,11 @@ export const PricingModal: React.FC<PricingModalProps> = ({
     },
     {
       q: 'How does subscription billing work?',
-      a: 'Subscriptions are billed monthly via Razorpay. Pro Practitioner includes unlimited clinical notes and standard exports, while Clinic/Team allows managing seats across your group.',
+      a: 'Choose Monthly or Yearly at the top. Monthly Pro is ₹699/mo with no commitment. On Yearly you can either keep monthly mandate billing at ₹499/mo (save ₹2,400/yr) or pay ₹5,508 once upfront — an effective ₹459/mo (save ₹2,880/yr, 34%). Mandate payments (UPI AutoPay/cards) may take a few minutes for bank approval; your plan activates automatically.',
     },
     {
       q: 'How does Clinic/Team billing work?',
-      a: 'Teams start at ₹399 per seat per month (minimum 3 seats). The team owner manages invites and shared templates across all team members.',
+      a: 'Teams start at ₹399 per seat per month (minimum 3 seats) billed via mandate — 3 seats run ₹1,197/mo (₹14,364/yr). Pay yearly upfront at ₹299/seat/mo and 3 seats cost ₹10,764 one-time — a saving of ₹3,600/yr (25%). The team owner manages invites and shared templates across all team members.',
     },
     {
       q: 'Is GST included in the prices?',
@@ -297,6 +434,40 @@ export const PricingModal: React.FC<PricingModalProps> = ({
             FAQ
           </button>
         </div>
+
+        {/* Billing Period Slider: Monthly vs Yearly */}
+        {tab === 'plans' && (
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex items-center gap-1 p-1 bg-[#131314] rounded-2xl border border-[#2d2e30]">
+              <button
+                type="button"
+                onClick={() => setBillingPeriod('monthly')}
+                className={`px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  billingPeriod === 'monthly' ? 'bg-[#4e8cff] text-white shadow' : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Monthly
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingPeriod('yearly')}
+                className={`px-5 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  billingPeriod === 'yearly' ? 'bg-emerald-500 text-slate-950 shadow' : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Yearly
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${billingPeriod === 'yearly' ? 'bg-slate-950 text-emerald-400' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                  −34%
+                </span>
+              </button>
+            </div>
+            <p className="text-[11px] text-[#9aa0a6]">
+              {billingPeriod === 'monthly'
+                ? 'Pay month-to-month. Cancel anytime.'
+                : `Yearly commitment — pay ${inr(PRO_UPFRONT_TOTAL)} once and save ${inr(proUpfrontSaving)}/yr, or keep monthly billing at ${inr(PRO_MANDATE_MO)}/mo.`}
+            </p>
+          </div>
+        )}
 
         {/* TAB 1: Subscription Plans */}
         {tab === 'plans' && (
@@ -372,8 +543,30 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   )}
                 </div>
                 <div className="text-2xl font-black text-white">
-                  ₹499 <span className="text-xs text-[#9aa0a6] font-normal">/ month</span>
+                  {billingPeriod === 'monthly' ? (
+                    <>₹699 <span className="text-xs text-[#9aa0a6] font-normal">/ month</span></>
+                  ) : (
+                    <>₹499 <span className="text-xs text-[#9aa0a6] font-normal">/ month, billed monthly</span></>
+                  )}
                 </div>
+                {billingPeriod === 'monthly' ? (
+                  <p className="text-xs text-[#9aa0a6]">
+                    Month-to-month billing. Cancel anytime.
+                  </p>
+                ) : (
+                  <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-2.5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-emerald-300 font-semibold">Yearly upfront option</span>
+                      <span className="text-sm font-black text-white">{inr(PRO_UPFRONT_TOTAL)} <span className="text-[10px] font-normal text-[#9aa0a6]">/ year</span></span>
+                    </div>
+                    <p className="text-[11px] text-[#c4c7c5]">
+                      Effective {inr(PRO_UPFRONT_MO)}/mo — <span className="font-bold text-emerald-300">save {inr(proUpfrontSaving)}/yr (34%)</span> vs monthly billing.
+                    </p>
+                    <p className="text-[11px] text-[#9aa0a6]">
+                      Or stay monthly at {inr(PRO_MANDATE_MO)}/mo on a yearly mandate — <span className="font-semibold text-emerald-300/90">save {inr(proYearlyMandateSaving)}/yr (29%)</span>.
+                    </p>
+                  </div>
+                )}
                 <p className="text-xs text-[#9aa0a6]">
                   For active doctors, attorneys, and engineers demanding full deterministic volume and exports.
                 </p>
@@ -397,18 +590,47 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 </ul>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleSubscribePlan('pro')}
-                disabled={isProcessing || currentPlan === 'pro'}
-                className="w-full py-2.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-blue-500/20 cursor-pointer"
-              >
-                {isProcessing
-                  ? 'Connecting to Razorpay...'
-                  : currentPlan === 'pro'
-                  ? 'Current Plan Active'
-                  : 'Upgrade to Pro (₹499/mo)'}
-              </button>
+              {billingPeriod === 'monthly' ? (
+                <button
+                  type="button"
+                  onClick={() => handleSubscribePlan('pro', 'mandate')}
+                  disabled={isProcessing || currentPlan === 'pro'}
+                  className="w-full py-2.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-blue-500/20 cursor-pointer"
+                >
+                  {isProcessing
+                    ? (mandateStatus || 'Connecting to Razorpay...')
+                    : currentPlan === 'pro'
+                    ? 'Current Plan Active'
+                    : 'Upgrade to Pro (₹699/mo)'}
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSubscribePlan('pro', 'upfront')}
+                    disabled={isProcessing || currentPlan === 'pro'}
+                    className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-xs text-slate-950 font-extrabold transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  >
+                    {isProcessing
+                      ? (mandateStatus || 'Connecting to Razorpay...')
+                      : currentPlan === 'pro'
+                      ? 'Current Plan Active'
+                      : `Pay Yearly Upfront (${inr(PRO_UPFRONT_TOTAL)})`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSubscribePlan('pro', 'mandate')}
+                    disabled={isProcessing || currentPlan === 'pro'}
+                    className="w-full py-2.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-blue-500/20 cursor-pointer"
+                  >
+                    {isProcessing
+                      ? (mandateStatus || 'Connecting to Razorpay...')
+                      : currentPlan === 'pro'
+                      ? 'Current Plan Active'
+                      : `Yearly mandate, pay ${inr(PRO_MANDATE_MO)}/mo`}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Clinic / Team Plan */}
@@ -431,7 +653,11 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   )}
                 </div>
                 <div className="text-2xl font-black text-white">
-                  ₹399 <span className="text-xs text-[#9aa0a6] font-normal">/ seat / month</span>
+                  {billingPeriod === 'monthly' ? (
+                    <>₹399 <span className="text-xs text-[#9aa0a6] font-normal">/ seat / month</span></>
+                  ) : (
+                    <>₹299 <span className="text-xs text-[#9aa0a6] font-normal">/ seat / month, yearly upfront</span></>
+                  )}
                 </div>
                 <p className="text-xs text-[#9aa0a6]">
                   For group practices, inspection firms, and enterprise teams with centralized management.
@@ -447,13 +673,28 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                       min={3}
                       max={50}
                       value={teamSeats}
-                      onChange={(e) => setTeamSeats(Math.max(3, Number(e.target.value)))}
+                      onChange={(e) => setTeamSeats(Math.max(3, Math.min(50, Number(e.target.value) || 3)))}
                       className="w-16 bg-[#131314] border border-[#3c4043] rounded-lg px-2 py-1 text-xs text-white text-center"
                     />
-                    <span className="text-xs text-white font-mono font-medium">
-                      = ₹{teamSeats * 399}/mo
-                    </span>
+                    {billingPeriod === 'monthly' ? (
+                      <span className="text-xs text-white font-mono font-medium">
+                        = {inr(teamSeats * 399)}/mo
+                      </span>
+                    ) : (
+                      <span className="text-xs text-white font-mono font-medium">
+                        = {inr(teamUpfrontTotal(teamSeats))} one-time
+                      </span>
+                    )}
                   </div>
+                  {billingPeriod === 'monthly' ? (
+                    <p className="text-[11px] text-[#9aa0a6]">
+                      Yearly run-rate: {inr(teamMonthlyRunRate(teamSeats))}/yr · Switch to <button type="button" onClick={() => setBillingPeriod('yearly')} className="text-purple-300 font-semibold hover:underline cursor-pointer">Yearly</button> to save {inr(teamSaving(teamSeats))} (25%).
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-emerald-300 font-semibold">
+                      You save {inr(teamSaving(teamSeats))}/yr (25%) vs monthly billing.
+                    </p>
+                  )}
                 </div>
 
                 <ul className="space-y-2 text-xs text-[#c4c7c5] pt-1 border-t border-[#2d2e30]">
@@ -478,15 +719,17 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleSubscribePlan('team')}
+                onClick={() => handleSubscribePlan('team', billingPeriod === 'yearly' ? 'upfront' : 'mandate')}
                 disabled={isProcessing || currentPlan === 'team'}
                 className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-purple-600/20 cursor-pointer"
               >
                 {isProcessing
-                  ? 'Connecting to Razorpay...'
+                  ? (mandateStatus || 'Connecting to Razorpay...')
                   : currentPlan === 'team'
                   ? 'Current Plan Active'
-                  : `Start Team Plan (₹${teamSeats * 399}/mo)`}
+                  : billingPeriod === 'yearly'
+                    ? `Pay Yearly Upfront (${inr(teamUpfrontTotal(teamSeats))})`
+                    : `Start Team Plan (${inr(teamSeats * 399)}/mo)`}
               </button>
             </div>
           </div>
