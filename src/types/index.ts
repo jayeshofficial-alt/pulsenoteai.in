@@ -301,6 +301,9 @@ export interface UserProfile {
   plan?: 'free' | 'premium';
   chats?: number;
   premiumUntil?: string | number | null;
+  /** Per-user AI feature flags (admin-controllable). Default true when undefined. */
+  aiImageEnabled?: boolean;
+  aiVideoEnabled?: boolean;
 }
 
 export interface PaymentRecord {

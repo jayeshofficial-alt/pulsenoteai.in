@@ -60,18 +60,20 @@ import { MyDocumentsView } from './components/MyDocumentsView';
 import { TemplateGalleryView } from './components/TemplateGalleryView';
 import { TemplateBuilderModal } from './components/TemplateBuilderModal';
 import { LegalTrustModal } from './components/LegalTrustModal';
+import { RevenueAdminDashboard } from './components/RevenueAdminDashboard';
 import { generateImageWithImagen, generateVideoWithVeo as generateVeo3Video } from './services/mediaService';
-import { 
-  auth, 
-  onAuthStateChanged, 
-  logOut, 
-  saveThreadToFirestore, 
-  loadUserThreadsFromFirestore, 
-  deleteThreadFromFirestore, 
+import {
+  auth,
+  onAuthStateChanged,
+  logOut,
+  saveThreadToFirestore,
+  loadUserThreadsFromFirestore,
+  deleteThreadFromFirestore,
   saveDocumentToFirestore,
   subscribeToFeatureSettings,
   subscribeToUserProfile,
-  isPulseNoteAdmin
+  isPulseNoteAdmin,
+  isRevenueAdmin
 } from './lib/firebase';
 import {
   chatCompletion,
@@ -1512,6 +1514,12 @@ export function App() {
               setActiveView('chat');
             }}
             onBack={() => setActiveView('chat')}
+          />
+        ) : activeView === 'revenue' ? (
+          <RevenueAdminDashboard
+            currentUser={currentUser as any}
+            onBack={() => setActiveView('chat')}
+            onShowToast={addToast}
           />
         ) : activeView === 'marketing' ? (
           <div className="flex-1 overflow-y-auto scrollbar-thin">
