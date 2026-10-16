@@ -11,6 +11,18 @@ export interface NoteExportMeta {
   patientIdOrMeta?: string;
   date?: string;
   authorName?: string;
+  /** Optional review sign-off stamp printed on the export. */
+  signoff?: {
+    status: 'draft' | 'in_review' | 'signed_off';
+    reviewedBy?: string;
+    signedAt?: number;
+  };
+}
+
+function signoffLine(signoff?: NoteExportMeta['signoff']): string | null {
+  if (!signoff || signoff.status !== 'signed_off') return null;
+  const when = signoff.signedAt ? new Date(signoff.signedAt).toLocaleString() : '';
+  return `SIGNED OFF by ${signoff.reviewedBy || 'reviewer'}${when ? ` on ${when}` : ''} — locked, no further edits.`;
 }
 
 /**
@@ -83,6 +95,22 @@ export function exportNoteToPdf(
     doc.addPage();
     yPosition = 20;
   }
+  const stamp = signoffLine(meta.signoff);
+  if (stamp) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(16, 122, 87);
+    const stampLines = doc.splitTextToSize(stamp, pageWidth - 28);
+    for (const line of stampLines) {
+      if (yPosition > 275) {
+        doc.addPage();
+        yPosition = 20;
+      }
+      doc.text(line, 14, yPosition);
+      yPosition += 5;
+    }
+    yPosition += 2;
+  }
   doc.setFontSize(8);
   doc.setTextColor(140, 140, 150);
   doc.text('Deterministic output verified by PulseNote AI (pulsenoteai.in).', 14, 285);
@@ -115,6 +143,16 @@ export async function exportNoteToDocx(
     }),
     new Paragraph({ text: '' }),
   ];
+
+  const stamp = signoffLine(meta.signoff);
+  if (stamp) {
+    docParagraphs.push(
+      new Paragraph({
+        children: [new TextRun({ text: stamp, bold: true, color: '107A57' })],
+      }),
+      new Paragraph({ text: '' })
+    );
+  }
 
   for (const sec of sections) {
     docParagraphs.push(

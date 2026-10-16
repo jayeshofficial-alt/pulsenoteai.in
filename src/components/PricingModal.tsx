@@ -42,14 +42,14 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   // ---- Pricing matrix (single source of truth, mirrors server BILLING_MATRIX) ----
-  const PRO_MONTHLY = 699; // month-to-month, cancel anytime
-  const PRO_MANDATE_MO = 499; // yearly commitment, billed monthly via mandate
+  // Two options only: Monthly mandate (₹699 / ₹399·seat) or Yearly upfront
+  // (₹5,508 pro / seats×₹299×12 team). UPI AutoPay powers recurring billing silently.
+  const PRO_MONTHLY = 699; // month-to-month mandate, cancel anytime
   const PRO_UPFRONT_TOTAL = 5508; // ₹459 × 12, one-time yearly payment
   const PRO_UPFRONT_MO = 459;
   const TEAM_MO_PER_SEAT = 399; // monthly mandate
   const TEAM_UPFRONT_MO_PER_SEAT = 299; // yearly upfront, per seat
 
-  const proYearlyMandateSaving = (PRO_MONTHLY - PRO_MANDATE_MO) * 12; // 2400
   const proUpfrontSaving = (PRO_MONTHLY - PRO_UPFRONT_MO) * 12; // 2880
   const teamMonthlyRunRate = (seats: number) => seats * TEAM_MO_PER_SEAT * 12; // 3 seats → 14364
   const teamUpfrontTotal = (seats: number) => seats * TEAM_UPFRONT_MO_PER_SEAT * 12; // 3 seats → 10764
@@ -146,15 +146,15 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         return;
       }
 
-      // MANDATE path (monthly deductions via UPI AutoPay / cards)
-      const billing = billingPeriod === 'yearly' ? 'yearly_mandate' : 'monthly';
+      // MANDATE path: recurring monthly deductions (UPI AutoPay / cards).
+      // Billing is always monthly now; yearly is sold as one-time upfront.
       const res = await fetchTimeout('/api/razorpay/create-subscription', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ plan, seats: teamSeats, billing }),
+        body: JSON.stringify({ plan, seats: teamSeats, billing: 'monthly' }),
       });
 
       const data = await safeJson(res);
@@ -172,19 +172,17 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         return;
       }
 
-      const perCycleInr = plan === 'pro'
-        ? (billing === 'yearly_mandate' ? PRO_MANDATE_MO : PRO_MONTHLY)
-        : TEAM_MO_PER_SEAT;
+      const perCycleInr = plan === 'pro' ? PRO_MONTHLY : TEAM_MO_PER_SEAT;
       await openCheckout({
         key: data.keyId,
         subscriptionId: data.subscriptionId,
         plan,
-        billing,
+        billing: 'monthly',
         token,
         perCycleInr,
         seats: teamSeats,
         description: plan === 'pro'
-          ? (billing === 'yearly_mandate' ? `Pro Yearly — ${inr(PRO_MANDATE_MO)}/mo billed monthly` : `Pro Monthly — ${inr(PRO_MONTHLY)}/mo`)
+          ? `Pro Monthly — ${inr(PRO_MONTHLY)}/mo, cancel anytime`
           : `Team Monthly — ${teamSeats} seats × ${inr(TEAM_MO_PER_SEAT)}/mo`,
       });
     } catch (err: any) {
@@ -375,7 +373,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
     },
     {
       q: 'How does subscription billing work?',
-      a: 'Choose Monthly or Yearly at the top. Monthly Pro is ₹699/mo with no commitment. On Yearly you can either keep monthly mandate billing at ₹499/mo (save ₹2,400/yr) or pay ₹5,508 once upfront — an effective ₹459/mo (save ₹2,880/yr, 34%). Mandate payments (UPI AutoPay/cards) may take a few minutes for bank approval; your plan activates automatically.',
+      a: 'Choose Monthly or Yearly at the top. Monthly Pro is ₹699/mo with no commitment, billed via UPI AutoPay or card mandate — cancel anytime. Yearly Pro is a single upfront payment of ₹5,508 (effective ₹459/mo, save ₹2,880/yr, 34%). Mandate payments may take a few minutes for bank approval; your plan activates automatically.',
     },
     {
       q: 'How does Clinic/Team billing work?',
@@ -463,8 +461,8 @@ export const PricingModal: React.FC<PricingModalProps> = ({
             </div>
             <p className="text-[11px] text-[#9aa0a6]">
               {billingPeriod === 'monthly'
-                ? 'Pay month-to-month. Cancel anytime.'
-                : `Yearly commitment — pay ${inr(PRO_UPFRONT_TOTAL)} once and save ${inr(proUpfrontSaving)}/yr, or keep monthly billing at ${inr(PRO_MANDATE_MO)}/mo.`}
+                ? 'Pay month-to-month via UPI AutoPay or card. Cancel anytime.'
+                : `One payment of ${inr(PRO_UPFRONT_TOTAL)} covers 12 months — no monthly deductions.`}
             </p>
           </div>
         )}
@@ -551,19 +549,16 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 </div>
                 {billingPeriod === 'monthly' ? (
                   <p className="text-xs text-[#9aa0a6]">
-                    Month-to-month billing. Cancel anytime.
+                    Month-to-month billing via mandate. Cancel anytime.
                   </p>
                 ) : (
                   <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-2.5 space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-emerald-300 font-semibold">Yearly upfront option</span>
+                      <span className="text-[11px] text-emerald-300 font-semibold">Yearly upfront</span>
                       <span className="text-sm font-black text-white">{inr(PRO_UPFRONT_TOTAL)} <span className="text-[10px] font-normal text-[#9aa0a6]">/ year</span></span>
                     </div>
                     <p className="text-[11px] text-[#c4c7c5]">
                       Effective {inr(PRO_UPFRONT_MO)}/mo — <span className="font-bold text-emerald-300">save {inr(proUpfrontSaving)}/yr (34%)</span> vs monthly billing.
-                    </p>
-                    <p className="text-[11px] text-[#9aa0a6]">
-                      Or stay monthly at {inr(PRO_MANDATE_MO)}/mo on a yearly mandate — <span className="font-semibold text-emerald-300/90">save {inr(proYearlyMandateSaving)}/yr (29%)</span>.
                     </p>
                   </div>
                 )}
@@ -604,32 +599,18 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                     : 'Upgrade to Pro (₹699/mo)'}
                 </button>
               ) : (
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSubscribePlan('pro', 'upfront')}
-                    disabled={isProcessing || currentPlan === 'pro'}
-                    className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-xs text-slate-950 font-extrabold transition shadow-lg shadow-emerald-500/20 cursor-pointer"
-                  >
-                    {isProcessing
-                      ? (mandateStatus || 'Connecting to Razorpay...')
-                      : currentPlan === 'pro'
-                      ? 'Current Plan Active'
-                      : `Pay Yearly Upfront (${inr(PRO_UPFRONT_TOTAL)})`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSubscribePlan('pro', 'mandate')}
-                    disabled={isProcessing || currentPlan === 'pro'}
-                    className="w-full py-2.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-50 text-xs text-white font-bold transition shadow-lg shadow-blue-500/20 cursor-pointer"
-                  >
-                    {isProcessing
-                      ? (mandateStatus || 'Connecting to Razorpay...')
-                      : currentPlan === 'pro'
-                      ? 'Current Plan Active'
-                      : `Yearly mandate, pay ${inr(PRO_MANDATE_MO)}/mo`}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSubscribePlan('pro', 'upfront')}
+                  disabled={isProcessing || currentPlan === 'pro'}
+                  className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-xs text-slate-950 font-extrabold transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                >
+                  {isProcessing
+                    ? (mandateStatus || 'Connecting to Razorpay...')
+                    : currentPlan === 'pro'
+                    ? 'Current Plan Active'
+                    : `Pay Yearly Upfront (${inr(PRO_UPFRONT_TOTAL)})`}
+                </button>
               )}
             </div>
 

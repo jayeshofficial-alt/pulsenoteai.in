@@ -20,6 +20,10 @@ import {
   UserX,
   ShieldAlert,
   Save,
+  Stamp,
+  Send,
+  LockOpen,
+  FileCheck,
 } from 'lucide-react';
 import { exportNoteToPdf, exportNoteToDocx } from '../lib/exportUtils';
 
@@ -29,6 +33,13 @@ export interface DocumentVersion {
   changedAt: number;
   summary: string;
   sections: Record<string, string>;
+}
+
+export interface DocumentSignoff {
+  status: 'draft' | 'in_review' | 'signed_off';
+  reviewedBy?: string;
+  signedAt?: number;
+  history: Array<{ status: 'draft' | 'in_review' | 'signed_off'; by: string; at: number; note?: string }>;
 }
 
 export interface StoredDocument {
@@ -45,6 +56,7 @@ export interface StoredDocument {
   createdAt: number;
   updatedAt: number;
   versions: DocumentVersion[];
+  signoff?: DocumentSignoff;
 }
 
 interface MyDocumentsViewProps {
@@ -190,8 +202,39 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
     }
   };
 
-  const handleDeleteDoc = async (docId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const signoffStatus = selectedDoc?.signoff?.status || 'draft';
+  const isLocked = signoffStatus === 'signed_off';
+
+  const handleSignoffAction = async (action: 'submit-review' | 'sign-off' | 'reopen') => {
+    if (!selectedDoc) return;
+    if (action === 'sign-off' && !confirm('Sign off this document? It will be locked and require reopening for any further edits.')) return;
+    try {
+      const res = await fetch(`/api/documents/${selectedDoc.id}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ by: userEmail || 'author' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.document) {
+        setSelectedDoc(data.document);
+        setDocuments((prev) => prev.map((d) => (d.id === data.document.id ? data.document : d)));
+        onShowToast?.(
+          'success',
+          action === 'submit-review'
+            ? 'Submitted for senior review.'
+            : action === 'sign-off'
+              ? 'Signed off and locked.'
+              : 'Reopened as draft.'
+        );
+      } else {
+        throw new Error(data.message || 'Sign-off action failed.');
+      }
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Sign-off action failed.');
+    }
+  };
+
+  const handleDeleteDoc = async (docId: string, e?: React.MouseEvent) => {    e?.stopPropagation();
     if (!confirm('Are you sure you want to delete this document? Your notes stay in your account until you delete them.')) return;
 
     try {
@@ -515,19 +558,74 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
                     ) : (
                       <div className="flex items-center gap-2 group">
                         <h2 className="text-lg font-bold text-white truncate">{editedTitle}</h2>
-                        <button
-                          onClick={() => setIsEditingTitle(true)}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-[#9aa0a6] hover:text-white transition"
-                          title="Rename Document"
-                        >
-                          <Edit3 size={14} />
-                        </button>
+                        {!isLocked && (
+                          <button
+                            onClick={() => setIsEditingTitle(true)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-[#9aa0a6] hover:text-white transition"
+                            title="Rename Document"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
 
                   {/* Actions Bar */}
                   <div className="flex flex-wrap items-center gap-2">
+                    {/* Sign-off status badge */}
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1 ${
+                        signoffStatus === 'signed_off'
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                          : signoffStatus === 'in_review'
+                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                            : 'bg-slate-500/15 text-slate-300 border-slate-500/40'
+                      }`}
+                      title={
+                        signoffStatus === 'signed_off' && selectedDoc?.signoff?.signedAt
+                          ? `Signed off by ${selectedDoc.signoff.reviewedBy || 'reviewer'} on ${new Date(selectedDoc.signoff.signedAt).toLocaleString()}`
+                          : signoffStatus === 'in_review'
+                            ? 'Awaiting senior review'
+                            : 'Editable draft'
+                      }
+                    >
+                      {signoffStatus === 'signed_off' ? <Stamp size={12} /> : signoffStatus === 'in_review' ? <Send size={12} /> : <FileCheck size={12} />}
+                      {signoffStatus === 'signed_off' ? 'Signed off · Locked' : signoffStatus === 'in_review' ? 'In review' : 'Draft'}
+                    </span>
+
+                    {/* Sign-off workflow buttons */}
+                    {signoffStatus === 'draft' && (
+                      <button
+                        onClick={() => handleSignoffAction('submit-review')}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                        title="Submit for senior review"
+                      >
+                        <Send size={14} />
+                        <span>Submit for Review</span>
+                      </button>
+                    )}
+                    {signoffStatus === 'in_review' && (
+                      <button
+                        onClick={() => handleSignoffAction('sign-off')}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                        title="Approve and lock this document"
+                      >
+                        <Stamp size={14} />
+                        <span>Sign Off & Lock</span>
+                      </button>
+                    )}
+                    {isLocked && (
+                      <button
+                        onClick={() => handleSignoffAction('reopen')}
+                        className="px-3 py-1.5 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] border border-[#3c4043] text-[#c4c7c5] hover:text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                        title="Reopen as editable draft"
+                      >
+                        <LockOpen size={14} />
+                        <span>Reopen</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => setShowVersionHistory(!showVersionHistory)}
                       className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
@@ -542,11 +640,12 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
 
                     <button
                       onClick={handleSaveDoc}
-                      disabled={isSaving}
-                      className="px-3.5 py-1.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#4e8cff]/20"
+                      disabled={isSaving || isLocked}
+                      title={isLocked ? 'Signed off documents are locked. Reopen to edit.' : 'Save a new version'}
+                      className="px-3.5 py-1.5 rounded-xl bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-40 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#4e8cff]/20"
                     >
                       <Save size={14} />
-                      <span>{isSaving ? 'Saving...' : 'Save Version'}</span>
+                      <span>{isSaving ? 'Saving...' : isLocked ? 'Locked' : 'Save Version'}</span>
                     </button>
 
                     {/* PDF Export */}
@@ -561,7 +660,7 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
                           title: k.toUpperCase(),
                           content: v,
                         }));
-                        exportNoteToPdf({ title: editedTitle }, sectionsList);
+                        exportNoteToPdf({ title: editedTitle, signoff: selectedDoc?.signoff }, sectionsList);
                         onShowToast?.('success', 'PDF exported successfully.');
                       }}
                       className="p-2 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-blue-400 border border-blue-500/30 transition cursor-pointer"
@@ -582,7 +681,7 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
                           title: k.toUpperCase(),
                           content: v,
                         }));
-                        await exportNoteToDocx({ title: editedTitle }, sectionsList);
+                        await exportNoteToDocx({ title: editedTitle, signoff: selectedDoc?.signoff }, sectionsList);
                         onShowToast?.('success', 'Word document exported successfully.');
                       }}
                       className="p-2 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-indigo-400 border border-indigo-500/30 transition cursor-pointer"
@@ -661,9 +760,9 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
 
                         <button
                           onClick={() => handleRegenerateSection(secKey)}
-                          disabled={regeneratingKey === secKey}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-[11px] text-[#c4c7c5] hover:text-white transition cursor-pointer"
-                          title="Regenerate this section strictly from raw input facts"
+                          disabled={regeneratingKey === secKey || isLocked}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] disabled:opacity-40 text-[11px] text-[#c4c7c5] hover:text-white transition cursor-pointer"
+                          title={isLocked ? 'Signed off documents are locked' : 'Regenerate this section strictly from raw input facts'}
                         >
                           <RefreshCw size={12} className={regeneratingKey === secKey ? 'animate-spin text-[#4e8cff]' : ''} />
                           <span>{regeneratingKey === secKey ? 'Regenerating...' : 'Regenerate section'}</span>
@@ -675,12 +774,13 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
                         {renderFactCheckedText(secValue, selectedDoc.unverifiedTokens)}
                       </div>
 
-                      {/* Simple Editable Textarea */}
+                      {/* Simple Editable Textarea (read-only when signed off) */}
                       <textarea
                         value={secValue}
                         onChange={(e) => setEditedSections((prev) => ({ ...prev, [secKey]: e.target.value }))}
                         rows={3}
-                        className="w-full bg-[#1e1f20] border border-[#3c4043]/50 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-[#4e8cff] font-mono leading-relaxed"
+                        disabled={isLocked}
+                        className="w-full bg-[#1e1f20] border border-[#3c4043]/50 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-[#4e8cff] font-mono leading-relaxed disabled:opacity-70"
                         placeholder="Edit section text..."
                       />
                     </div>

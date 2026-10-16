@@ -12,13 +12,20 @@ import {
   ArrowLeft,
   Mail,
   ExternalLink,
+  Clock,
+  Sparkles,
 } from 'lucide-react';
-import { TeamDoc, CustomTemplateDoc } from '../types';
+import { TeamDoc, TeamMemberRole, CustomTemplateDoc } from '../types';
 import {
   subscribeToTeam,
   createTeamAccount,
+  createTeamTrial,
   inviteTeamMember,
   removeTeamMember,
+  setMemberRole,
+  getMemberRole,
+  isTeamTrialActive,
+  TEAM_TRIAL_DAYS,
   db,
 } from '../lib/firebase';
 import { collection, query, getDocs } from 'firebase/firestore';
@@ -44,6 +51,7 @@ export function TeamDashboard({
   const [copiedLink, setCopiedLink] = useState(false);
   const [teamTemplates, setTeamTemplates] = useState<CustomTemplateDoc[]>([]);
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
+  const [isStartingTrial, setIsStartingTrial] = useState(false);
   const [newTeamName, setNewTeamName] = useState('Medical Group Alpha');
   const [newTeamSeats, setNewTeamSeats] = useState(5);
 
@@ -71,6 +79,39 @@ export function TeamDashboard({
   }, [teamId]);
 
   const isOwner = currentUser?.uid && team?.ownerUid === currentUser.uid;
+  const myRole = getMemberRole(team, currentUser?.email);
+  const isViewer = myRole === 'viewer';
+  const trialActive = isTeamTrialActive(team);
+  const trialDaysLeft = team?.trialEndsAt
+    ? Math.max(0, Math.ceil((new Date(team.trialEndsAt).getTime() - Date.now()) / 86400000))
+    : 0;
+
+  const handleStartTrial = async () => {
+    if (!currentUser) return;
+    setIsStartingTrial(true);
+    try {
+      await createTeamTrial(
+        newTeamName || 'My Clinic Trial',
+        currentUser.uid,
+        currentUser.email || 'owner@pulsenoteai.in'
+      );
+      onShowToast?.('success', `14-day free trial started — 3 seats, full features, no card required!`);
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Failed to start trial');
+    } finally {
+      setIsStartingTrial(false);
+    }
+  };
+
+  const handleRoleChange = async (email: string, role: TeamMemberRole) => {
+    if (!teamId) return;
+    try {
+      await setMemberRole(teamId, email, role);
+      onShowToast?.('success', `${email} is now ${role}.`);
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Failed to update role');
+    }
+  };
 
   const handleCreateTeam = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,6 +227,29 @@ export function TeamDashboard({
               </button>
             </form>
           </div>
+
+          {/* 14-day free trial — no card */}
+          <div className="bg-gradient-to-br from-emerald-950/60 to-[#1e1f20] border border-emerald-500/30 rounded-2xl p-6 space-y-3">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-emerald-400" />
+              <h3 className="text-sm font-bold text-white">Try free for {TEAM_TRIAL_DAYS} days</h3>
+            </div>
+            <p className="text-xs text-[#c4c7c5] leading-relaxed">
+              Full Clinic/Team features for 3 seats — shared templates, member invites, exports.
+              No card required. Upgrade to a paid plan before the trial ends to keep access.
+            </p>
+            <button
+              type="button"
+              onClick={handleStartTrial}
+              disabled={isStartingTrial || !currentUser}
+              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-sm font-bold transition cursor-pointer"
+            >
+              {isStartingTrial ? 'Starting trial…' : `Start ${TEAM_TRIAL_DAYS}-Day Free Trial`}
+            </button>
+            {!currentUser && (
+              <p className="text-[11px] text-amber-300">Please sign in to start a trial workspace.</p>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -239,6 +303,36 @@ export function TeamDashboard({
           </div>
         </div>
 
+        {/* Trial status banner */}
+        {team?.isTrial && (
+          <div className={`rounded-2xl border p-4 flex items-center gap-3 ${trialActive ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-rose-950/40 border-rose-500/30'}`}>
+            <Clock size={18} className={trialActive ? 'text-emerald-400' : 'text-rose-400'} />
+            <div className="flex-1">
+              <p className={`text-xs font-bold ${trialActive ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {trialActive ? `Free trial active — ${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : 'Free trial expired'}
+              </p>
+              <p className="text-[11px] text-[#9aa0a6]">
+                {trialActive
+                  ? 'Full features unlocked. Add a payment method before expiry to keep your workspace.'
+                  : 'Upgrade to a paid Clinic/Team plan to restore full access for all members.'}
+              </p>
+            </div>
+            <button
+              onClick={onOpenPricing}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition cursor-pointer shrink-0"
+            >
+              {trialActive ? 'Upgrade now' : 'Restore access'}
+            </button>
+          </div>
+        )}
+
+        {/* Viewer notice */}
+        {isViewer && (
+          <div className="rounded-2xl border border-sky-500/30 bg-sky-950/30 p-3 text-[11px] text-sky-200">
+            You have <strong>viewer</strong> access: you can read notes and shared templates, but cannot invite members, change roles, or edit shared templates.
+          </div>
+        )}
+
         {/* Member Management */}
         <div className="bg-[#1e1f20] border border-[#2d2e30] rounded-2xl p-5 space-y-4 shadow-xl">
           <div className="flex items-center justify-between">
@@ -277,6 +371,13 @@ export function TeamDashboard({
           <div className="divide-y divide-[#2d2e30]/60 border border-[#2d2e30] rounded-xl overflow-hidden">
             {(team?.members || []).map((email, idx) => {
               const isLead = email === team?.members?.[0];
+              const role = getMemberRole(team, email);
+              const roleColor =
+                role === 'owner'
+                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                  : role === 'doctor'
+                    ? 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+                    : 'bg-slate-500/20 text-slate-300 border-slate-500/30';
               return (
                 <div key={idx} className="p-3 bg-[#131314]/50 flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2.5">
@@ -289,6 +390,23 @@ export function TeamDashboard({
                         {isLead ? 'Team Owner & Billing Admin' : 'Practice Member'}
                       </span>
                     </div>
+                    {isOwner ? (
+                      <select
+                        value={role}
+                        onChange={(e) => handleRoleChange(email, e.target.value as TeamMemberRole)}
+                        disabled={isLead}
+                        title={isLead ? 'Founding owner role is fixed' : 'Change member role'}
+                        className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border outline-none cursor-pointer disabled:opacity-70 ${roleColor}`}
+                      >
+                        <option value="owner">Owner</option>
+                        <option value="doctor">Doctor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    ) : (
+                      <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${roleColor}`}>
+                        {role}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3">

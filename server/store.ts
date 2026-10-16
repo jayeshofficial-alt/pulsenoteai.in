@@ -38,6 +38,15 @@ export interface DocumentVersion {
   sections: Record<string, string>;
 }
 
+export type DocumentSignoffStatus = 'draft' | 'in_review' | 'signed_off';
+
+export interface DocumentSignoffEvent {
+  status: DocumentSignoffStatus;
+  by: string;
+  at: number;
+  note?: string;
+}
+
 export interface StoredDocument {
   id: string;
   userId: string;
@@ -52,6 +61,13 @@ export interface StoredDocument {
   createdAt: number;
   updatedAt: number;
   versions: DocumentVersion[];
+  /** Clinical/enterprise sign-off: draft → in_review → signed_off (locked). */
+  signoff?: {
+    status: DocumentSignoffStatus;
+    reviewedBy?: string;
+    signedAt?: number;
+    history: DocumentSignoffEvent[];
+  };
 }
 
 interface DatabaseSchema {
@@ -1272,6 +1288,9 @@ class Store {
     if (!doc) {
       throw new Error('Document not found');
     }
+    if (doc.signoff?.status === 'signed_off') {
+      throw new Error('Document is signed off and locked. Reopen it before editing.');
+    }
 
     const now = Date.now();
     if (updates.title) {
@@ -1318,6 +1337,56 @@ class Store {
       },
       userEmail
     );
+  }
+
+  /** Submit a document for senior review (draft → in_review). */
+  public submitDocumentForReview(docId: string, by: string, note?: string): StoredDocument {
+    const doc = this.getDocumentById(docId);
+    if (!doc) throw new Error('Document not found');
+    if (doc.signoff?.status === 'signed_off') {
+      throw new Error('Document is already signed off and locked.');
+    }
+    const now = Date.now();
+    doc.signoff = doc.signoff || { status: 'draft', history: [] };
+    doc.signoff.status = 'in_review';
+    doc.signoff.reviewedBy = by;
+    doc.signoff.history.push({ status: 'in_review', by, at: now, note });
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+
+  /** Sign off a document (in_review → signed_off). Locks all further edits. */
+  public signOffDocument(docId: string, by: string, note?: string): StoredDocument {
+    const doc = this.getDocumentById(docId);
+    if (!doc) throw new Error('Document not found');
+    if (doc.signoff?.status === 'signed_off') {
+      throw new Error('Document is already signed off.');
+    }
+    const now = Date.now();
+    doc.signoff = doc.signoff || { status: 'draft', history: [] };
+    doc.signoff.status = 'signed_off';
+    doc.signoff.reviewedBy = by;
+    doc.signoff.signedAt = now;
+    doc.signoff.history.push({ status: 'signed_off', by, at: now, note });
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+
+  /** Reopen a signed-off (or in-review) document back to draft for corrections. */
+  public reopenDocument(docId: string, by: string, note?: string): StoredDocument {
+    const doc = this.getDocumentById(docId);
+    if (!doc) throw new Error('Document not found');
+    if (!doc.signoff || doc.signoff.status === 'draft') {
+      throw new Error('Document is already a draft.');
+    }
+    const now = Date.now();
+    doc.signoff.status = 'draft';
+    doc.signoff.history.push({ status: 'draft', by, at: now, note: note || 'Reopened for corrections' });
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
   }
 
   public deleteDocument(userId: string, docId: string): boolean {
