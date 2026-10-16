@@ -23,7 +23,7 @@ import {
   addDoc,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { FeatureSettingsDoc, UserFirestoreData, TeamDoc, CustomTemplateDoc, PartnerLeadDoc } from '../types';
+import { FeatureSettingsDoc, UserFirestoreData, TeamDoc, TeamMemberRole, CustomTemplateDoc, PartnerLeadDoc } from '../types';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
@@ -262,17 +262,76 @@ export async function createTeamAccount(
   ownerEmail: string
 ): Promise<string> {
   const teamRef = doc(collection(db, 'teams'));
+  const owner = ownerEmail.toLowerCase().trim();
   const teamData: Omit<TeamDoc, 'id'> = {
     ownerUid,
     name,
     seats,
-    members: [ownerEmail],
+    members: [owner],
+    memberRoles: { [owner]: 'owner' },
     createdAt: new Date().toISOString(),
   };
   await setDoc(teamRef, teamData);
   // Link to user profile
   await setDoc(doc(db, 'users', ownerUid), { teamId: teamRef.id }, { merge: true });
   return teamRef.id;
+}
+
+/** 14-day free trial workspace: 3 seats, full features, no card required. */
+export const TEAM_TRIAL_DAYS = 14;
+export const TEAM_TRIAL_SEATS = 3;
+
+export async function createTeamTrial(
+  name: string,
+  ownerUid: string,
+  ownerEmail: string
+): Promise<string> {
+  const teamRef = doc(collection(db, 'teams'));
+  const owner = ownerEmail.toLowerCase().trim();
+  const trialEndsAt = new Date(Date.now() + TEAM_TRIAL_DAYS * 86400000).toISOString();
+  const teamData: Omit<TeamDoc, 'id'> = {
+    ownerUid,
+    name,
+    seats: TEAM_TRIAL_SEATS,
+    members: [owner],
+    memberRoles: { [owner]: 'owner' },
+    isTrial: true,
+    trialEndsAt,
+    createdAt: new Date().toISOString(),
+  };
+  await setDoc(teamRef, teamData);
+  await setDoc(doc(db, 'users', ownerUid), { teamId: teamRef.id }, { merge: true });
+  return teamRef.id;
+}
+
+/** Resolve a member's role. Owner-uid/first member defaults to owner, others to doctor. */
+export function getMemberRole(team: TeamDoc | null, email?: string | null): TeamMemberRole {
+  if (!team || !email) return 'viewer';
+  const clean = email.toLowerCase().trim();
+  const mapped = team.memberRoles?.[clean];
+  if (mapped === 'owner' || mapped === 'doctor' || mapped === 'viewer') return mapped;
+  if ((team.members || [])[0] === clean) return 'owner';
+  return (team.members || []).includes(clean) ? 'doctor' : 'viewer';
+}
+
+/** Trial is active when isTrial and trialEndsAt is in the future. */
+export function isTeamTrialActive(team: TeamDoc | null): boolean {
+  if (!team?.isTrial || !team?.trialEndsAt) return false;
+  return new Date(team.trialEndsAt).getTime() > Date.now();
+}
+
+/** Owner-only: change a member's role. */
+export async function setMemberRole(teamId: string, memberEmail: string, role: TeamMemberRole) {
+  const teamRef = doc(db, 'teams', teamId);
+  const snap = await getDoc(teamRef);
+  if (!snap.exists()) throw new Error('Team does not exist');
+  const team = snap.data() as TeamDoc;
+  const clean = memberEmail.toLowerCase().trim();
+  if (!(team.members || []).includes(clean)) throw new Error('User is not a team member');
+  if ((team.members || [])[0] === clean && role !== 'owner') {
+    throw new Error('The founding owner role cannot be removed');
+  }
+  await setDoc(teamRef, { memberRoles: { ...(team.memberRoles || {}), [clean]: role } }, { merge: true });
 }
 
 export async function inviteTeamMember(teamId: string, newMemberEmail: string) {
@@ -288,7 +347,14 @@ export async function inviteTeamMember(teamId: string, newMemberEmail: string) {
     throw new Error(`Team seat limit reached (${team.seats} seats). Upgrade seats to add more members.`);
   }
   const updatedMembers = [...(team.members || []), cleanEmail];
-  await setDoc(teamRef, { members: updatedMembers }, { merge: true });
+  await setDoc(
+    teamRef,
+    {
+      members: updatedMembers,
+      memberRoles: { ...(team.memberRoles || {}), [cleanEmail]: 'doctor' },
+    },
+    { merge: true }
+  );
 }
 
 export async function removeTeamMember(teamId: string, memberEmail: string) {
@@ -298,7 +364,9 @@ export async function removeTeamMember(teamId: string, memberEmail: string) {
   const team = snap.data() as TeamDoc;
   const cleanEmail = memberEmail.toLowerCase().trim();
   const updatedMembers = (team.members || []).filter((m) => m !== cleanEmail);
-  await setDoc(teamRef, { members: updatedMembers }, { merge: true });
+  const updatedRoles = { ...(team.memberRoles || {}) };
+  delete updatedRoles[cleanEmail];
+  await setDoc(teamRef, { members: updatedMembers, memberRoles: updatedRoles }, { merge: true });
 }
 
 // -------------------------------------------------------------

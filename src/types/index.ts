@@ -529,12 +529,19 @@ export interface UserFirestoreData {
   referredBy?: string;
 }
 
+export type TeamMemberRole = 'owner' | 'doctor' | 'viewer';
+
 export interface TeamDoc {
   id: string;
   ownerUid: string;
   name: string;
   seats: number;
   members: string[]; // Email list of members
+  /** Email → role map. Missing entries default: ownerUid/first member = owner, else doctor. */
+  memberRoles?: Record<string, TeamMemberRole>;
+  /** 14-day free trial fields. Trial teams get full features until trialEndsAt. */
+  isTrial?: boolean;
+  trialEndsAt?: string;
   createdAt: string;
 }
 

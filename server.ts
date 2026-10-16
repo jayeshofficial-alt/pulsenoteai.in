@@ -2232,6 +2232,39 @@ app.delete('/api/documents/:id', (req, res) => {
   return res.status(404).json({ error: 'DOCUMENT_NOT_FOUND', message: 'Document not found or already deleted' });
 });
 
+// POST /api/documents/:id/submit-review — draft → in_review
+app.post('/api/documents/:id/submit-review', (req, res) => {
+  try {
+    const { by = 'author', note } = req.body || {};
+    const doc = store.submitDocumentForReview(req.params.id, String(by), note ? String(note) : undefined);
+    return res.json({ success: true, document: doc });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'REVIEW_SUBMIT_FAILED', message: err?.message || 'Failed to submit for review' });
+  }
+});
+
+// POST /api/documents/:id/sign-off — in_review → signed_off (locks edits)
+app.post('/api/documents/:id/sign-off', (req, res) => {
+  try {
+    const { by = 'reviewer', note } = req.body || {};
+    const doc = store.signOffDocument(req.params.id, String(by), note ? String(note) : undefined);
+    return res.json({ success: true, document: doc });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'SIGNOFF_FAILED', message: err?.message || 'Failed to sign off document' });
+  }
+});
+
+// POST /api/documents/:id/reopen — signed_off/in_review → draft
+app.post('/api/documents/:id/reopen', (req, res) => {
+  try {
+    const { by = 'author', note } = req.body || {};
+    const doc = store.reopenDocument(req.params.id, String(by), note ? String(note) : undefined);
+    return res.json({ success: true, document: doc });
+  } catch (err: any) {
+    return res.status(400).json({ error: 'REOPEN_FAILED', message: err?.message || 'Failed to reopen document' });
+  }
+});
+
 // POST /api/user/delete-account - Permanently delete user account and all saved data (Requirement 3)
 app.post(['/api/user/delete-account', '/api/user/account/delete'], (req, res) => {
   const { userId, email } = req.body || {};
@@ -2369,20 +2402,20 @@ app.post(['/api/create-order', '/api/razorpay/create-order'], async (req, res) =
 // Server /api/razorpay/create-subscription
 //
 // Billing matrix (amounts in INR paise):
-//   pro  + monthly        → subscription ₹699/mo,  monthly interval, 120 cycles
-//   pro  + yearly_mandate → subscription ₹499/mo,  monthly interval, 12 cycles (1-year commitment)
-//   team + monthly        → subscription ₹399/seat/mo, monthly interval, 120 cycles, qty = seats
-// Upfront yearly (₹5,508 pro / seats×₹299×12 team) is a ONE-TIME order via /api/create-order.
+//   pro  + monthly → subscription ₹699/mo,  monthly interval, 120 cycles (cancel anytime)
+//   team + monthly → subscription ₹399/seat/mo, monthly interval, 120 cycles, qty = seats
+// Yearly is ONE-TIME upfront via /api/create-order:
+//   pro  → ₹5,508 (₹459 × 12) | team → seats × ₹299 × 12
 const BILLING_MATRIX: Record<string, { amountPaise: number; interval: 'monthly'; totalCount: number; label: string }> = {
   'pro:monthly': { amountPaise: 69900, interval: 'monthly', totalCount: 120, label: 'PulseNote Pro Monthly' },
-  'pro:yearly_mandate': { amountPaise: 49900, interval: 'monthly', totalCount: 12, label: 'PulseNote Pro Yearly (billed monthly)' },
   'team:monthly': { amountPaise: 39900, interval: 'monthly', totalCount: 120, label: 'PulseNote Team Monthly (per seat)' },
 };
 
 function resolveBillingKey(plan: string, billing: string): string {
   const p = plan === 'team' ? 'team' : 'pro';
-  const b = billing === 'yearly_mandate' ? 'yearly_mandate' : 'monthly';
-  return `${p}:${b}`;
+  // Only monthly mandates exist; anything else falls back to monthly.
+  // Yearly is sold as one-time upfront orders, not mandates.
+  return `${p}:monthly`;
 }
 
 app.post('/api/razorpay/create-subscription', async (req, res) => {
@@ -2395,17 +2428,11 @@ app.post('/api/razorpay/create-subscription', async (req, res) => {
 
     const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
     // Per-tier Razorpay Plan IDs (each Razorpay Plan has a FIXED amount, so
-    // monthly and yearly-mandate tiers need distinct plans). Pin real IDs in env;
+    // each tier needs its own plan). Pin real IDs in env;
     // otherwise the server auto-creates them and logs the IDs to pin.
     const planProMonthly = process.env.RAZORPAY_PLAN_PRO_MONTHLY || '';
-    const planProYearly = process.env.RAZORPAY_PLAN_PRO_YEARLY || '';
     const planTeamMonthly = process.env.RAZORPAY_PLAN_TEAM_MONTHLY || '';
-    const presetPlanId =
-      req.body?.billing === 'yearly_mandate' && req.body?.plan !== 'team'
-        ? planProYearly
-        : req.body?.plan === 'team'
-          ? planTeamMonthly
-          : planProMonthly;
+    const presetPlanId = req.body?.plan === 'team' ? planTeamMonthly : planProMonthly;
 
     const { plan = 'pro', seats = 3, billing = 'monthly' } = req.body || {};
     const billingKey = resolveBillingKey(plan, billing);
@@ -2433,9 +2460,7 @@ app.post('/api/razorpay/create-subscription', async (req, res) => {
             name: `${tier.label} — ₹${(tier.amountPaise / 100).toLocaleString('en-IN')}/mo`,
             amount: tier.amountPaise,
             currency: 'INR',
-            description: billingKey === 'pro:yearly_mandate'
-              ? '₹499 billed monthly, 12-month commitment'
-              : tier.label,
+            description: tier.label,
           },
         });
         validPlanId = createdPlan.id;
