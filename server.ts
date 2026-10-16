@@ -1645,6 +1645,48 @@ app.all(['/api/gemini/video/download', '/api/video-download'], async (req, res) 
 // Uses gemini-2.5-flash with temperature: 0, topP: 1, responseMimeType: "application/json"
 // Never invents facts; returns strict schema or error with retry
 // ==========================================
+/**
+ * Fetch with a hard timeout so a hung AI provider can never hang the request
+ * until the platform kills it with an HTML gateway error page.
+ */
+async function fetchWithTimeout(url: string, options: any = {}, timeoutMs = 90000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Robustly extract a JSON object from model output.
+ * Handles: raw JSON, ```json fenced blocks, prose-wrapped JSON, trailing commas.
+ * Returns null when no parseable object exists.
+ */
+function extractJsonObject(text: string): any | null {
+  if (!text || typeof text !== 'string') return null;
+  let t = text.trim();
+  // Strip markdown code fences
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence) t = fence[1].trim();
+  try {
+    const direct = JSON.parse(t);
+    if (direct && typeof direct === 'object') return direct;
+  } catch { /* fall through to brace scan */ }
+  // Scan for the largest {...} block
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    const candidate = t.slice(start, end + 1).replace(/,\s*([}\]])/g, '$1');
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch { /* no parseable object */ }
+  }
+  return null;
+}
+
 app.post('/api/notes/generate', async (req, res) => {
   const { input: rawInput, templateType = 'soap', customSchema } = req.body;
   if (!rawInput || typeof rawInput !== 'string' || !rawInput.trim()) {
@@ -1822,6 +1864,7 @@ app.post('/api/notes/generate', async (req, res) => {
   try {
     let parsed: any = null;
     let modelUsed = 'gemini-2.5-flash';
+    let providerErrorDetail = '';
 
     if (process.env.GEMINI_API_KEY) {
       try {
@@ -1848,42 +1891,60 @@ app.post('/api/notes/generate', async (req, res) => {
       const schemaKeys = responseSchema?.required || ['subjective', 'objective', 'assessment', 'plan'];
       const systemWithSchema = `${systemInstruction} Output ONLY a valid JSON object with the following required string keys in exact order: ${JSON.stringify(schemaKeys)}. Never return free text or markdown outside the JSON.`;
 
-      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': process.env.APP_URL || 'https://pulsenoteai.in',
-          'X-Title': 'PulseNote AI',
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [
-            { role: 'system', content: systemWithSchema },
-            { role: 'user', content: rawInput.trim() },
-          ],
-          temperature: 0,
-          top_p: 0.1,
-          response_format: { type: 'json_object' },
-        }),
-      });
+      try {
+        const orRes = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.APP_URL || 'https://pulsenoteai.in',
+            'X-Title': 'PulseNote AI',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              { role: 'system', content: systemWithSchema },
+              { role: 'user', content: rawInput.trim() },
+            ],
+            temperature: 0,
+            top_p: 0.1,
+            response_format: { type: 'json_object' },
+          }),
+        }, 90000);
 
-      if (orRes.ok) {
-        const orData = await orRes.json();
-        const contentStr = orData.choices?.[0]?.message?.content || '';
-        try {
-          parsed = JSON.parse(contentStr);
-          modelUsed = 'google/gemini-2.5-flash (OpenRouter)';
-        } catch (jsonErr) {
-          console.error('[DeterministicEngine] JSON parse failed on OpenRouter reply:', contentStr);
+        if (!orRes.ok) {
+          const errBody = await orRes.text().catch(() => '');
+          console.error(`[DeterministicEngine] OpenRouter HTTP ${orRes.status}:`, errBody.slice(0, 300));
+          providerErrorDetail = `AI provider returned ${orRes.status}${orRes.status === 401 ? ' — check OPENROUTER_API_KEY' : orRes.status === 402 ? ' — insufficient OpenRouter credits' : orRes.status === 429 ? ' — rate limited, retry shortly' : ''}`;
+        } else {
+          const orData = await orRes.json();
+          const contentStr = orData.choices?.[0]?.message?.content || '';
+          parsed = extractJsonObject(contentStr);
+          if (parsed) {
+            modelUsed = 'google/gemini-2.5-flash (OpenRouter)';
+          } else {
+            console.error('[DeterministicEngine] JSON parse failed on OpenRouter reply:', String(contentStr).slice(0, 300));
+            providerErrorDetail = 'AI provider returned unparseable output; retried parse with fence-stripping and brace scan.';
+          }
         }
+      } catch (orErr: any) {
+        const isTimeout = orErr?.name === 'AbortError';
+        console.error('[DeterministicEngine] OpenRouter request failed:', orErr?.message);
+        providerErrorDetail = isTimeout ? 'AI provider timed out after 90s. Please click Retry.' : `AI provider request failed: ${orErr?.message || 'network error'}`;
       }
+    }
+
+    if (!process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY && !parsed) {
+      return res.status(503).json({
+        error: 'NO_PROVIDER_KEY',
+        message: 'No AI provider key configured on the server. Add GEMINI_API_KEY or OPENROUTER_API_KEY in deployment secrets.',
+      });
     }
 
     if (!parsed) {
       return res.status(500).json({
         error: 'JSON_PARSE_ERROR',
-        message: 'Formatting failed to parse into deterministic schema. Please click Retry.',
+        message: providerErrorDetail || 'Formatting failed to parse into deterministic schema. Please click Retry.',
       });
     }
 
@@ -2004,28 +2065,34 @@ app.post('/api/notes/regenerate-section', async (req, res) => {
     }
 
     if (!newContent && process.env.OPENROUTER_API_KEY) {
-      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': process.env.APP_URL || 'https://pulsenoteai.in',
-          'X-Title': 'PulseNote AI',
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: rawInput.trim() },
-          ],
-          temperature: 0,
-          top_p: 0.1,
-        }),
-      });
+      try {
+        const orRes = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.APP_URL || 'https://pulsenoteai.in',
+            'X-Title': 'PulseNote AI',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: rawInput.trim() },
+            ],
+            temperature: 0,
+            top_p: 0.1,
+          }),
+        }, 90000);
 
-      if (orRes.ok) {
-        const orData = await orRes.json();
-        newContent = (orData.choices?.[0]?.message?.content || '').trim();
+        if (orRes.ok) {
+          const orData = await orRes.json();
+          newContent = (orData.choices?.[0]?.message?.content || '').trim();
+        } else {
+          console.error(`[DeterministicEngine] regenerate-section OpenRouter HTTP ${orRes.status}`);
+        }
+      } catch (orErr: any) {
+        console.error('[DeterministicEngine] regenerate-section OpenRouter failed:', orErr?.message);
       }
     }
 
