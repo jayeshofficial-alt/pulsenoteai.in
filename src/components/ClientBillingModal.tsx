@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   ExternalLink,
   Sparkles,
-  Receipt
+  Receipt,
+  LogOut
 } from 'lucide-react';
 
 interface ClientBillingModalProps {
@@ -22,6 +23,7 @@ interface ClientBillingModalProps {
   currentUser: UserProfile | null;
   onOpenPricing: () => void;
   onRefreshUser: () => void;
+  onLogout?: () => void | Promise<void>;
 }
 
 export const ClientBillingModal: React.FC<ClientBillingModalProps> = ({
@@ -30,6 +32,7 @@ export const ClientBillingModal: React.FC<ClientBillingModalProps> = ({
   currentUser,
   onOpenPricing,
   onRefreshUser,
+  onLogout,
 }) => {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -85,11 +88,10 @@ Plan Purchased: ${payment.planName}
 Amount Paid: ${payment.currency === 'INR' ? '₹' : '$'}${payment.amount}
 Payment Mode: ${payment.paymentMethod}
 Transaction Reference / UTR: ${payment.transactionRef}
-Settlement Account (Direct VPA): ${payment.settlementVpa}
 Payment Status: ${payment.status.toUpperCase()}
 
 Security & Compliance:
-• Direct Settlement to wagh.jayesh@oksbi
+• Razorpay Managed Payment Gateway
 • PCI-DSS Compliant Tokenized Checkout
 • TLS 1.3 / AES-256 Encryption
 
@@ -150,17 +152,30 @@ Thank you for choosing PulseNote AI.
           </div>
 
           <div className="flex items-center gap-2">
+            {onLogout && (
+              <button
+                onClick={async () => {
+                  onClose();
+                  await onLogout();
+                }}
+                className="px-3.5 py-1.5 text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Sign out of your account"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Logout</span>
+              </button>
+            )}
             <button
               onClick={handleManualSyncExpiration}
               disabled={syncing}
               title="Sync subscription status with expiration engine"
-              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-emerald-400 transition-colors"
+              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
             >
               <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin text-emerald-400' : ''}`} />
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -224,8 +239,8 @@ Thank you for choosing PulseNote AI.
                 <CreditCard className="w-4 h-4 text-emerald-400" />
                 Complete Payment & Settlement History
               </h4>
-              <span className="text-[11px] text-slate-500 font-mono">
-                Direct VPA: wagh.jayesh@oksbi
+              <span className="text-[11px] text-emerald-400 font-medium">
+                Billing Status: Active (Razorpay Managed)
               </span>
             </div>
 

@@ -309,7 +309,7 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
             onClick={onOpenPricing}
             className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
           >
-            <span>👉 Pay via Secure UPI (wagh.jayesh@oksbi), Credit/Debit Card, or Net Banking</span>
+            <span>👉 Pay via Secure UPI, Credit/Debit Card, or Net Banking</span>
           </button>
         </div>
       </div>

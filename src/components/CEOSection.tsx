@@ -31,7 +31,7 @@ export const CEO_PROFILE = {
   githubHandle: '@jayeshwagh',
   githubUrl: 'https://github.com/jayeshwagh',
   email: 'contact@pulsenoteai.in',
-  upiHandle: 'wagh.jayesh@oksbi',
+  upiHandle: 'Razorpay Gateway',
   initials: 'JW',
   
   tagline: 'Full-stack AI architect and engineer pioneering deterministic clinical synthesis and multimodal workflow engines.',

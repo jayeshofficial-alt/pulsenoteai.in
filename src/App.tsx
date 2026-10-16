@@ -1809,6 +1809,7 @@ export function App() {
               syncAuthoritativeProfile(currentUser.email, currentUser.name, currentUser.avatarUrl);
             }
           }}
+          onLogout={handleLogout}
         />
       )}
 

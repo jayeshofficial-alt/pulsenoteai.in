@@ -694,7 +694,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-medium text-[#e3e3e3]">Revenue Overview</h3>
                   <span className="text-xs text-[#9aa0a6] bg-[#2d2e30] px-3 py-1 rounded-full border border-[#3c4043]">
-                    UPI: wagh.jayesh@oksbi
+                    Razorpay Gateway
                   </span>
                 </div>
                 <div className="h-[200px] bg-[#131314] rounded-xl flex flex-col items-center justify-center text-[#9aa0a6] text-sm border border-dashed border-[#3c4043] p-4 text-center">
@@ -876,7 +876,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
             <div className="bg-[#1e1f20] border border-amber-500/30 rounded-2xl p-4 text-sm flex items-start gap-3 shadow-sm">
               <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
               <p className="text-amber-300 text-xs leading-relaxed">
-                <strong>Security Notice:</strong> Do not change API keys here. This UI only edits display and tier metadata. Your payment gateway at <code className="bg-[#131314] px-1.5 py-0.5 rounded text-amber-200">/api/payment/*</code> and UPI VPA (<code className="bg-[#131314] px-1.5 py-0.5 rounded text-amber-200">wagh.jayesh@oksbi</code>) remain strictly verified and untouched.
+                <strong>Security Notice:</strong> Do not change API keys here. This UI only edits display and tier metadata. Your payment gateway at <code className="bg-[#131314] px-1.5 py-0.5 rounded text-amber-200">/api/payment/*</code> and Razorpay configuration remain strictly verified and untouched.
               </p>
             </div>
           </div>
@@ -1416,7 +1416,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   ₹{financialData?.totalINR?.toLocaleString() || 0}
                 </div>
                 <div className="text-[11px] text-slate-500 mt-1">
-                  Settled directly to: <span className="text-amber-300 font-mono">wagh.jayesh@oksbi</span>
+                  Processed via: <span className="text-emerald-400 font-mono">Razorpay Gateway</span>
                 </div>
               </div>
 
