@@ -2263,13 +2263,21 @@ app.post(['/api/create-order', '/api/razorpay/create-order'], async (req, res) =
 
     let amountInPaise = Number(amount);
 
-    // Support packId/plan presets if amount is not passed explicitly
+    // Support packId/plan presets if amount is not passed explicitly.
+    // Billing matrix: monthly ₹699 pro / ₹399×seats team (mandate);
+    // yearly upfront ₹5,508 pro (₹459×12) / seats×₹299×12 team.
     if (!amountInPaise || isNaN(amountInPaise)) {
-      if (plan === 'pro') {
-        amountInPaise = 49900; // ₹499
+      const billing = req.body?.billing || 'monthly';
+      if (plan === 'pro' && billing === 'yearly_upfront') {
+        amountInPaise = 550800; // ₹5,508 = ₹459 × 12
+      } else if (plan === 'team' && billing === 'yearly_upfront') {
+        const seatCount = Math.max(3, Number(seats) || 3);
+        amountInPaise = seatCount * 299 * 12 * 100; // ₹299 × 12 × seats
+      } else if (plan === 'pro') {
+        amountInPaise = 69900; // ₹699 monthly
       } else if (plan === 'team') {
         const seatCount = Math.max(3, Number(seats) || 3);
-        amountInPaise = seatCount * 39900; // ₹399/seat
+        amountInPaise = seatCount * 39900; // ₹399/seat monthly
       } else if (packId === 'credits_100') {
         amountInPaise = 29900; // ₹299
       } else if (packId === 'credits_500') {
@@ -2319,6 +2327,24 @@ app.post(['/api/create-order', '/api/razorpay/create-order'], async (req, res) =
 });
 
 // Server /api/razorpay/create-subscription
+//
+// Billing matrix (amounts in INR paise):
+//   pro  + monthly        → subscription ₹699/mo,  monthly interval, 120 cycles
+//   pro  + yearly_mandate → subscription ₹499/mo,  monthly interval, 12 cycles (1-year commitment)
+//   team + monthly        → subscription ₹399/seat/mo, monthly interval, 120 cycles, qty = seats
+// Upfront yearly (₹5,508 pro / seats×₹299×12 team) is a ONE-TIME order via /api/create-order.
+const BILLING_MATRIX: Record<string, { amountPaise: number; interval: 'monthly'; totalCount: number; label: string }> = {
+  'pro:monthly': { amountPaise: 69900, interval: 'monthly', totalCount: 120, label: 'PulseNote Pro Monthly' },
+  'pro:yearly_mandate': { amountPaise: 49900, interval: 'monthly', totalCount: 12, label: 'PulseNote Pro Yearly (billed monthly)' },
+  'team:monthly': { amountPaise: 39900, interval: 'monthly', totalCount: 120, label: 'PulseNote Team Monthly (per seat)' },
+};
+
+function resolveBillingKey(plan: string, billing: string): string {
+  const p = plan === 'team' ? 'team' : 'pro';
+  const b = billing === 'yearly_mandate' ? 'yearly_mandate' : 'monthly';
+  return `${p}:${b}`;
+}
+
 app.post('/api/razorpay/create-subscription', async (req, res) => {
   try {
     const keyId =
@@ -2328,34 +2354,59 @@ app.post('/api/razorpay/create-subscription', async (req, res) => {
       RAZORPAY_KEY_ID;
 
     const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
-    const planPro = process.env.RAZORPAY_PLAN_PRO || 'plan_P1111111111111';
-    const planTeam = process.env.RAZORPAY_PLAN_TEAM || 'plan_T2222222222222';
+    // Per-tier Razorpay Plan IDs (each Razorpay Plan has a FIXED amount, so
+    // monthly and yearly-mandate tiers need distinct plans). Pin real IDs in env;
+    // otherwise the server auto-creates them and logs the IDs to pin.
+    const planProMonthly = process.env.RAZORPAY_PLAN_PRO_MONTHLY || '';
+    const planProYearly = process.env.RAZORPAY_PLAN_PRO_YEARLY || '';
+    const planTeamMonthly = process.env.RAZORPAY_PLAN_TEAM_MONTHLY || '';
+    const presetPlanId =
+      req.body?.billing === 'yearly_mandate' && req.body?.plan !== 'team'
+        ? planProYearly
+        : req.body?.plan === 'team'
+          ? planTeamMonthly
+          : planProMonthly;
 
-    const { plan = 'pro', seats = 3 } = req.body || {};
-    const planId = plan === 'team' ? planTeam : planPro;
+    const { plan = 'pro', seats = 3, billing = 'monthly' } = req.body || {};
+    const billingKey = resolveBillingKey(plan, billing);
+    const tier = BILLING_MATRIX[billingKey];
 
     const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
 
-    // Validate or auto-create plan
-    let validPlanId = planId;
-    try {
-      await client.plans.fetch(planId);
-    } catch (planErr: any) {
-      console.warn(`[Razorpay] Plan fetch failed for ${planId}:`, planErr?.error?.description || planErr?.message);
+    // Validate or auto-create the Razorpay Plan for this exact billing tier.
+    // (A Razorpay Plan's amount is immutable, so each tier needs its own plan.)
+    let validPlanId = presetPlanId;
+    if (validPlanId) {
+      try {
+        await client.plans.fetch(validPlanId);
+      } catch (planErr: any) {
+        console.warn(`[Razorpay] Configured plan ${validPlanId} unreachable:`, planErr?.error?.description || planErr?.message);
+        validPlanId = '';
+      }
+    }
+    if (!validPlanId) {
       try {
         const createdPlan = await client.plans.create({
-          period: 'monthly',
+          period: tier.interval,
           interval: 1,
           item: {
-            name: plan === 'team' ? 'PulseNote AI Clinic Team Plan' : 'PulseNote AI Pro Plan',
-            amount: plan === 'team' ? 39900 : 49900,
+            name: `${tier.label} — ₹${(tier.amountPaise / 100).toLocaleString('en-IN')}/mo`,
+            amount: tier.amountPaise,
             currency: 'INR',
-            description: plan === 'team' ? '₹399 per seat monthly' : '₹499 monthly subscription',
+            description: billingKey === 'pro:yearly_mandate'
+              ? '₹499 billed monthly, 12-month commitment'
+              : tier.label,
           },
         });
         validPlanId = createdPlan.id;
+        console.log(`[Razorpay] Auto-created plan ${validPlanId} for tier ${billingKey}. Pin it as env to reuse.`);
       } catch (autoCreateErr: any) {
-        console.warn('[Razorpay] Auto-create plan fallback:', autoCreateErr?.error?.description || autoCreateErr?.message);
+        console.error('[Razorpay] Plan auto-create failed:', autoCreateErr?.error?.description || autoCreateErr?.message);
+        return res.status(500).json({
+          success: false,
+          error: 'PLAN_SETUP_FAILED',
+          message: 'Billing plan setup failed. Please try again or contact support.',
+        });
       }
     }
 
@@ -2366,12 +2417,13 @@ app.post('/api/razorpay/create-subscription', async (req, res) => {
     try {
       const sub = await client.subscriptions.create({
         plan_id: validPlanId,
-        total_count: 120,
+        total_count: tier.totalCount,
         quantity: seatCount,
         customer_notify: 1,
         notes: {
           uid,
           plan,
+          billing: billingKey,
           seats: seatCount,
         },
       });
@@ -2379,25 +2431,21 @@ app.post('/api/razorpay/create-subscription', async (req, res) => {
       return res.json({
         success: true,
         subscriptionId: sub.id,
+        plan,
+        billing: billingKey,
+        seats: seatCount,
+        amountPerCycle: tier.amountPaise,
+        currency: 'INR',
         keyId,
       });
     } catch (subErr: any) {
       const desc = subErr?.error?.description || subErr?.message || 'Razorpay subscription creation failed.';
-      console.warn('[Razorpay] Subscription creation failed, falling back to Order creation:', desc);
+      console.error('[Razorpay] Subscription creation failed:', desc);
 
-      // Fallback: create order if subscription creation fails in test environment
-      const orderAmountPaise = plan === 'team' ? seatCount * 39900 : 49900;
-      const fallbackOrder = await client.orders.create({
-        amount: orderAmountPaise,
-        currency: 'INR',
-        receipt: `sub_fallback_${Date.now()}`,
-      });
-
-      return res.json({
-        success: true,
-        subscriptionId: fallbackOrder.id,
-        orderId: fallbackOrder.id,
-        keyId,
+      return res.status(502).json({
+        success: false,
+        error: 'SUBSCRIPTION_CREATE_FAILED',
+        message: desc,
       });
     }
   } catch (err: any) {
@@ -2478,13 +2526,27 @@ app.post(['/api/verify-payment', '/api/razorpay/verify-payment', '/api/razorpay/
 
     if (targetUid) {
       const acc = getUserState(targetUid);
+      const billing = (req.body?.billing as string) || '';
       if (plan === 'pro') {
         acc.plan = 'pro';
         acc.credits = Math.max(acc.credits || 0, 500);
+        acc.planBilling = billing === 'yearly_upfront' ? 'yearly_upfront' : 'mandate_monthly';
+        acc.subscriptionId = subIdOrOrderId;
+        // Yearly-upfront = 12 months access; mandate flows renew via webhook/subscription status
+        acc.nextBillingDate = new Date(
+          Date.now() + (billing === 'yearly_upfront' ? 365 : 30) * 24 * 3600 * 1000
+        ).toISOString();
+        acc.subscriptionStatus = 'active';
       } else if (plan === 'team') {
         acc.plan = 'team';
         acc.teamSeats = Math.max(3, Number(seats) || 3);
         acc.credits = Math.max(acc.credits || 0, 1000);
+        acc.planBilling = billing === 'yearly_upfront' ? 'yearly_upfront' : 'mandate_monthly';
+        acc.subscriptionId = subIdOrOrderId;
+        acc.nextBillingDate = new Date(
+          Date.now() + (billing === 'yearly_upfront' ? 365 : 30) * 24 * 3600 * 1000
+        ).toISOString();
+        acc.subscriptionStatus = 'active';
       } else if (packId === 'credits_100') {
         acc.credits = (acc.credits || 0) + 100;
       } else if (packId === 'credits_500') {
@@ -2506,6 +2568,51 @@ app.post(['/api/verify-payment', '/api/razorpay/verify-payment', '/api/razorpay/
       success: false,
       error: 'VERIFICATION_ERROR',
       message: err?.message || 'Payment verification failed.',
+    });
+  }
+});
+
+// Mandate status polling — UPI AutoPay authorizations settle asynchronously.
+// Client polls this after checkout until status is active/charged (or timeout).
+app.get('/api/razorpay/subscription/:id', async (req, res) => {
+  try {
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
+    const keyId =
+      process.env.RAZORPAY_KEY_ID ||
+      process.env.VITE_RAZORPAY_KEY_ID ||
+      process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
+      RAZORPAY_KEY_ID;
+    const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    const sub: any = await client.subscriptions.fetch(req.params.id);
+    const status = String(sub?.status || 'unknown').toLowerCase();
+    const active = ['active', 'authenticated', 'charged'].includes(status) ||
+      Number(sub?.paid_count || 0) > 0;
+    if (active) {
+      // Opportunistically grant the plan from subscription notes
+      const notes = sub?.notes || {};
+      const uid = notes.uid && notes.uid !== 'guest' ? notes.uid : null;
+      if (uid) {
+        const acc = getUserState(uid);
+        acc.plan = notes.plan === 'team' ? 'team' : 'pro';
+        if (notes.plan === 'team') acc.teamSeats = Math.max(3, Number(notes.seats) || 3);
+        acc.subscriptionStatus = 'active';
+        acc.subscriptionId = sub.id;
+        acc.nextBillingDate = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        userAccountState[uid] = acc;
+      }
+    }
+    return res.json({
+      success: true,
+      status: sub?.status || 'unknown',
+      active,
+      paidCount: Number(sub?.paid_count || 0),
+      plan: sub?.notes?.plan || null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: 'SUBSCRIPTION_FETCH_FAILED',
+      message: err?.message || 'Could not fetch subscription status.',
     });
   }
 });
