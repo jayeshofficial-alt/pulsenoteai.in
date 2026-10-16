@@ -102,11 +102,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           onClick={onOpenPricing}
           className="w-full max-w-md py-4 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
         >
-          <span>👉 Pay via Secure UPI (wagh.jayesh@oksbi), Credit/Debit Card, or Net Banking</span>
+          <span>👉 Pay via Secure UPI, Credit/Debit Card, or Net Banking</span>
         </button>
 
         <div className="text-[11px] text-slate-400 font-mono">
-          👉 Pay via Secure UPI (<strong className="text-emerald-400">wagh.jayesh@oksbi</strong>), Credit/Debit Card, or Net Banking.
+          👉 Pay via Secure Razorpay Checkout (UPI, Credit/Debit Card, Net Banking).
         </div>
       </div>
     );
