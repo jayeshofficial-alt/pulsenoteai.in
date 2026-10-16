@@ -4624,50 +4624,14 @@ app.post('/api/payment/create-order', (req, res) => {
 });
 
 app.post('/api/payment/verify', (req, res) => {
-  const { 
-    orderId, 
-    planId = 'pro_monthly', 
-    paymentMethod = 'UPI', 
-    transactionRef,
-    userId,
-    currency = 'INR'
-  } = req.body;
-
-  if (!orderId) {
-    return res.status(400).json({ error: 'Order ID is required' });
-  }
-
-  const isAnnual = planId === 'pro_annual';
-  const amount = isAnnual ? (currency === 'INR' ? 1999 : 24.99) : (currency === 'INR' ? 299 : 3.99);
-
-  try {
-    const payment = store.recordPayment({
-      userId: userId || 'user_sample_doctor',
-      orderId,
-      planId,
-      amount,
-      currency,
-      paymentMethod,
-      transactionRef: transactionRef || `TXN_${Date.now()}`,
-    });
-
-    const user = store.findUserById(userId || 'user_sample_doctor');
-
-    res.json({
-      success: true,
-      message: 'Payment verified and settled successfully to wagh.jayesh@oksbi',
-      payment,
-      isPro: true,
-      planId,
-      orderId,
-      settlementAccount: 'wagh.jayesh@oksbi',
-      paymentMethod,
-      transactionRef: payment.transactionRef,
-      expiresAt: user?.subscription.expiresAt || (Date.now() + (isAnnual ? 365 : 30) * 86400000),
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Payment processing failed' });
-  }
+  // DEPRECATED: self-attested UTR verification removed for security.
+  // All payments must go through Razorpay with HMAC signature verification
+  // via POST /api/verify-payment (see RazorpayCheckoutButton).
+  return res.status(410).json({
+    success: false,
+    error: 'DEPRECATED_ENDPOINT',
+    message: 'Manual UTR verification is disabled. Please complete payment via Razorpay checkout.',
+  });
 });
 
 // ==========================================
