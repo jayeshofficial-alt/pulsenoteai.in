@@ -13,6 +13,9 @@ import {
 const DATA_DIR = path.join(process.cwd(), '.data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
+// Official super-admin contact number (single source of truth)
+export const SUPERADMIN_MOBILE = '+919860215449';
+
 // Password hashing helper using Node crypto PBKDF2
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -106,7 +109,7 @@ class Store {
         id: 'admin_root_jayesh',
         name: 'Jayesh (Super Admin)',
         email: 'jayeshofficial@gmail.com',
-        mobile: '+91 98765 43210',
+        mobile: SUPERADMIN_MOBILE,
         role: 'admin',
         status: 'active',
         isActivated: true,
@@ -128,6 +131,7 @@ class Store {
       admin1.role = 'admin';
       admin1.status = 'active';
       admin1.isActivated = true;
+      admin1.mobile = SUPERADMIN_MOBILE;
     }
     if (!db.userPasswords[admin1.id]) {
       db.userPasswords[admin1.id] = defaultPassHash;
@@ -140,7 +144,7 @@ class Store {
         id: 'admin_root_contact',
         name: 'PulseNote Admin',
         email: 'contact@pulsenoteai.in',
-        mobile: '+91 98765 43211',
+        mobile: SUPERADMIN_MOBILE,
         role: 'admin',
         status: 'active',
         isActivated: true,
@@ -162,6 +166,7 @@ class Store {
       admin2.role = 'admin';
       admin2.status = 'active';
       admin2.isActivated = true;
+      admin2.mobile = SUPERADMIN_MOBILE;
     }
     if (!db.userPasswords[admin2.id]) {
       db.userPasswords[admin2.id] = defaultPassHash;
@@ -210,7 +215,7 @@ class Store {
         id: adminId,
         name: 'Jayesh (Super Admin)',
         email: adminEmail,
-        mobile: '+91 98765 43210',
+        mobile: SUPERADMIN_MOBILE,
         role: 'admin',
         status: 'active',
         isActivated: true,
@@ -440,7 +445,7 @@ class Store {
         id: `admin_${clean.replace(/[^a-z0-9]/g, '_')}`,
         name: clean.includes('jayesh') ? 'Jayesh (Super Admin)' : 'PulseNote Admin',
         email: clean,
-        mobile: '+91 98765 43210',
+        mobile: SUPERADMIN_MOBILE,
         role: 'admin',
         status: 'active',
         isActivated: true,
