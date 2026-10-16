@@ -15,8 +15,10 @@ import {
   Users,
   Handshake,
   Layers,
+  IndianRupee,
 } from 'lucide-react';
 import UserNavMenu from './UserNavMenu';
+import { isRevenueAdmin } from '../lib/firebase';
 
 export type AppActiveView =
   | 'marketing'
@@ -29,7 +31,8 @@ export type AppActiveView =
   | 'partners'
   | 'pricing'
   | 'documents'
-  | 'gallery';
+  | 'gallery'
+  | 'revenue';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -258,6 +261,22 @@ export default function Sidebar({
             >
               <ShieldAlert size={14} className="text-red-400" />
               <span>Admin Feature Portal (/admin)</span>
+            </button>
+          )}
+
+          {/* Revenue Dashboard: ONLY for subscription-revenue admins */}
+          {isRevenueAdmin(currentUser?.email) && (
+            <button
+              type="button"
+              onClick={() => onToggleView('revenue')}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition cursor-pointer border ${
+                activeView === 'revenue'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-semibold'
+                  : 'text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/10'
+              }`}
+            >
+              <IndianRupee size={14} className="text-emerald-400" />
+              <span>Revenue Dashboard</span>
             </button>
           )}
         </div>

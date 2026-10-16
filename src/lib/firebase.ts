@@ -45,6 +45,22 @@ export function isPulseNoteAdmin(email?: string | null, emailVerified?: boolean)
   return ADMIN_EMAILS.includes(clean);
 }
 
+// Revenue Dashboard Admin Allowlist — ONLY these emails may open the
+// Admin Subscription & Revenue Dashboard (client gate; server re-verifies).
+// NOTE: contact@pulsenoteai.in is included alongside the requested
+// contact@pulsenoteai.com because the whole codebase uses the .in address.
+// Remove it if access must be restricted to exactly the two addresses below.
+export const REVENUE_ADMIN_EMAILS = [
+  'jayeshofficial@gmail.com',
+  'contact@pulsenoteai.com',
+  'contact@pulsenoteai.in',
+];
+
+export function isRevenueAdmin(email?: string | null): boolean {
+  if (!email) return false;
+  return REVENUE_ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
+
 // -------------------------------------------------------------
 // Authentication
 // -------------------------------------------------------------

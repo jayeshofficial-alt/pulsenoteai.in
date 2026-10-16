@@ -813,6 +813,218 @@ class Store {
     this.saveDatabase();
   }
 
+  // =========================================================================
+  // SUBSCRIPTION & REVENUE ADMIN (dashboard: jayeshofficial@gmail.com,
+  // contact@pulsenoteai.com). Server-side whitelist — enforced on every route.
+  // =========================================================================
+
+  public static readonly SUBSCRIPTION_ADMIN_EMAILS = [
+    'jayeshofficial@gmail.com',
+    'contact@pulsenoteai.com',
+    // Included alongside .com because the codebase uses .in everywhere.
+    // Remove to restrict to exactly the two requested addresses.
+    'contact@pulsenoteai.in',
+  ];
+
+  public isSubscriptionAdminEmail(email?: string | null): boolean {
+    if (!email) return false;
+    return (this.constructor as typeof Store).SUBSCRIPTION_ADMIN_EMAILS.includes(
+      email.toLowerCase().trim()
+    );
+  }
+
+  /** Toggle per-user AI Image / Video model access. */
+  public setUserAiFlags(
+    userId: string,
+    flags: { aiImageEnabled?: boolean; aiVideoEnabled?: boolean }
+  ): UserProfile {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found');
+    if (this.isStrictAdminEmail(user.email)) {
+      throw new Error('Cannot restrict AI access for super-administrator accounts.');
+    }
+    if (flags.aiImageEnabled !== undefined) user.aiImageEnabled = !!flags.aiImageEnabled;
+    if (flags.aiVideoEnabled !== undefined) user.aiVideoEnabled = !!flags.aiVideoEnabled;
+    this.saveDatabase();
+    return user;
+  }
+
+  /** Manually set a user's plan expiry date (extend or shorten). */
+  public setUserPlanExpiry(userId: string, expiresAt: number | null): UserProfile {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found');
+    user.subscription = user.subscription || {
+      tier: 'free',
+      isPro: false,
+      startDate: Date.now(),
+      expiresAt: null,
+    };
+    user.subscription.expiresAt = expiresAt;
+    if (expiresAt === null || expiresAt > Date.now()) {
+      if (user.status === 'banned') {
+        throw new Error('User is banned. Unban before extending access.');
+      }
+    }
+    this.saveDatabase();
+    console.log(`[Store] Plan expiry for ${user.email} set to ${expiresAt ? new Date(expiresAt).toISOString() : 'lifetime'}`);
+    return user;
+  }
+
+  /**
+   * Start (or restart) a plan for a user with an explicit amount.
+   * Records a manual PaymentRecord so revenue analytics stay accurate.
+   */
+  public startUserPlan(
+    userId: string,
+    opts: {
+      plan: 'pro' | 'team' | 'free';
+      billing?: string;
+      seats?: number;
+      amount?: number;
+      months?: number;
+      paymentMethod?: string;
+      grantedBy?: string;
+    }
+  ): { user: UserProfile; payment: PaymentRecord | null } {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found');
+    if (this.isStrictAdminEmail(user.email)) {
+      throw new Error('Cannot modify super-administrator accounts.');
+    }
+    const now = Date.now();
+    const months = Math.max(1, Math.floor(Number(opts.months) || (opts.plan === 'free' ? 0 : 1)));
+    const expiresAt = opts.plan === 'free' ? null : now + months * 30 * 86400000;
+
+    user.subscription = {
+      tier: (opts.plan === 'free' ? 'free' : opts.plan === 'team' ? 'pro_annual' : 'pro_monthly') as any,
+      isPro: opts.plan !== 'free',
+      startDate: now,
+      expiresAt,
+      grantedByAdmin: true,
+    };
+    if (opts.plan !== 'free') user.dailyPromptCount = 0;
+
+    let payment: PaymentRecord | null = null;
+    if (opts.plan !== 'free') {
+      payment = {
+        id: `PAY_${now}_${Math.random().toString(36).substring(2, 6)}`,
+        userId: user.id,
+        userEmail: user.email,
+        userName: user.name || 'User',
+        orderId: `ADMIN_${now}`,
+        planId: (opts.plan === 'team' ? 'pro_annual' : 'pro_monthly') as any,
+        planName: opts.plan === 'team' ? `Clinic/Team (${opts.seats || 3} seats, manual)` : `Pro (manual, ${opts.billing || 'monthly'})`,
+        amount: Number(opts.amount) || 0,
+        currency: 'INR',
+        paymentMethod: opts.paymentMethod || 'ADMIN_MANUAL',
+        transactionRef: `ADMIN_${opts.grantedBy || 'dashboard'}_${now}`,
+        settlementVpa: 'wagh.jayesh@oksbi',
+        timestamp: now,
+        status: 'completed',
+      };
+      this.db.payments.unshift(payment);
+    }
+    this.saveDatabase();
+    return { user, payment };
+  }
+
+  /** End a user's plan immediately (revert to free). */
+  public endUserPlan(userId: string): UserProfile {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error('User not found');
+    if (this.isStrictAdminEmail(user.email)) {
+      throw new Error('Cannot modify super-administrator accounts.');
+    }
+    user.subscription = {
+      tier: 'free',
+      isPro: false,
+      startDate: user.subscription?.startDate || Date.now(),
+      expiresAt: null,
+    };
+    this.saveDatabase();
+    return user;
+  }
+
+  /** Latest completed payment for a user (plan opted amount + paid date). */
+  public getLatestPaymentForUser(userId: string): PaymentRecord | null {
+    const list = this.db.payments
+      .filter((p) => p.userId === userId && p.status === 'completed')
+      .sort((a, b) => b.timestamp - a.timestamp);
+    return list[0] || null;
+  }
+
+  /**
+   * Revenue analytics over completed payments in [fromMs, toMs].
+   * Earnings = sum(amount). Active subscribers = users with isPro or
+   * non-expired subscription. Renewals = users with >1 completed payment
+   * in range (or repeat payments overall counted in range).
+   */
+  public getRevenueAnalytics(fromMs: number, toMs: number): {
+    earnings: number;
+    currency: string;
+    paymentsCount: number;
+    activeSubscribers: number;
+    renewals: number;
+    newSubscribers: number;
+    byPlan: Record<string, { count: number; earnings: number }>;
+    dailySeries: Array<{ date: string; earnings: number; count: number }>;
+  } {
+    const inRange = this.db.payments.filter(
+      (p) => p.status === 'completed' && p.timestamp >= fromMs && p.timestamp <= toMs
+    );
+    const earnings = inRange.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const byPlan: Record<string, { count: number; earnings: number }> = {};
+    const perUserCount: Record<string, number> = {};
+    const dayMap: Record<string, { earnings: number; count: number }> = {};
+    for (const p of inRange) {
+      const key = p.planName || p.planId || 'unknown';
+      byPlan[key] = byPlan[key] || { count: 0, earnings: 0 };
+      byPlan[key].count += 1;
+      byPlan[key].earnings += Number(p.amount) || 0;
+      perUserCount[p.userId] = (perUserCount[p.userId] || 0) + 1;
+      const day = new Date(p.timestamp).toISOString().slice(0, 10);
+      dayMap[day] = dayMap[day] || { earnings: 0, count: 0 };
+      dayMap[day].earnings += Number(p.amount) || 0;
+      dayMap[day].count += 1;
+    }
+    // Renewals: users whose earliest completed payment is BEFORE the range
+    // but who paid again inside the range.
+    let renewals = 0;
+    let newSubscribers = 0;
+    const counted = new Set<string>();
+    for (const p of inRange) {
+      if (counted.has(p.userId)) continue;
+      counted.add(p.userId);
+      const all = this.db.payments
+        .filter((x) => x.userId === p.userId && x.status === 'completed')
+        .sort((a, b) => a.timestamp - b.timestamp);
+      if (all.length > 1 && all[0].timestamp < fromMs) renewals += 1;
+      else newSubscribers += 1;
+    }
+    const now = Date.now();
+    const activeSubscribers = this.db.users.filter((u) => {
+      if (u.status === 'banned' || (u as any).isBanned) return false;
+      if (u.subscription?.isPro) {
+        const exp = u.subscription?.expiresAt;
+        return exp === null || exp === undefined || exp > now;
+      }
+      return false;
+    }).length;
+    const dailySeries = Object.keys(dayMap)
+      .sort()
+      .map((date) => ({ date, ...dayMap[date] }));
+    return {
+      earnings,
+      currency: 'INR',
+      paymentsCount: inRange.length,
+      activeSubscribers,
+      renewals,
+      newSubscribers,
+      byPlan,
+      dailySeries,
+    };
+  }
+
   // Payments and Billing
   public recordPayment(params: {
     userId: string;

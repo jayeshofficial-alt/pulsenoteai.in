@@ -1182,6 +1182,33 @@ export function isAuthorizedAdmin(user: { email?: string; emailVerified?: boolea
   return PULSENOTE_ADMIN_EMAILS.includes(user.email.toLowerCase().trim()) && user.emailVerified === true;
 }
 
+/**
+ * Per-user AI feature gate (admin-controllable via Revenue Dashboard).
+ * Returns { allowed, reason }. Defaults to allowed when the user has no
+ * store record or the flag was never set (backwards compatible).
+ */
+export function checkUserAiAccess(
+  email: string | undefined,
+  feature: 'image' | 'video'
+): { allowed: boolean; reason: string } {
+  if (!email) return { allowed: true, reason: '' };
+  try {
+    const record = store.findUserByEmail(email.toLowerCase().trim());
+    if (!record) return { allowed: true, reason: '' };
+    if (store.isStrictAdminEmail(record.email)) return { allowed: true, reason: '' };
+    const enabled = feature === 'image' ? record.aiImageEnabled : record.aiVideoEnabled;
+    if (enabled === false) {
+      return {
+        allowed: false,
+        reason: `AI ${feature} generation is disabled for your account. Contact support.`,
+      };
+    }
+    return { allowed: true, reason: '' };
+  } catch {
+    return { allowed: true, reason: '' };
+  }
+}
+
 // Global in-memory / cache mirror for Firestore doc `settings/features`
 // Defaults both to false as required
 export interface ServerFeatureSettings {
@@ -1297,8 +1324,15 @@ app.post('/api/gemini/image/generate', async (req, res) => {
   const userPrompt = prompt.trim();
   const modelName = 'imagen-4.0-generate-001';
 
+  // Per-user AI feature gate (Revenue Dashboard toggle)
+  const userForFlags = await verifyServerFirebaseUser(req);
+  const flagCheck = checkUserAiAccess(userForFlags?.email, 'image');
+  if (!flagCheck.allowed) {
+    return res.status(403).json({ error: 'AI_FEATURE_DISABLED', message: flagCheck.reason });
+  }
+
   // 2. Authenticate user & check credits (Cost: 1 credit)
-  const user = await verifyServerFirebaseUser(req);
+  const user = userForFlags;
   const isAdmin = isAuthorizedAdmin(user);
   let userUid = user?.uid || 'guest_user';
 
@@ -1412,6 +1446,12 @@ app.post('/api/gemini/video/generate', async (req, res) => {
   // 2. Authenticate user & check credits (Cost: 10 credits)
   const user = await verifyServerFirebaseUser(req);
   const isAdmin = isAuthorizedAdmin(user);
+
+  // Per-user AI feature gate (Revenue Dashboard toggle)
+  const videoFlag = checkUserAiAccess(user?.email, 'video');
+  if (!videoFlag.allowed) {
+    return res.status(403).json({ error: 'AI_FEATURE_DISABLED', message: videoFlag.reason });
+  }
 
   if (!isAdmin && user) {
     const acc = getUserState(user.uid);
@@ -5243,6 +5283,271 @@ app.post('/api/admin/grant-premium', (req, res) => {
     });
   } catch (err: any) {
     return res.status(400).json({ error: err.message });
+  }
+});
+
+// Manual Premium Grant Tool (Days, Months, Years)
+app.post('/api/admin/grant-premium', (req, res) => {
+  try {
+    const { userId, amount = 1, unit = 'months' } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    if (!['days', 'months', 'years'].includes(unit)) {
+      return res.status(400).json({ error: 'Unit must be days, months, or years' });
+    }
+
+    const updatedUser = store.grantPremiumAccess(userId, Number(amount), unit);
+    return res.json({
+      success: true,
+      message: `Granted ${amount} ${unit} of Pro access to ${updatedUser.name}`,
+      user: updatedUser,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// =========================================================================
+// SUBSCRIPTION & REVENUE ADMIN API — restricted to the revenue whitelist
+// (jayeshofficial@gmail.com, contact@pulsenoteai.com). Every route below
+// rejects non-whitelisted callers with 403, regardless of role flags.
+// =========================================================================
+
+/** Resolve the caller's admin email from header / query / body. */
+function revenueAdminEmail(req: any): string {
+  const fromHeader = req.headers['x-admin-email'];
+  const email =
+    (Array.isArray(fromHeader) ? fromHeader[0] : fromHeader) ||
+    req.query.adminEmail ||
+    req.body?.adminEmail ||
+    '';
+  return String(email || '').toLowerCase().trim();
+}
+
+function requireRevenueAdmin(req: any, res: any): string | null {
+  const email = revenueAdminEmail(req);
+  if (!email || !store.isSubscriptionAdminEmail(email)) {
+    res.status(403).json({
+      success: false,
+      error: 'FORBIDDEN',
+      message: 'Subscription & Revenue dashboard is restricted to authorized admins.',
+    });
+    return null;
+  }
+  return email;
+}
+
+function subscriptionRow(u: any) {
+  const latest = store.getLatestPaymentForUser(u.id);
+  const sub = u.subscription || {};
+  const planLabel = sub.isPro
+    ? (String(sub.tier || '').includes('annual') || sub.tier === 'pro_annual' ? 'Pro Annual' : sub.tier === 'admin_grant' ? 'Admin Grant' : 'Pro')
+    : 'Free';
+  return {
+    id: u.id,
+    name: u.name || 'User',
+    email: u.email,
+    mobile: u.mobile || '',
+    plan: planLabel,
+    tier: sub.tier || 'free',
+    isPro: !!sub.isPro,
+    signInDate: u.createdAt || null,
+    planOptedDate: latest ? latest.timestamp : (sub.startDate || null),
+    planOptedAmount: latest ? latest.amount : null,
+    planCurrency: latest ? latest.currency || 'INR' : 'INR',
+    amountPaidDate: latest ? latest.timestamp : null,
+    planExpiryDate: sub.expiresAt ?? null,
+    status: u.status || 'active',
+    aiImageEnabled: u.aiImageEnabled !== false,
+    aiVideoEnabled: u.aiVideoEnabled !== false,
+    lastPayment: latest
+      ? { amount: latest.amount, currency: latest.currency, date: latest.timestamp, method: latest.paymentMethod, planName: latest.planName }
+      : null,
+  };
+}
+
+// GET /api/admin/subscriptions/users — paginated + searchable enriched rows
+app.get('/api/admin/subscriptions/users', (req, res) => {
+  if (!requireRevenueAdmin(req, res)) return;
+  try {
+    store.checkAndProcessExpirations?.();
+    const search = String(req.query.search || '').toLowerCase().trim();
+    const planFilter = String(req.query.plan || 'all').toLowerCase().trim();
+    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+
+    let rows = store.getAllUsers().map(subscriptionRow);
+    if (search) {
+      rows = rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(search) ||
+          r.email.toLowerCase().includes(search) ||
+          (r.mobile || '').includes(search)
+      );
+    }
+    if (planFilter === 'pro') rows = rows.filter((r) => r.isPro);
+    else if (planFilter === 'free') rows = rows.filter((r) => !r.isPro);
+    else if (planFilter === 'expired')
+      rows = rows.filter((r) => r.planExpiryDate !== null && r.planExpiryDate < Date.now());
+
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+    const users = rows.slice((safePage - 1) * limit, safePage * limit);
+    return res.json({ success: true, users, total, page: safePage, totalPages });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Failed to load users.' });
+  }
+});
+
+// PATCH /api/admin/subscriptions/users/:id/expiry — set plan expiry (ms epoch or null=lifetime)
+app.patch('/api/admin/subscriptions/users/:id/expiry', (req, res) => {
+  const adminEmail = requireRevenueAdmin(req, res);
+  if (!adminEmail) return;
+  try {
+    const { expiresAt } = req.body || {};
+    const value = expiresAt === null || expiresAt === undefined || expiresAt === ''
+      ? null
+      : Number(expiresAt);
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      return res.status(400).json({ success: false, error: 'expiresAt must be a millisecond epoch or null.' });
+    }
+    const user = store.setUserPlanExpiry(req.params.id, value);
+    console.log(`[RevenueAdmin] ${adminEmail} set expiry for ${user.email} -> ${value ? new Date(value).toISOString() : 'lifetime'}`);
+    return res.json({ success: true, user: subscriptionRow(user) });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message || 'Failed to update expiry.' });
+  }
+});
+
+// POST /api/admin/subscriptions/users/:id/plan — start/end plan with dynamic amount
+app.post('/api/admin/subscriptions/users/:id/plan', (req, res) => {
+  const adminEmail = requireRevenueAdmin(req, res);
+  if (!adminEmail) return;
+  try {
+    const { action, plan = 'pro', billing = 'monthly', seats = 1, amount = 0, months = 1, paymentMethod = 'ADMIN_MANUAL' } = req.body || {};
+    if (action === 'end') {
+      const user = store.endUserPlan(req.params.id);
+      console.log(`[RevenueAdmin] ${adminEmail} ended plan for ${user.email}`);
+      return res.json({ success: true, message: 'Plan ended. User reverted to Free.', user: subscriptionRow(user) });
+    }
+    if (action !== 'start') {
+      return res.status(400).json({ success: false, error: "action must be 'start' or 'end'." });
+    }
+    if (!['pro', 'team', 'free'].includes(plan)) {
+      return res.status(400).json({ success: false, error: "plan must be 'pro', 'team' or 'free'." });
+    }
+    const { user, payment } = store.startUserPlan(req.params.id, {
+      plan,
+      billing,
+      seats: Math.max(1, Number(seats) || 1),
+      amount: Math.max(0, Number(amount) || 0),
+      months: Math.max(1, Number(months) || 1),
+      paymentMethod,
+      grantedBy: adminEmail,
+    });
+    console.log(`[RevenueAdmin] ${adminEmail} started ${plan} for ${user.email} amount=${amount}`);
+    return res.json({ success: true, message: `Plan started: ${plan}.`, user: subscriptionRow(user), payment });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message || 'Failed to update plan.' });
+  }
+});
+
+// PATCH /api/admin/subscriptions/users/:id/ai-flags — toggle Image/Video access
+app.patch('/api/admin/subscriptions/users/:id/ai-flags', (req, res) => {
+  const adminEmail = requireRevenueAdmin(req, res);
+  if (!adminEmail) return;
+  try {
+    const { aiImageEnabled, aiVideoEnabled } = req.body || {};
+    if (aiImageEnabled === undefined && aiVideoEnabled === undefined) {
+      return res.status(400).json({ success: false, error: 'Provide aiImageEnabled and/or aiVideoEnabled.' });
+    }
+    const user = store.setUserAiFlags(req.params.id, { aiImageEnabled, aiVideoEnabled });
+    console.log(`[RevenueAdmin] ${adminEmail} set AI flags for ${user.email}: image=${user.aiImageEnabled !== false} video=${user.aiVideoEnabled !== false}`);
+    return res.json({ success: true, user: subscriptionRow(user) });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message || 'Failed to update AI flags.' });
+  }
+});
+
+// GET /api/admin/subscriptions/analytics?range=daily|monthly|yearly|custom&from&to
+app.get('/api/admin/subscriptions/analytics', (req, res) => {
+  if (!requireRevenueAdmin(req, res)) return;
+  try {
+    const range = String(req.query.range || 'monthly').toLowerCase();
+    const now = new Date();
+    let fromMs: number;
+    let toMs = now.getTime();
+    if (range === 'daily') {
+      const d = new Date(now); d.setHours(0, 0, 0, 0); fromMs = d.getTime();
+    } else if (range === 'yearly') {
+      fromMs = new Date(now.getFullYear(), 0, 1).getTime();
+    } else if (range === 'custom') {
+      const from = new Date(String(req.query.from || ''));
+      const to = new Date(String(req.query.to || ''));
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return res.status(400).json({ success: false, error: 'Custom range needs valid from/to dates (YYYY-MM-DD).' });
+      }
+      fromMs = from.getTime();
+      toMs = Math.min(to.getTime() + 86399999, Date.now());
+      if (fromMs > toMs) {
+        return res.status(400).json({ success: false, error: 'from must be before to.' });
+      }
+    } else {
+      // monthly (default): first day of current month
+      fromMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    }
+    const analytics = store.getRevenueAnalytics(fromMs, toMs);
+    return res.json({ success: true, range, from: fromMs, to: toMs, ...analytics });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Failed to compute analytics.' });
+  }
+});
+
+// GET /api/admin/subscriptions/export.xlsx — full subscription report download
+app.get('/api/admin/subscriptions/export.xlsx', async (req, res) => {
+  if (!requireRevenueAdmin(req, res)) return;
+  try {
+    const rows = store.getAllUsers().map(subscriptionRow);
+    const header = [
+      'Name', 'Email', 'Mobile', 'Plan', 'Tier', 'Sign-in Date',
+      'Plan Opted Date', 'Plan Opted Amount (INR)', 'Amount Paid Date',
+      'Plan Expiry Date', 'Status', 'AI Image', 'AI Video',
+    ];
+    const fmt = (ts: number | null) => (ts ? new Date(ts).toISOString().slice(0, 10) : '-');
+    const data = rows.map((r) => [
+      r.name, r.email, r.mobile, r.plan, r.tier,
+      fmt(r.signInDate), fmt(r.planOptedDate),
+      r.planOptedAmount ?? '-', fmt(r.amountPaidDate),
+      r.planExpiryDate ? new Date(r.planExpiryDate).toISOString().slice(0, 10) : 'Lifetime',
+      r.status, r.aiImageEnabled ? 'Enabled' : 'Disabled', r.aiVideoEnabled ? 'Enabled' : 'Disabled',
+    ]);
+    const filename = `pulsenote-subscriptions-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    let xlsx: any = null;
+    try {
+      const mod = await import('xlsx');
+      xlsx = (mod as any).default || mod;
+    } catch {
+      xlsx = null;
+    }
+    if (xlsx) {
+      const wb = xlsx.utils.book_new();
+      const ws = xlsx.utils.aoa_to_sheet([header, ...data]);
+      ws['!cols'] = header.map(() => ({ wch: 22 }));
+      xlsx.utils.book_append_sheet(wb, ws, 'Subscriptions');
+      const buf = Buffer.from(xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(buf);
+    }
+    // Fallback: CSV payload if xlsx is unavailable at runtime
+    const csv = [header, ...data].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/\.xlsx$/, '.csv')}"`);
+    return res.send(csv);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Export failed.' });
   }
 });
 
