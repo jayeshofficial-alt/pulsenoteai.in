@@ -42,28 +42,19 @@ app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // Baseline security headers. These are cheap, apply to every response, and
 // close clickjacking / MIME-sniffing / referrer-leak gaps that Hostinger does
-// not add for us. CSP is intentionally permissive for the SPA (Razorpay, Google
-// Fonts, Firebase and inline styles are all used) while still blocking framing.
+// not add for us.
+//
+// NOTE: we intentionally do NOT ship a restrictive script-src CSP here. The SPA
+// loads Razorpay Checkout, Firebase Auth, Google Identity and Google Fonts, and
+// an over-tight policy silently breaks payments/login. `frame-ancestors` still
+// gives the clickjacking protection that matters without any load risk.
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+  res.setHeader('Permissions-Policy', 'geolocation=()');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com https://*.razorpay.com https://apis.google.com https://www.gstatic.com",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' data: https://fonts.gstatic.com",
-      "img-src 'self' data: blob: https:",
-      "connect-src 'self' https: wss:",
-      "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://*.razorpay.com",
-      "object-src 'none'",
-      "base-uri 'self'",
-    ].join('; ')
-  );
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
   next();
 });
 
