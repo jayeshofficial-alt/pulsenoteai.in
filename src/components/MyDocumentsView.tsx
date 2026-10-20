@@ -212,7 +212,7 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
       const res = await fetch(`/api/documents/${selectedDoc.id}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ by: userEmail || 'author' }),
+        body: JSON.stringify({ by: userEmail || 'author', userId, userEmail }),
       });
       const data = await res.json();
       if (res.ok && data.document) {
@@ -241,7 +241,7 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
       const res = await fetch(`/api/documents/${docId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId, userEmail }),
       });
 
       if (res.ok) {
