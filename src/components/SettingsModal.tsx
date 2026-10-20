@@ -103,7 +103,7 @@ export function SettingsModal({
                 className="w-full mt-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#8b5cf6] text-white text-xs font-semibold hover:opacity-90 transition cursor-pointer"
               >
                 <Zap size={13} />
-                <span>Upgrade to Pro — ₹1,999/year</span>
+                <span>Upgrade to Pro — from ₹699/month</span>
               </button>
             )}
           </div>

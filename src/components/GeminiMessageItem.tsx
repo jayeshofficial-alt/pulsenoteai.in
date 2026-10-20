@@ -290,17 +290,17 @@ export const GeminiMessageItem: React.FC<GeminiMessageItemProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
               <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pro Monthly</div>
-              <div className="text-base font-black text-white">₹299 <span className="text-xs text-slate-400 font-normal">/ mo (~$3.99)</span></div>
-              <div className="text-[10px] text-slate-400">Unlimited prompts & media</div>
+              <div className="text-base font-black text-white">₹699 <span className="text-xs text-slate-400 font-normal">/ mo</span></div>
+              <div className="text-[10px] text-slate-400">Unlimited documents, cancel anytime</div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/40 relative">
               <span className="absolute -top-2 right-2 bg-amber-400 text-slate-950 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full">
-                Save 45%
+                Save 34%
               </span>
-              <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pro Annual</div>
-              <div className="text-base font-black text-white">₹1,999 <span className="text-xs text-slate-400 font-normal">/ yr (~₹166/mo)</span></div>
-              <div className="text-[10px] text-slate-400">Save 45% on annual billing</div>
+              <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pro Yearly</div>
+              <div className="text-base font-black text-white">₹5,508 <span className="text-xs text-slate-400 font-normal">/ yr (~₹459/mo)</span></div>
+              <div className="text-[10px] text-slate-400">One-time upfront — save ₹2,880</div>
             </div>
           </div>
 

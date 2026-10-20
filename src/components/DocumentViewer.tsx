@@ -83,17 +83,17 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md text-left">
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
             <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Pro Monthly</div>
-            <div className="text-lg font-black text-white">₹299 <span className="text-xs text-slate-400 font-normal">/ month (~$3.99)</span></div>
-            <div className="text-[11px] text-slate-400 mt-1">Unlimited prompts & media</div>
+            <div className="text-lg font-black text-white">₹699 <span className="text-xs text-slate-400 font-normal">/ month</span></div>
+            <div className="text-[11px] text-slate-400 mt-1">Unlimited documents, cancel anytime</div>
           </div>
 
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-amber-500/40 relative">
             <span className="absolute -top-2 right-2 bg-amber-400 text-slate-950 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
-              Save 45%
+              Save 34%
             </span>
-            <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pro Annual</div>
-            <div className="text-lg font-black text-white">₹1,999 <span className="text-xs text-slate-400 font-normal">/ year (~₹166/mo)</span></div>
-            <div className="text-[11px] text-slate-400 mt-1">Save 45% on annual billing</div>
+            <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Pro Yearly</div>
+            <div className="text-lg font-black text-white">₹5,508 <span className="text-xs text-slate-400 font-normal">/ year (~₹459/mo)</span></div>
+            <div className="text-[11px] text-slate-400 mt-1">One-time upfront — save ₹2,880</div>
           </div>
         </div>
 

@@ -703,7 +703,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   </div>
                   <p className="font-medium text-[#e3e3e3]">Live Revenue Stream Connected</p>
                   <p className="text-xs text-[#9aa0a6] mt-1">
-                    ₹299/mo and ₹1,999/yr subscription settlement verified via SBI UPI
+                    Pro ₹699/mo and ₹5,508/yr (one-time) settled via Razorpay
                   </p>
                 </div>
               </div>
@@ -713,12 +713,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   <h3 className="font-medium mb-4 text-[#e3e3e3]">Premium Plans Status</h3>
                   <div className="space-y-3">
                     <div className="flex justify-between text-sm p-3 bg-[#2d2e30] rounded-xl border border-[#3c4043]/40">
-                      <span className="text-[#e3e3e3]">Monthly ₹299</span>
-                      <span className="text-[#4e8cff] font-medium">820 users</span>
+                      <span className="text-[#e3e3e3]">Monthly ₹699</span>
+                      <span className="text-[#4e8cff] font-medium">Active</span>
                     </div>
                     <div className="flex justify-between text-sm p-3 bg-[#2d2e30] rounded-xl border border-[#3c4043]/40">
-                      <span className="text-[#e3e3e3]">Yearly ₹1,999</span>
-                      <span className="text-[#4e8cff] font-medium">420 users</span>
+                      <span className="text-[#e3e3e3]">Yearly ₹5,508</span>
+                      <span className="text-[#4e8cff] font-medium">Active</span>
                     </div>
                   </div>
                 </div>
@@ -822,11 +822,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </span>
                   </div>
                   <p className="text-3xl font-medium mt-4 text-white">
-                    ₹299
+                    ₹699
                     <span className="text-sm text-[#9aa0a6] font-normal">/month</span>
                   </p>
                   <p className="text-xs text-[#9aa0a6] mt-2 leading-relaxed">
-                    2.5 Pro, Unlimited Chats, File Upload, Veo 3.1 Video, Imagen 3 Diffusion
+                    Unlimited documents, all templates, PDF & Word export, version history
                   </p>
                 </div>
 
@@ -854,11 +854,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </span>
                   </div>
                   <p className="text-3xl font-medium mt-4 text-white">
-                    ₹1,999
+                    ₹5,508
                     <span className="text-sm text-[#9aa0a6] font-normal">/year</span>
                   </p>
                   <p className="text-xs text-[#9aa0a6] mt-2 leading-relaxed">
-                    2.5 Pro, Save 45%, Priority Veo Fast Queue, Priority Support
+                    One-time upfront, effective ₹459/mo, save 34%
                   </p>
                 </div>
 
@@ -1141,8 +1141,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                     >
                       <option value="free">Free Tier (3 Prompts / Day Limit)</option>
-                      <option value="pro_monthly">Pro Monthly (₹299/mo Unlimited)</option>
-                      <option value="pro_annual">Pro Annual (₹1,999/yr Unlimited)</option>
+                      <option value="pro_monthly">Pro Monthly (₹699/mo Unlimited)</option>
+                      <option value="pro_annual">Pro Annual (₹5,508/yr Unlimited)</option>
                       <option value="admin_grant">Admin Granted Pro (Manual Access)</option>
                     </select>
                   </div>
