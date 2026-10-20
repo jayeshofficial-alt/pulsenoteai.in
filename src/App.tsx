@@ -162,6 +162,13 @@ export function App() {
         if (window.location.hash.includes('image')) return 'image';
         if (window.location.hash.includes('video')) return 'video';
         if (window.location.hash.includes('chat') || window.location.hash.includes('app')) return 'chat';
+        // Deep-linkable app routes (bookmarks, refreshes, shared links)
+        if (window.location.hash.includes('documents')) return 'documents';
+        if (window.location.hash.includes('templates')) return 'gallery';
+        if (window.location.hash.includes('team')) return 'team';
+        if (window.location.hash.includes('partners')) return 'partners';
+        if (window.location.hash.includes('revenue')) return 'revenue';
+        if (window.location.hash.includes('canvas')) return 'canvas';
       }
     } catch {}
     return 'marketing';
@@ -359,12 +366,13 @@ export function App() {
   }, [messages, isGenerating, activeView]);
 
   // Real-time subscribe to Firestore settings/features (Section 1)
+  // Re-subscribes once auth resolves, since rules require an authenticated read.
   useEffect(() => {
     const unsub = subscribeToFeatureSettings((f) => {
       setFeatures(f);
     });
     return () => unsub();
-  }, []);
+  }, [currentUser?.id]);
 
   // Real-time subscribe to user's plan and credits in Firestore users/{uid} (Section 4)
   useEffect(() => {
@@ -1254,6 +1262,31 @@ export function App() {
     } catch {}
   };
 
+  // The public marketing site is a standalone full-screen page: no app sidebar,
+  // no app chrome. Everything else renders inside the logged-in app shell.
+  if (activeView === 'marketing') {
+    return (
+      <div className="h-screen w-screen overflow-y-auto scrollbar-thin bg-[#131314] text-[#e3e3e3] font-sans antialiased">
+        <MarketingSite
+          onLaunchApp={() => setActiveView('chat')}
+          onOpenPricing={() => setIsPricingModalOpen(true)}
+          usageState={usageState}
+          currentUser={currentUser}
+        />
+        <ToastContainer toasts={toasts} onDismiss={removeToast} />
+        {isPricingModalOpen && (
+          <PricingModal
+            isOpen={isPricingModalOpen}
+            onClose={() => setIsPricingModalOpen(false)}
+            currentUser={currentUser as any}
+            currentPlan={userFirestore.plan}
+            onShowToast={addToast}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex h-screen w-screen overflow-hidden bg-[#131314] text-[#e3e3e3] font-sans antialiased relative"
@@ -1358,14 +1391,36 @@ export function App() {
             <div className="hidden sm:flex bg-[#1e1f20] p-0.5 rounded-full border border-[#3c4043]/40 text-xs">
               <button
                 type="button"
-                onClick={() => setActiveView('marketing')}
+                onClick={() => setActiveView('chat')}
                 className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
-                  activeView === 'marketing'
+                  activeView === 'chat'
                     ? 'bg-[#2d2e30] text-white shadow-sm'
                     : 'text-[#9aa0a6] hover:text-white'
                 }`}
               >
                 Home
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView('canvas')}
+                className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
+                  activeView === 'canvas'
+                    ? 'bg-[#2d2e30] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Canvas
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView('gallery')}
+                className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
+                  activeView === 'gallery'
+                    ? 'bg-[#2d2e30] text-white shadow-sm'
+                    : 'text-[#9aa0a6] hover:text-white'
+                }`}
+              >
+                Templates
               </button>
               <button
                 type="button"
@@ -1496,6 +1551,11 @@ export function App() {
             teamId={userFirestore.teamId}
             onBack={() => setActiveView('chat')}
             onOpenPricing={() => setIsPricingModalOpen(true)}
+            onShowToast={addToast}
+          />
+        ) : activeView === 'partners' ? (
+          <PartnersPage
+            onBack={() => setActiveView('chat')}
             onShowToast={addToast}
           />
         ) : activeView === 'documents' ? (

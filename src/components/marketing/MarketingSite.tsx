@@ -337,7 +337,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
     {
       category: 'pricing',
       question: 'What is included in the Free tier versus the Pro and Team subscriptions?',
-      answer: 'The Free tier includes 5 documents a month with 3 basic templates and watermark. Pro (₹499/mo or ₹4,999/yr) unlocks unlimited documents, all templates, PDF and Word downloads without watermarks, and version history. Clinic / Team (₹399/seat/mo, min 3 seats) adds shared team templates, team admin dashboard, and clinic logo letterheads.'
+      answer: 'The Free tier includes 5 documents a month with 3 basic templates and watermark. Pro (₹699/mo or ₹5,508/yr one-time, save 34%) unlocks unlimited documents, all templates, PDF and Word downloads without watermarks, and version history. Clinic / Team (₹399/seat/mo or ₹3,588/seat/yr, min 3 seats) adds shared team templates, team admin dashboard, member roles, and clinic logo letterheads.'
     },
     {
       category: 'pricing',
@@ -985,7 +985,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 </button>
                 <span className="text-[#e3e3e3] font-medium">Annual Billing</span>
                 <span className="text-[10px] font-bold text-[#10b981] bg-[#10b981]/15 px-2 py-0.5 rounded border border-[#10b981]/30">
-                  SAVE UP TO 20%
+                  SAVE UP TO 34%
                 </span>
               </div>
             </div>
@@ -1045,12 +1045,12 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <div className="text-xs font-bold text-[#4e8cff] uppercase tracking-wider mb-2">Pro</div>
                 <div className="text-3xl font-extrabold text-white mb-1">
                   {pricingCurrency === 'INR' 
-                    ? (pricingAnnual ? '₹4,999' : '₹499')
-                    : (pricingAnnual ? '$59.00' : '$6.99')}
+                    ? (pricingAnnual ? '₹5,508' : '₹699')
+                    : (pricingAnnual ? '$79.00' : '$9.99')}
                   <span className="text-xs font-normal text-[#9aa0a6]">{pricingAnnual ? ' / year' : ' / month'}</span>
                 </div>
                 <p className="text-xs text-[#9aa0a6] mb-6">
-                  {pricingAnnual ? 'Equivalent to ~₹416/mo. Unlimited clinical & enterprise documents.' : 'Billed monthly. Cancel anytime.'}
+                  {pricingAnnual ? 'One-time yearly payment — effective ~₹459/mo, save ₹2,880 (34%). Unlimited documents.' : 'Billed monthly via UPI AutoPay. Cancel anytime.'}
                 </p>
 
                 <div className="space-y-3 pt-4 border-t border-[#3c4043]/30 text-xs text-[#c4c7c5]">
@@ -1095,12 +1095,12 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <div className="text-xs font-bold text-[#10b981] uppercase tracking-wider mb-2">Clinic / Team</div>
                 <div className="text-3xl font-extrabold text-white mb-1">
                   {pricingCurrency === 'INR' 
-                    ? (pricingAnnual ? '₹3,999' : '₹399')
-                    : (pricingAnnual ? '$49.00' : '$5.49')}
+                    ? (pricingAnnual ? '₹3,588' : '₹399')
+                    : (pricingAnnual ? '$43.99' : '$5.49')}
                   <span className="text-xs font-normal text-[#9aa0a6]">{pricingAnnual ? ' / seat / year' : ' / seat / mo'}</span>
                 </div>
                 <p className="text-xs text-[#9aa0a6] mb-6">
-                  Minimum 3 seats ({pricingCurrency === 'INR' ? '₹1,197/mo' : '$16.47/mo'}). Full clinic administration.
+                  Minimum 3 seats ({pricingCurrency === 'INR' ? (pricingAnnual ? '₹10,764/yr one-time, save 25%' : '₹1,197/mo') : (pricingAnnual ? '$131.97/yr' : '$16.47/mo')}). Full clinic administration.
                 </p>
 
                 <div className="space-y-3 pt-4 border-t border-[#3c4043]/30 text-xs text-[#c4c7c5]">
@@ -1621,7 +1621,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <ul className="space-y-2 text-[11px]">
                 <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Start Free (5 Docs/Mo)</button></li>
                 <li><a href="#soap-demo" className="hover:text-white transition-colors">Interactive SOAP Demo</a></li>
-                <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Pro Plan (₹499/mo)</button></li>
+                <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Pro Plan (₹699/mo)</button></li>
                 <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Clinic / Team (₹399/seat)</button></li>
                 <li><a href={DEMO_LINK} target="_blank" rel="noreferrer" className="hover:text-white transition-colors">Book a Demo</a></li>
               </ul>
