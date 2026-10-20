@@ -2164,9 +2164,15 @@ app.get('/api/documents', (req, res) => {
 
 // GET /api/documents/:id - Get single document with full version history
 app.get('/api/documents/:id', (req, res) => {
+  const userId = (req.query.userId || req.headers['x-user-id'] || '') as string;
+  const userEmail = (req.query.userEmail || req.headers['x-user-email'] || '') as string;
   const doc = store.getDocumentById(req.params.id);
   if (!doc) {
     return res.status(404).json({ error: 'DOCUMENT_NOT_FOUND', message: 'Document not found' });
+  }
+  // Documents are private (may contain PHI): require the caller to be the owner.
+  if (!store.isDocumentOwnedBy(req.params.id, userId, userEmail)) {
+    return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
   }
   return res.json({ success: true, document: doc });
 });
@@ -2199,6 +2205,9 @@ app.post('/api/documents', (req, res) => {
 app.put('/api/documents/:id', (req, res) => {
   const { userId = 'user_guest', userEmail, title, sections, summary, unverifiedTokens } = req.body;
   try {
+    if (!store.isDocumentOwnedBy(req.params.id, userId, userEmail)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
+    }
     const updated = store.updateDocument(
       userId,
       req.params.id,
@@ -2215,6 +2224,9 @@ app.put('/api/documents/:id', (req, res) => {
 app.post('/api/documents/:id/duplicate', (req, res) => {
   const { userId = 'user_guest', userEmail } = req.body;
   try {
+    if (!store.isDocumentOwnedBy(req.params.id, userId, userEmail)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
+    }
     const duplicated = store.duplicateDocument(userId, req.params.id, userEmail);
     return res.json({ success: true, document: duplicated });
   } catch (err: any) {
@@ -2225,6 +2237,9 @@ app.post('/api/documents/:id/duplicate', (req, res) => {
 // DELETE /api/documents/:id - Delete document
 app.delete('/api/documents/:id', (req, res) => {
   const { userId = 'user_guest' } = req.body || {};
+  if (!store.isDocumentOwnedBy(req.params.id, userId, req.body?.userEmail)) {
+    return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
+  }
   const ok = store.deleteDocument(userId, req.params.id);
   if (ok) {
     return res.json({ success: true, message: 'Document deleted successfully' });
@@ -2235,7 +2250,10 @@ app.delete('/api/documents/:id', (req, res) => {
 // POST /api/documents/:id/submit-review — draft → in_review
 app.post('/api/documents/:id/submit-review', (req, res) => {
   try {
-    const { by = 'author', note } = req.body || {};
+    const { by = 'author', note, userId, userEmail } = req.body || {};
+    if (!store.isDocumentOwnedBy(req.params.id, userId || by, userEmail)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
+    }
     const doc = store.submitDocumentForReview(req.params.id, String(by), note ? String(note) : undefined);
     return res.json({ success: true, document: doc });
   } catch (err: any) {
@@ -2246,7 +2264,10 @@ app.post('/api/documents/:id/submit-review', (req, res) => {
 // POST /api/documents/:id/sign-off — in_review → signed_off (locks edits)
 app.post('/api/documents/:id/sign-off', (req, res) => {
   try {
-    const { by = 'reviewer', note } = req.body || {};
+    const { by = 'reviewer', note, userId, userEmail } = req.body || {};
+    if (!store.isDocumentOwnedBy(req.params.id, userId || by, userEmail)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
+    }
     const doc = store.signOffDocument(req.params.id, String(by), note ? String(note) : undefined);
     return res.json({ success: true, document: doc });
   } catch (err: any) {
@@ -2257,7 +2278,10 @@ app.post('/api/documents/:id/sign-off', (req, res) => {
 // POST /api/documents/:id/reopen — signed_off/in_review → draft
 app.post('/api/documents/:id/reopen', (req, res) => {
   try {
-    const { by = 'author', note } = req.body || {};
+    const { by = 'author', note, userId, userEmail } = req.body || {};
+    if (!store.isDocumentOwnedBy(req.params.id, userId || by, userEmail)) {
+      return res.status(403).json({ error: 'FORBIDDEN', message: 'You do not have access to this document.' });
+    }
     const doc = store.reopenDocument(req.params.id, String(by), note ? String(note) : undefined);
     return res.json({ success: true, document: doc });
   } catch (err: any) {

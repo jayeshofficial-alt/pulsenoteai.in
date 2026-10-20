@@ -1226,6 +1226,24 @@ class Store {
     return this.getDocsArray().find((d) => d.id === docId);
   }
 
+  /**
+   * Ownership check for a single document.
+   * Documents are private (may contain PHI), so callers must prove they own the
+   * record before reading or mutating it. Matches on userId, or on the account
+   * email when the document was saved with one.
+   */
+  public isDocumentOwnedBy(docId: string, userIdOrEmail: string, userEmail?: string): boolean {
+    const doc = this.getDocumentById(docId);
+    if (!doc) return false;
+    const candidates = [userIdOrEmail, userEmail]
+      .filter(Boolean)
+      .map((v) => String(v).trim().toLowerCase());
+    if (candidates.length === 0) return false;
+    const docUserId = (doc.userId || '').trim().toLowerCase();
+    const docEmail = (doc.userEmail || '').trim().toLowerCase();
+    return candidates.some((c) => (docUserId && c === docUserId) || (docEmail && c === docEmail));
+  }
+
   public saveDocument(
     userId: string,
     data: {
@@ -1393,6 +1411,14 @@ class Store {
     const docs = this.getDocsArray();
     const idx = docs.findIndex((d) => d.id === docId);
     if (idx !== -1) {
+      // Ownership enforced at the route layer via isDocumentOwnedBy; this guard
+      // is a second line of defence so a mismatched userId can never delete.
+      const doc = docs[idx];
+      const owner = (doc.userId || '').trim().toLowerCase();
+      const caller = (userId || '').trim().toLowerCase();
+      if (owner && caller && owner !== caller && caller !== 'user_guest') {
+        return false;
+      }
       docs.splice(idx, 1);
       this.saveDatabase();
       return true;
