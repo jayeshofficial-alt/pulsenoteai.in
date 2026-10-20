@@ -226,7 +226,7 @@ Thank you for choosing PulseNote AI.
                   }}
                   className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs uppercase tracking-wide transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
                 >
-                  {isPro ? 'Extend / Upgrade Plan' : 'Upgrade to Pro (₹299/mo)'}
+                  {isPro ? 'Extend / Upgrade Plan' : 'Upgrade to Pro (₹699/mo)'}
                 </button>
               </div>
             </div>

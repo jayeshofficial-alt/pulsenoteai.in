@@ -281,7 +281,7 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
                 className="w-full py-1.5 px-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:brightness-110 text-slate-950 font-bold text-[11px] flex items-center justify-center gap-1 shadow-sm transition-all cursor-pointer"
               >
                 <Sparkles className="w-3 h-3 fill-slate-950" />
-                <span>Upgrade to Pro (₹299/mo)</span>
+                <span>Upgrade to Pro (₹699/mo)</span>
               </button>
             ) : (
               <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">

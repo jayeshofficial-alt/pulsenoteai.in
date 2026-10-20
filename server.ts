@@ -40,6 +40,33 @@ const port = process.env.PORT || 3000;
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
+// Baseline security headers. These are cheap, apply to every response, and
+// close clickjacking / MIME-sniffing / referrer-leak gaps that Hostinger does
+// not add for us. CSP is intentionally permissive for the SPA (Razorpay, Google
+// Fonts, Firebase and inline styles are all used) while still blocking framing.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com https://*.razorpay.com https://apis.google.com https://www.gstatic.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "img-src 'self' data: blob: https:",
+      "connect-src 'self' https: wss:",
+      "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://*.razorpay.com",
+      "object-src 'none'",
+      "base-uri 'self'",
+    ].join('; ')
+  );
+  next();
+});
+
 // Official Google GenAI SDK instance for server-side operations
 export const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -66,11 +93,12 @@ const Modality = {
 
 const MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
 
-const UPGRADE_BLOCK_VERBATIM = `🛑 **Daily Free Limit Reached (3/3 Prompts Used)**
-Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
-* **Pro Monthly:** ₹299/month (~$3.99)
-* **Pro Annual:** ₹1,999/year (~₹166/mo) — Save 45%
-👉 Pay via Secure UPI (\`wagh.jayesh@oksbi\`), Credit/Debit Card, or Net Banking.`;
+const UPGRADE_BLOCK_VERBATIM = `🛑 **Daily Free Limit Reached**
+Upgrade to Pro for unlimited documents, all templates, PDF and Word downloads, and version history.
+* **Pro Monthly:** ₹699/month (cancel anytime)
+* **Pro Yearly:** ₹5,508/year one-time — effective ₹459/month, save 34%
+* **Clinic / Team:** ₹399/seat/month (min 3 seats) or ₹3,588/seat/year
+👉 Upgrade securely in-app via Razorpay (UPI, cards, net banking).`;
 
 const SYSTEM_INSTRUCTION_BASE = `You are the primary core intelligence engine for **Pulse Note AI** (hosted at pulsenoteai.in). Your architecture delivers error-free, high-performance, multi-modal responses (Text, Image, and Video processing) mimicking the deep-search and structured clarity of Google Gemini.
 
@@ -162,13 +190,12 @@ app.post('/api/media/generate', (req, res) => {
       return res.status(400).json({ error: 'Prompt is required for media generation.' });
     }
 
-    // Guardrail: Enforce 3 prompts per day free limit (settlement via wagh.jayesh@oksbi)
+    // Guardrail: Enforce 3 prompts per day free limit
     if (!isPro && dailyPromptCount >= 3) {
       return res.status(403).json({
         isLimitReached: true,
         error: 'Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited media generation.',
         upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-        settlementVpa: 'wagh.jayesh@oksbi',
       });
     }
 
@@ -403,7 +430,6 @@ app.post('/api/chat', async (req, res) => {
           isLimitReached: true,
           error: 'Upgrade to Premium to use 2.5 Pro.',
           upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-          settlementVpa: 'wagh.jayesh@oksbi',
         });
       }
       modelName = 'gemini-3.1-pro-preview';
@@ -419,7 +445,6 @@ app.post('/api/chat', async (req, res) => {
         isLimitReached: true,
         error: 'Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited chat.',
         upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-        settlementVpa: 'wagh.jayesh@oksbi',
       });
     }
 
@@ -2323,7 +2348,8 @@ app.post(['/api/auth/logout', '/api/logout'], (req, res) => {
 
 // ==========================================
 // RAZORPAY PAYMENTS & WEBHOOK (Section 4)
-// Subscriptions (Pro ₹499/mo, Team ₹399/seat/mo)
+// Subscriptions (Pro ₹699/mo, Team ₹399/seat/mo)
+// Upfront yearly one-time orders: Pro ₹5,508/yr, Team ₹299/seat/mo billed yearly
 // Credit packs (100 credits ₹299, 500 credits ₹1199, Template Setup ₹2999)
 // ==========================================
 const RAZORPAY_KEY_ID =
@@ -3309,7 +3335,7 @@ app.post('/api/transform', async (req, res) => {
         ],
         actionItems: [
           {
-            task: 'Upgrade to PulseNote Pro for unlimited transformations via UPI (wagh.jayesh@oksbi) or Card',
+            task: 'Upgrade to PulseNote Pro for unlimited transformations (secure in-app Razorpay checkout)',
             owner: 'User',
             deadline: 'Immediate',
             priority: 'High',
@@ -4873,35 +4899,45 @@ ${MANDATORY_LEGAL_NOTICE}`;
 }
 
 // Payment Gateway & Settlement Routes (Part 1 & Part 2)
-// Direct Settlement to exact UPI VPA: wagh.jayesh@oksbi
 app.get('/api/payment/config', (_req, res) => {
   res.json({
-    gateway: 'PulseNote Merchant Gateway (Razorpay/Cashfree/Paytm compatible)',
-    settlementVpa: 'wagh.jayesh@oksbi',
+    gateway: 'Razorpay (UPI, cards, net banking)',
     merchantName: 'PulseNote AI Technologies',
-    currencySupported: ['INR', 'USD'],
+    currencySupported: ['INR'],
     security: {
       pciDssCompliant: true,
       tokenization: 'TLS 1.3 / AES-256 GCM Client-Side Tokenization',
-      directSettlementVpa: 'wagh.jayesh@oksbi',
       mfa3dSecure: true,
     },
     plans: {
       pro_monthly: {
         id: 'pro_monthly',
         name: 'Pro Monthly',
-        priceINR: 299,
-        priceUSD: 3.99,
+        priceINR: 699,
         interval: 'month',
-        savings: 'Cheaper than $20/mo standard',
+        note: 'Cancel anytime. Billed via UPI AutoPay mandate.',
       },
-      pro_annual: {
-        id: 'pro_annual',
-        name: 'Pro Power Pack (Annual)',
-        priceINR: 1999,
-        priceUSD: 24.99,
+      pro_yearly_upfront: {
+        id: 'pro_yearly_upfront',
+        name: 'Pro Yearly (one-time upfront)',
+        priceINR: 5508,
         interval: 'year',
-        savings: 'Save over 45% (~₹166/mo)',
+        note: 'Effective ₹459/month — save ₹2,880 (34%) vs monthly.',
+      },
+      team_monthly: {
+        id: 'team_monthly',
+        name: 'Clinic / Team Monthly',
+        priceINR: 399,
+        interval: 'seat/month',
+        minSeats: 3,
+      },
+      team_yearly_upfront: {
+        id: 'team_yearly_upfront',
+        name: 'Clinic / Team Yearly (one-time upfront)',
+        priceINR: 3588,
+        interval: 'seat/year',
+        minSeats: 3,
+        note: 'Effective ₹299/seat/month — save 25% vs monthly.',
       },
     },
   });
@@ -5777,7 +5813,6 @@ app.get('/api/admin/financials', (req, res) => {
     totalTransactions: filtered.length,
     totalINR,
     totalUSD,
-    settlementVpa: 'wagh.jayesh@oksbi',
     monthlyBreakdown,
     recentPayments: filtered.slice(0, 50),
   });
@@ -6180,6 +6215,38 @@ async function startServer() {
     return res.status(err?.status || 500).json({
       error: err?.message || 'Internal server error',
     });
+  });
+
+  // SEO: robots.txt and sitemap.xml. Without these, the SPA catch-all served
+  // index.html for both paths, so crawlers got no crawl rules and no sitemap.
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send(
+      [
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /api/',
+        'Disallow: /admin',
+        '',
+        'Sitemap: https://pulsenoteai.in/sitemap.xml',
+        '',
+      ].join('\n')
+    );
+  });
+
+  app.get('/sitemap.xml', (_req, res) => {
+    const lastmod = new Date().toISOString().split('T')[0];
+    const urls = ['/', '/#pricing', '/#soap-demo', '/#faq', '/#about', '/#partners', '/#templates'];
+    const body =
+      `<?xml version="1.0" encoding="UTF-8"?>\n` +
+      `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+      urls
+        .map(
+          (u) =>
+            `  <url>\n    <loc>https://pulsenoteai.in${u}</loc>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n  </url>`
+        )
+        .join('\n') +
+      `\n</urlset>\n`;
+    res.type('application/xml').send(body);
   });
 
   if (!isProd) {

@@ -55,7 +55,7 @@ export const DailyLimitBadge: React.FC<DailyLimitBadgeProps> = ({
         className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[11px] font-bold transition-all"
       >
         <Zap className="w-3 h-3 fill-amber-400" />
-        Upgrade ₹299
+        Upgrade ₹699
         <ArrowUpRight className="w-3 h-3 opacity-70" />
       </button>
     </div>
