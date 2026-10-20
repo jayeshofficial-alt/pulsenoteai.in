@@ -2782,19 +2782,34 @@ app.post(['/razorpayWebhook', '/api/razorpay/webhook'], (req, res) => {
   const signature = req.headers['x-razorpay-signature'] as string;
   const payload = JSON.stringify(req.body);
 
-  if (RAZORPAY_WEBHOOK_SECRET && signature) {
-    try {
-      const expectedSignature = crypto
-        .createHmac('sha256', RAZORPAY_WEBHOOK_SECRET)
-        .update(payload)
-        .digest('hex');
+  // SECURITY: this endpoint grants paid entitlements, so a valid signature is
+  // mandatory. Previously a mismatch was only logged, which let anyone POST a
+  // forged "subscription.charged" body and upgrade any account for free.
+  if (!RAZORPAY_WEBHOOK_SECRET) {
+    console.error('[RazorpayWebhook] Rejected: RAZORPAY_WEBHOOK_SECRET is not configured.');
+    return res.status(500).json({ status: 'error', reason: 'webhook_secret_not_configured' });
+  }
+  if (!signature) {
+    console.warn('[RazorpayWebhook] Rejected: missing x-razorpay-signature header.');
+    return res.status(400).json({ status: 'error', reason: 'missing_signature' });
+  }
+  try {
+    const expectedSignature = crypto
+      .createHmac('sha256', RAZORPAY_WEBHOOK_SECRET)
+      .update(payload)
+      .digest('hex');
 
-      if (signature !== expectedSignature) {
-        console.warn('[RazorpayWebhook] Signature mismatch verification warning');
-      }
-    } catch (sigErr) {
-      console.warn('[RazorpayWebhook] Signature check error:', sigErr);
+    const sigBuf = Buffer.from(String(signature), 'utf8');
+    const expBuf = Buffer.from(expectedSignature, 'utf8');
+    const valid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+
+    if (!valid) {
+      console.warn('[RazorpayWebhook] Rejected: signature mismatch.');
+      return res.status(400).json({ status: 'error', reason: 'invalid_signature' });
     }
+  } catch (sigErr) {
+    console.error('[RazorpayWebhook] Signature check error:', sigErr);
+    return res.status(400).json({ status: 'error', reason: 'signature_check_failed' });
   }
 
   const event = req.body?.event;
@@ -4869,24 +4884,15 @@ app.get('/api/payment/config', (_req, res) => {
 });
 
 app.post('/api/payment/create-order', (req, res) => {
-  const { planId = 'pro_monthly', currency = 'INR' } = req.body;
-  const isAnnual = planId === 'pro_annual';
-  const amountINR = isAnnual ? 1999 : 299;
-  const amountUSD = isAnnual ? 24.99 : 3.99;
-  const orderId = `PULSE_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-
-  // Direct UPI Intent String targeting user UPI VPA: wagh.jayesh@oksbi
-  const upiIntentUrl = `upi://pay?pa=wagh.jayesh@oksbi&pn=PulseNote%20AI&am=${amountINR}&cu=INR&tn=PulseNote%20${isAnnual ? 'Annual' : 'Monthly'}%20Pro%20Upgrade%20${orderId}`;
-
-  res.json({
-    orderId,
-    planId,
-    amount: currency === 'INR' ? amountINR : amountUSD,
-    currency,
-    settlementVpa: 'wagh.jayesh@oksbi',
-    merchantName: 'PulseNote AI Technologies',
-    upiIntentUrl,
-    supportedChannels: ['UPI_INTENT', 'UPI_QR', 'CREDIT_CARD', 'DEBIT_CARD', 'NET_BANKING'],
+  // DEPRECATED: superseded by the current Razorpay flow
+  // (POST /api/create-order for one-time orders,
+  //  POST /api/razorpay/create-subscription for monthly mandates).
+  // This legacy handler carried outdated prices (₹299/₹1,999) and a personal
+  // UPI VPA, so it is disabled to avoid charging customers the wrong amount.
+  return res.status(410).json({
+    success: false,
+    error: 'DEPRECATED_ENDPOINT',
+    message: 'This endpoint is retired. Use the in-app upgrade flow (Razorpay checkout).',
   });
 });
 
