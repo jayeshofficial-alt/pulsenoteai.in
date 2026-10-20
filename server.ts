@@ -2332,34 +2332,35 @@ app.get(['/api/razorpay/config', '/api/razorpay/key'], (_req, res) => {
 // STEP 1: BACKEND - Create Order (POST /api/create-order)
 app.post(['/api/create-order', '/api/razorpay/create-order'], async (req, res) => {
   try {
-    const { amount, currency = 'INR', receipt, packId, plan, seats = 3 } = req.body || {};
+    const { currency = 'INR', receipt, packId, plan, seats = 3 } = req.body || {};
 
-    let amountInPaise = Number(amount);
+    let amountInPaise = Number(req.body?.amount);
 
     // Support packId/plan presets if amount is not passed explicitly.
     // Billing matrix: monthly ₹699 pro / ₹399×seats team (mandate);
     // yearly upfront ₹5,508 pro (₹459×12) / seats×₹299×12 team.
-    if (!amountInPaise || isNaN(amountInPaise)) {
-      const billing = req.body?.billing || 'monthly';
-      if (plan === 'pro' && billing === 'yearly_upfront') {
-        amountInPaise = 550800; // ₹5,508 = ₹459 × 12
-      } else if (plan === 'team' && billing === 'yearly_upfront') {
-        const seatCount = Math.max(3, Number(seats) || 3);
-        amountInPaise = seatCount * 299 * 12 * 100; // ₹299 × 12 × seats
-      } else if (plan === 'pro') {
-        amountInPaise = 69900; // ₹699 monthly
-      } else if (plan === 'team') {
-        const seatCount = Math.max(3, Number(seats) || 3);
-        amountInPaise = seatCount * 39900; // ₹399/seat monthly
-      } else if (packId === 'credits_100') {
-        amountInPaise = 29900; // ₹299
-      } else if (packId === 'credits_500') {
-        amountInPaise = 119900; // ₹1199
-      } else if (packId === 'template_setup') {
-        amountInPaise = 299900; // ₹2999
-      } else {
-        amountInPaise = 49900; // Default ₹499
-      }
+    //
+    // SECURITY: when the caller names a `plan` or `packId`, the server amount
+    // WINS. A client-supplied `amount` is only honoured for orders that do not
+    // map to a plan/pack (so a spoofed low amount can never buy a real tier).
+    if (plan === 'pro' && req.body?.billing === 'yearly_upfront') {
+      amountInPaise = 550800; // ₹5,508 = ₹459 × 12
+    } else if (plan === 'team' && req.body?.billing === 'yearly_upfront') {
+      const seatCount = Math.max(3, Number(seats) || 3);
+      amountInPaise = seatCount * 299 * 12 * 100; // ₹299 × 12 × seats
+    } else if (plan === 'pro') {
+      amountInPaise = 69900; // ₹699 monthly
+    } else if (plan === 'team') {
+      const seatCount = Math.max(3, Number(seats) || 3);
+      amountInPaise = seatCount * 39900; // ₹399/seat monthly
+    } else if (packId === 'credits_100') {
+      amountInPaise = 29900; // ₹299
+    } else if (packId === 'credits_500') {
+      amountInPaise = 119900; // ₹1199
+    } else if (packId === 'template_setup') {
+      amountInPaise = 299900; // ₹2999
+    } else if (!amountInPaise || isNaN(amountInPaise)) {
+      amountInPaise = 49900; // Default ₹499
     }
 
     // Minimum amount validation: 100 paise (₹1.00)
@@ -2584,6 +2585,100 @@ app.post(['/api/verify-payment', '/api/razorpay/verify-payment', '/api/razorpay/
     }
 
     console.log(`[Razorpay] Signature Verified Successfully for ID: ${subIdOrOrderId}, Payment: ${pId}`);
+
+    // ---------------------------------------------------------------------
+    // SERVER-SIDE AUTHORITATIVE CHECK
+    // The signature only proves the ids are genuine; it does NOT prove what was
+    // paid for. `plan`, `billing` and `seats` arrive from the client, so we must
+    // re-derive the entitlement from Razorpay itself before granting anything.
+    // Without this, a client could create a ₹1 order and then verify it while
+    // claiming plan=pro/yearly_upfront to get a year of Pro for ₹1.
+    // ---------------------------------------------------------------------
+    const claimedBilling = ((req.body?.billing as string) || '').trim();
+    const claimedSeats = Math.max(1, Number(seats) || 0);
+
+    // Expected amount (in paise) for what the caller claims to have bought.
+    let expectedPaise = 0;
+    let entitlement: 'pro' | 'team' | 'credits_100' | 'credits_500' | null = null;
+    if (plan === 'pro') {
+      expectedPaise = claimedBilling === 'yearly_upfront' ? 550800 : 69900;
+      entitlement = 'pro';
+    } else if (plan === 'team') {
+      const seatCount = Math.max(3, claimedSeats || 3);
+      expectedPaise = claimedBilling === 'yearly_upfront' ? seatCount * 299 * 12 * 100 : seatCount * 39900;
+      entitlement = 'team';
+    } else if (packId === 'credits_100') {
+      expectedPaise = 29900;
+      entitlement = 'credits_100';
+    } else if (packId === 'credits_500') {
+      expectedPaise = 119900;
+      entitlement = 'credits_500';
+    }
+
+    if (!entitlement) {
+      return res.status(400).json({
+        success: false,
+        error: 'UNKNOWN_ENTITLEMENT',
+        message: 'Could not determine what this payment was for.',
+      });
+    }
+
+    // Re-fetch the real order / subscription from Razorpay and compare amounts.
+    if (razorpay_order_id || orderId) {
+      try {
+        const order = await razorpayClient.orders.fetch(razorpay_order_id || orderId);
+        const paidPaise = Number(order?.amount) || 0;
+        if (paidPaise < expectedPaise) {
+          console.error('[Razorpay] Amount mismatch on verify:', {
+            orderId: razorpay_order_id || orderId,
+            paidPaise,
+            expectedPaise,
+            claimedPlan: plan,
+          });
+          return res.status(400).json({
+            success: false,
+            error: 'AMOUNT_MISMATCH',
+            message: 'Paid amount does not match the selected plan. Contact support with your payment id.',
+          });
+        }
+      } catch (orderErr: any) {
+        console.error('[Razorpay] Order lookup failed:', orderErr?.message || orderErr);
+        return res.status(400).json({
+          success: false,
+          error: 'ORDER_LOOKUP_FAILED',
+          message: 'Could not confirm this order with Razorpay. Contact support with your payment id.',
+        });
+      }
+    } else {
+      // Subscription mandates settle asynchronously; verify the mandate exists
+      // and is attached to a plan whose amount matches what the client claims.
+      try {
+        const sub = await razorpayClient.subscriptions.fetch(subIdOrOrderId);
+        const subPaise = Number(sub?.plan?.item?.amount) || 0;
+        const qty = Math.max(1, Number(sub?.quantity) || 1);
+        const perCycle = subPaise * qty;
+        if (perCycle < expectedPaise) {
+          console.error('[Razorpay] Subscription amount mismatch on verify:', {
+            subscriptionId: subIdOrOrderId,
+            perCycle,
+            expectedPaise,
+            claimedPlan: plan,
+          });
+          return res.status(400).json({
+            success: false,
+            error: 'AMOUNT_MISMATCH',
+            message: 'Subscription amount does not match the selected plan. Contact support with your payment id.',
+          });
+        }
+      } catch (subErr: any) {
+        console.error('[Razorpay] Subscription lookup failed:', subErr?.message || subErr);
+        return res.status(400).json({
+          success: false,
+          error: 'SUBSCRIPTION_LOOKUP_FAILED',
+          message: 'Could not confirm this subscription with Razorpay. Contact support with your payment id.',
+        });
+      }
+    }
 
     // Update user state in database/memory store
     const user = await verifyServerFirebaseUser(req);
