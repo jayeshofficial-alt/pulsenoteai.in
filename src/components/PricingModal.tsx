@@ -544,7 +544,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   {billingPeriod === 'monthly' ? (
                     <>₹699 <span className="text-xs text-[#9aa0a6] font-normal">/ month</span></>
                   ) : (
-                    <>₹499 <span className="text-xs text-[#9aa0a6] font-normal">/ month, billed monthly</span></>
+                    <>₹5,508 <span className="text-xs text-[#9aa0a6] font-normal">/ year, one-time</span></>
                   )}
                 </div>
                 {billingPeriod === 'monthly' ? (
@@ -554,8 +554,8 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 ) : (
                   <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-2.5 space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-emerald-300 font-semibold">Yearly upfront</span>
-                      <span className="text-sm font-black text-white">{inr(PRO_UPFRONT_TOTAL)} <span className="text-[10px] font-normal text-[#9aa0a6]">/ year</span></span>
+                      <span className="text-[11px] text-emerald-300 font-semibold">Effective rate</span>
+                      <span className="text-sm font-black text-white">{inr(PRO_UPFRONT_MO)} <span className="text-[10px] font-normal text-[#9aa0a6]">/ month equivalent</span></span>
                     </div>
                     <p className="text-[11px] text-[#c4c7c5]">
                       Effective {inr(PRO_UPFRONT_MO)}/mo — <span className="font-bold text-emerald-300">save {inr(proUpfrontSaving)}/yr (34%)</span> vs monthly billing.

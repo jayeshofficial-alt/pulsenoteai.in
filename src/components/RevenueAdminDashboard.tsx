@@ -59,7 +59,6 @@ interface Analytics {
 // Plan catalog with dynamic amounts (mirrors server BILLING_MATRIX + upfront)
 const PLAN_OPTIONS = [
   { id: 'pro_monthly', label: 'Pro Monthly — ₹699/mo', plan: 'pro', billing: 'monthly', baseAmount: 699, per: 'month' },
-  { id: 'pro_yearly_mandate', label: 'Pro Yearly Mandate — ₹499/mo', plan: 'pro', billing: 'yearly_mandate', baseAmount: 499, per: 'month × 12' },
   { id: 'pro_yearly_upfront', label: 'Pro Yearly Upfront — ₹5,508/yr', plan: 'pro', billing: 'yearly_upfront', baseAmount: 5508, per: 'year' },
   { id: 'team_monthly', label: 'Team Monthly — ₹399/seat/mo', plan: 'team', billing: 'monthly', baseAmount: 399, per: 'seat/month' },
   { id: 'team_yearly_upfront', label: 'Team Yearly Upfront — ₹299/seat/mo', plan: 'team', billing: 'yearly_upfront', baseAmount: 299 * 12, per: 'seat/year' },
@@ -186,9 +185,7 @@ export function RevenueAdminDashboard({ currentUser, onBack, onShowToast }: Reve
         ? (selectedPlan.billing === 'yearly_upfront' ? planSeats * 299 * 12 : planSeats * 399)
         : selectedPlan.billing === 'yearly_upfront'
           ? 5508
-          : selectedPlan.billing === 'yearly_mandate'
-            ? 499
-            : 699;
+          : 699;
 
   const handlePlanSave = async () => {
     if (!planUser) return;

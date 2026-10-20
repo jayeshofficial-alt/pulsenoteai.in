@@ -139,6 +139,17 @@ export function subscribeToFeatureSettings(
   callback: (settings: FeatureSettingsDoc) => void
 ): () => void {
   const settingsRef = doc(db, 'settings', 'features');
+  // Firestore rules allow reading /settings only when authenticated. Skip the
+  // listener entirely for signed-out visitors to avoid permission errors.
+  if (!auth.currentUser) {
+    callback({
+      imageGenerationEnabled: false,
+      videoGenerationEnabled: false,
+      updatedBy: 'system',
+      updatedAt: new Date().toISOString(),
+    });
+    return () => {};
+  }
   return onSnapshot(
     settingsRef,
     (docSnap) => {

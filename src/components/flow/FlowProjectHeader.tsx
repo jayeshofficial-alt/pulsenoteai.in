@@ -210,7 +210,7 @@ export const FlowProjectHeader: React.FC<FlowProjectHeaderProps> = ({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
           >
             <Crown className="w-3.5 h-3.5 fill-current" />
-            <span>Upgrade Pro (₹499)</span>
+            <span>Upgrade Pro (₹699)</span>
           </button>
         ) : isAdmin ? (
           <button
