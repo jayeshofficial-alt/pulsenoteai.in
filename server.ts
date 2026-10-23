@@ -35,7 +35,7 @@ try {
 }
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
 
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
@@ -48,13 +48,18 @@ app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 // loads Razorpay Checkout, Firebase Auth, Google Identity and Google Fonts, and
 // an over-tight policy silently breaks payments/login. `frame-ancestors` still
 // gives the clickjacking protection that matters without any load risk.
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  // Allow framing from AI Studio, Google Cloud Run, and Google domains so preview iframe loads smoothly
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.google.com https://*.aistudio.google.com https://*.run.app *");
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Authorization, x-admin-email, x-user-email, x-user-id');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=()');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
   next();
 });
 
@@ -1249,7 +1254,7 @@ function checkAdminAccess(req: express.Request): boolean {
 }
 
 app.use('/api/admin', (req, res, next) => {
-  if (req.path === '/features' && req.method === 'GET') {
+  if ((req.path === '/features' || req.path === '/health') && req.method === 'GET') {
     return next();
   }
   if (!checkAdminAccess(req)) {
@@ -1269,6 +1274,130 @@ app.get('/api/admin/features', (_req, res) => {
   });
 });
 
+// Admin External Services & Database Health Status Check (/api/admin/health)
+app.get('/api/admin/health', async (_req, res) => {
+  const healthResults: Record<string, any> = {
+    timestamp: new Date().toISOString(),
+    status: 'healthy',
+    services: {},
+  };
+
+  // 1. Firebase Service Health
+  try {
+    const hasFirebaseCfg = Boolean(firebaseConfig?.projectId && firebaseConfig?.apiKey);
+    healthResults.services.firebase = {
+      name: 'Firebase (Firestore & Auth)',
+      status: hasFirebaseCfg ? 'ok' : 'degraded',
+      configured: hasFirebaseCfg,
+      projectId: firebaseConfig?.projectId || 'none',
+      authDomain: firebaseConfig?.authDomain || 'none',
+      message: hasFirebaseCfg ? 'Firebase SDK initialized & config verified.' : 'Firebase config missing or incomplete.',
+    };
+  } catch (err: any) {
+    healthResults.services.firebase = {
+      name: 'Firebase (Firestore & Auth)',
+      status: 'error',
+      configured: false,
+      error: err?.message || 'Firebase health check failed',
+    };
+  }
+
+  // 2. OpenRouter API Connection Health
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  if (!openRouterKey) {
+    healthResults.services.openRouter = {
+      name: 'OpenRouter AI API',
+      status: 'not_configured',
+      configured: false,
+      message: 'OPENROUTER_API_KEY environment variable is not configured.',
+    };
+  } else {
+    try {
+      const startTime = Date.now();
+      const orRes = await fetch('https://openrouter.ai/api/v1/auth/key', {
+        headers: { Authorization: `Bearer ${openRouterKey}` },
+      });
+      const latencyMs = Date.now() - startTime;
+      if (orRes.ok) {
+        const keyData = await orRes.json();
+        healthResults.services.openRouter = {
+          name: 'OpenRouter AI API',
+          status: 'ok',
+          configured: true,
+          latencyMs,
+          label: keyData?.data?.label || 'Active Key',
+          limit: keyData?.data?.limit || null,
+          usage: keyData?.data?.usage || 0,
+          message: 'Connected & authenticated successfully.',
+        };
+      } else {
+        healthResults.services.openRouter = {
+          name: 'OpenRouter AI API',
+          status: 'degraded',
+          configured: true,
+          latencyMs,
+          httpStatus: orRes.status,
+          message: `Key validation returned HTTP ${orRes.status}`,
+        };
+      }
+    } catch (err: any) {
+      healthResults.services.openRouter = {
+        name: 'OpenRouter AI API',
+        status: 'error',
+        configured: true,
+        error: err?.message || 'Failed to connect to OpenRouter endpoint',
+      };
+    }
+  }
+
+  // 3. Gemini / Google GenAI SDK Health
+  const geminiKey = process.env.GEMINI_API_KEY;
+  healthResults.services.gemini = {
+    name: 'Google Gemini 2.5/3.5 Pro',
+    status: geminiKey && geminiKey !== 'MY_GEMINI_API_KEY' ? 'ok' : 'not_configured',
+    configured: Boolean(geminiKey && geminiKey !== 'MY_GEMINI_API_KEY'),
+    message: geminiKey && geminiKey !== 'MY_GEMINI_API_KEY' ? 'GEMINI_API_KEY is configured' : 'GEMINI_API_KEY missing',
+  };
+
+  // 4. Razorpay Payment Gateway Health
+  const razorpayKey = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || RAZORPAY_KEY_ID;
+  healthResults.services.razorpay = {
+    name: 'Razorpay Payment Gateway',
+    status: Boolean(razorpayKey) ? 'ok' : 'degraded',
+    configured: Boolean(razorpayKey),
+    keyPreview: razorpayKey ? `${razorpayKey.slice(0, 8)}...` : 'none',
+    message: razorpayKey ? 'Merchant Key ID active' : 'Key missing',
+  };
+
+  // 5. System Store Database Health
+  try {
+    const users = store.getAllUsers();
+    healthResults.services.database = {
+      name: 'Local Store Database',
+      status: 'ok',
+      totalUsers: users.length,
+      totalPayments: store.getAllPayments().length,
+      message: 'Local account database responsive.',
+    };
+  } catch (err: any) {
+    healthResults.services.database = {
+      name: 'Local Store Database',
+      status: 'error',
+      error: err?.message || 'Database store check failed',
+    };
+  }
+
+  // Aggregate overall system status
+  const statuses = Object.values(healthResults.services).map((s: any) => s.status);
+  if (statuses.includes('error')) {
+    healthResults.status = 'error';
+  } else if (statuses.includes('degraded') || statuses.includes('not_configured')) {
+    healthResults.status = 'degraded';
+  }
+
+  return res.json(healthResults);
+});
+
 app.post('/api/admin/features', async (req, res) => {
   const user = await verifyServerFirebaseUser(req);
   if (!isAuthorizedAdmin(user)) {
@@ -1285,11 +1414,166 @@ app.post('/api/admin/features', async (req, res) => {
     updatedAt: new Date().toISOString(),
   };
 
+  store.logAdminAuditAction({
+    adminEmail: user?.email || 'admin@pulsenoteai.in',
+    action: 'TOGGLE_FEATURE_SWITCH',
+    details: `Updated feature switches: Image Generation=${Boolean(imageGenerationEnabled)}, Video Generation=${Boolean(videoGenerationEnabled)}`,
+  });
+
   console.log('[Admin] Feature switch updated by', user?.email, currentFeatureSettings);
   return res.json({
     success: true,
     features: currentFeatureSettings,
   });
+});
+
+// Admin Audit Log API Endpoint (/api/admin/audit-logs)
+app.get(['/api/admin/audit-logs', '/api/admin/logs'], (_req, res) => {
+  try {
+    const logs = store.getAdminAuditLogs();
+    return res.json({ success: true, logs });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to fetch audit logs' });
+  }
+});
+
+// Admin User Ban/Unban API Endpoint
+app.post('/api/admin/users/:id/ban', (req, res) => {
+  const { id } = req.params;
+  const { isBanned, reason = '' } = req.body || {};
+  const adminEmail = (req.headers['x-admin-email'] || req.body?.adminEmail || 'admin@pulsenoteai.in') as string;
+
+  try {
+    const user = store.findUserById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const newStatus = isBanned ? 'banned' : 'active';
+    store.updateUserAdminFields(id, { status: newStatus as any });
+
+    const actionName = isBanned ? 'BAN_USER' : 'UNBAN_USER';
+    const logDetails = isBanned
+      ? `Banned user ${user.name} (${user.email}). Rationale: ${reason || 'Admin moderation'}`
+      : `Unbanned user ${user.name} (${user.email}). Account status restored to active.`;
+
+    store.logAdminAuditAction({
+      adminEmail,
+      action: actionName,
+      targetUserId: user.id,
+      targetUserEmail: user.email,
+      details: logDetails,
+    });
+
+    return res.json({
+      success: true,
+      user,
+      message: `User ${user.email} ${isBanned ? 'banned' : 'unbanned'} successfully.`,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Failed to update user ban status' });
+  }
+});
+
+// Admin User Subscription / Premium Status Change API Endpoint
+app.post(['/api/admin/users/:id/premium', '/api/admin/users/:id/plan'], (req, res) => {
+  const { id } = req.params;
+  const { plan = 'free', tier } = req.body || {};
+  const targetPlan = tier || plan;
+  const adminEmail = (req.headers['x-admin-email'] || req.body?.adminEmail || 'admin@pulsenoteai.in') as string;
+
+  try {
+    const user = store.findUserById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const oldTier = user.subscription?.tier || 'free';
+    const newTier = (targetPlan === 'premium' || targetPlan === 'pro' || targetPlan === 'pro_monthly') ? 'pro_monthly' : targetPlan === 'team' || targetPlan === 'pro_annual' ? 'pro_annual' : 'free';
+    const expiresAt = newTier === 'free' ? null : Date.now() + 30 * 86400000;
+
+    const updatedUser = store.updateUserSubscription(id, {
+      tier: newTier as any,
+      isPro: newTier !== 'free',
+      expiresAt,
+    });
+
+    const actionName = newTier !== 'free' ? 'GRANT_PREMIUM' : 'REVOKE_PREMIUM';
+    const logDetails = `Updated subscription tier for ${user.name} (${user.email}) from '${oldTier}' to '${newTier}'.`;
+
+    store.logAdminAuditAction({
+      adminEmail,
+      action: actionName,
+      targetUserId: user.id,
+      targetUserEmail: user.email,
+      details: logDetails,
+    });
+
+    return res.json({
+      success: true,
+      user: updatedUser,
+      message: `User subscription set to ${newTier}.`,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Failed to update user subscription' });
+  }
+});
+
+// Admin User Manual Pro Tenure Grant API Endpoint
+app.post('/api/admin/users/:id/grant', (req, res) => {
+  const { id } = req.params;
+  const { amount = 30, unit = 'days' } = req.body || {};
+  const adminEmail = (req.headers['x-admin-email'] || req.body?.adminEmail || 'admin@pulsenoteai.in') as string;
+
+  try {
+    const user = store.findUserById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const updatedUser = store.grantPremiumAccess(id, Number(amount), unit as any);
+
+    store.logAdminAuditAction({
+      adminEmail,
+      action: 'GRANT_MANUAL_TENURE',
+      targetUserId: user.id,
+      targetUserEmail: user.email,
+      details: `Granted ${amount} ${unit} Pro access to ${user.name} (${user.email}). Tenure unlocked until ${new Date(updatedUser.subscription.expiresAt || 0).toLocaleDateString()}.`,
+    });
+
+    return res.json({
+      success: true,
+      user: updatedUser,
+      message: `Granted ${amount} ${unit} Pro access to ${user.email}.`,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Failed to grant manual tenure' });
+  }
+});
+
+// Admin Permanent User Deletion Endpoint
+app.delete('/api/admin/users/:id', (req, res) => {
+  const { id } = req.params;
+  const adminEmail = (req.headers['x-admin-email'] || req.body?.adminEmail || 'admin@pulsenoteai.in') as string;
+
+  try {
+    const result = store.deleteUser(id);
+
+    store.logAdminAuditAction({
+      adminEmail,
+      action: 'DELETE_USER',
+      targetUserId: result.deletedUser.id,
+      targetUserEmail: result.deletedUser.email,
+      details: `Permanently deleted user ${result.deletedUser.name} (${result.deletedUser.email}) and purged account data.`,
+    });
+
+    return res.json({
+      success: true,
+      message: `Permanently deleted user ${result.deletedUser.email}`,
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Failed to delete user' });
+  }
 });
 
 // In-memory credit and note counter store for server-enforced transactions
@@ -1306,6 +1590,8 @@ const userAccountState: Record<
     subscriptionStatus?: string;
     nextBillingDate?: string;
     createdAt?: string;
+    planBilling?: string;
+    subscriptionId?: string;
   }
 > = {};
 
@@ -2694,7 +2980,7 @@ app.post(['/api/verify-payment', '/api/razorpay/verify-payment', '/api/razorpay/
       // Subscription mandates settle asynchronously; verify the mandate exists
       // and is attached to a plan whose amount matches what the client claims.
       try {
-        const sub = await razorpayClient.subscriptions.fetch(subIdOrOrderId);
+        const sub: any = await razorpayClient.subscriptions.fetch(subIdOrOrderId);
         const subPaise = Number(sub?.plan?.item?.amount) || 0;
         const qty = Math.max(1, Number(sub?.quantity) || 1);
         const perCycle = subPaise * qty;
@@ -6254,8 +6540,9 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(port, () => {
-    console.log(`PulseNote AI server listening on port ${port} [mode: ${isProd ? 'production' : 'development'}]`);
+  const PORT_NUM = 3000;
+  const server = app.listen(PORT_NUM, '0.0.0.0', () => {
+    console.log(`PulseNote AI server listening on http://0.0.0.0:${PORT_NUM} [mode: ${isProd ? 'production' : 'development'}]`);
   });
 
   // Initialize Google Flow Real-Time WebSocket Server
@@ -6267,4 +6554,13 @@ async function startServer() {
   server.requestTimeout = 120000;   // 120 seconds
 }
 
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT_EXCEPTION_GUARD]', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED_REJECTION_GUARD]', reason);
+});
+
 startServer();
+

@@ -1581,7 +1581,7 @@ export function App() {
             onBack={() => setActiveView('chat')}
             onShowToast={addToast}
           />
-        ) : activeView === 'marketing' ? (
+        ) : (activeView as string) === 'marketing' ? (
           <div className="flex-1 overflow-y-auto scrollbar-thin">
             <MarketingSite
               onLaunchApp={() => setActiveView('chat')}

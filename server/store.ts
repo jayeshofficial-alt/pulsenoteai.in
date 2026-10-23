@@ -70,6 +70,16 @@ export interface StoredDocument {
   };
 }
 
+export interface AdminAuditLog {
+  id: string;
+  adminEmail: string;
+  action: string;
+  targetUserId?: string;
+  targetUserEmail?: string;
+  details: string;
+  timestamp: number;
+}
+
 interface DatabaseSchema {
   adminEmail: string;
   adminPasswordHash: string;
@@ -78,6 +88,7 @@ interface DatabaseSchema {
   passwordResetOtps: Record<string, { otp: string; channel: 'sms' | 'email' | 'both'; expiresAt: number }>;
   payments: PaymentRecord[];
   activityLogs: UserActivityLog[];
+  auditLogs?: AdminAuditLog[];
   emails: SystemEmailNotification[];
   settings: AppInterfaceSettings;
   documents?: StoredDocument[];
@@ -1156,6 +1167,43 @@ class Store {
 
   public getUserActivityLogs(userId: string): UserActivityLog[] {
     return this.db.activityLogs.filter((l) => l.userId === userId);
+  }
+
+  // Admin Audit Logging
+  public logAdminAuditAction(params: {
+    adminEmail: string;
+    action: string;
+    targetUserId?: string;
+    targetUserEmail?: string;
+    details: string;
+  }): AdminAuditLog {
+    if (!this.db.auditLogs) {
+      this.db.auditLogs = [];
+    }
+
+    const log: AdminAuditLog = {
+      id: `AUDIT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      adminEmail: params.adminEmail || 'admin@pulsenoteai.in',
+      action: params.action,
+      targetUserId: params.targetUserId,
+      targetUserEmail: params.targetUserEmail,
+      details: params.details,
+      timestamp: Date.now(),
+    };
+
+    this.db.auditLogs.unshift(log);
+    if (this.db.auditLogs.length > 500) {
+      this.db.auditLogs = this.db.auditLogs.slice(0, 500);
+    }
+    this.saveDatabase();
+    return log;
+  }
+
+  public getAdminAuditLogs(): AdminAuditLog[] {
+    if (!this.db.auditLogs) {
+      this.db.auditLogs = [];
+    }
+    return [...this.db.auditLogs];
   }
 
   // System Email Notification Log

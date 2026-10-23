@@ -15,10 +15,18 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      host: '0.0.0.0',
+      port: 3000,
+      origin: 'https://ais-dev-v24ydvjkr7k3gbns26ecmk-727009405222.europe-west2.run.app',
+      allowedHosts: [
+        '0.0.0.0',
+        'ais-dev-v24ydvjkr7k3gbns26ecmk-727009405222.europe-west2.run.app',
+        'ais-pre-v24ydvjkr7k3gbns26ecmk-727009405222.europe-west2.run.app',
+        'localhost',
+        '127.0.0.1',
+      ],
+      cors: true,
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

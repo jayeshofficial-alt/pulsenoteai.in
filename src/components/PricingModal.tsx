@@ -18,6 +18,7 @@ import { auth } from '../lib/firebase';
 interface PricingModalProps {
   isOpen: boolean;
   onClose: () => void;
+  currentUser?: any;
   currentPlan?: PulseNotePlan;
   currentCredits?: number;
   notesUsedThisMonth?: number;
@@ -168,7 +169,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
       // Check if Razorpay script loaded
       if (!(window as any).Razorpay) {
-        await verifyLocalPayment({ plan, seats: teamSeats, billing, subscriptionId: data.subscriptionId || data.orderId, token });
+        await verifyLocalPayment({ plan, seats: teamSeats, billing: 'monthly', subscriptionId: data.subscriptionId || data.orderId, token });
         return;
       }
 
