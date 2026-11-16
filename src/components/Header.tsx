@@ -3,6 +3,7 @@ import { TargetIndustry, UserUsageState, UserProfile, SearchFormatLens } from '.
 import { INDUSTRY_CONFIGS } from '../data/presets';
 import { DailyLimitBadge } from './DailyLimitBadge';
 import { FormatLensDropdown } from './FormatLensDropdown';
+import { isPulseNoteAdmin } from '../lib/firebase';
 import { 
   Smartphone, 
   Maximize2, 
@@ -73,12 +74,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleViewMode,
 }) => {
   const activeConfig = INDUSTRY_CONFIGS.find((c) => c.id === currentIndustry) || INDUSTRY_CONFIGS[0];
-  const userEmail = currentUser?.email?.trim().toLowerCase();
   const isAdmin = Boolean(
     currentUser && (
       currentUser.role === 'admin' ||
-      userEmail === 'jayeshofficial@gmail.com' ||
-      userEmail === 'contact@pulsenoteai.in'
+      isPulseNoteAdmin(currentUser.email)
     )
   );
 

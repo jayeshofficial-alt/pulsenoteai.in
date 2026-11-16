@@ -13,7 +13,7 @@ import { searchLiveImages } from './server/imageSearchService.js';
 import { flowStore } from './server/flowStore.js';
 import { initFlowWebSocketServer } from './server/flowWebSocket.js';
 import { BLOCKED_PATTERNS, precheck_prompt, generate_video } from './server/videoGenerator.js';
-import { MODE_SYSTEM_PROMPTS, getSystemPromptForMode } from './server/modePrompts.js';
+import { MODE_SYSTEM_PROMPTS, getSystemPromptForMode, formatOutputLengthInstruction, formatDictionaryInstruction } from './server/modePrompts.js';
 
 export { BLOCKED_PATTERNS, precheck_prompt, generate_video };
 
@@ -417,22 +417,22 @@ app.post('/api/chat', async (req, res) => {
     const effectiveIsPro = isPro || isAdminUser;
 
     // Model selection based on user request or task complexity
-    let modelName = 'gemini-3.5-flash';
-    const isProModelRequested = model === '2.5 Pro' || model === 'gemini-3.1-pro-preview' || taskComplexity === 'complex';
+    let modelName = 'gemini-4-hydrogen';
+    const isProModelRequested = model === '2.5 Pro' || model === 'gemini-4-argon' || model === 'gemini-3.1-pro-preview' || taskComplexity === 'complex';
 
     if (isProModelRequested) {
       if (!effectiveIsPro) {
         return res.status(403).json({
           isLimitReached: true,
-          error: 'Upgrade to Premium to use 2.5 Pro.',
+          error: 'Upgrade to Premium to use Pro Engine.',
           upgradeMessage: UPGRADE_BLOCK_VERBATIM,
         });
       }
-      modelName = 'gemini-3.1-pro-preview';
+      modelName = 'gemini-4-hydrogen';
     } else if (model === 'gemini-3.1-flash-lite' || taskComplexity === 'fast') {
       modelName = 'gemini-3.1-flash-lite';
-    } else if (model === '2.5 Flash' || model === 'gemini-3.5-flash' || taskComplexity === 'general') {
-      modelName = 'gemini-3.5-flash';
+    } else if (model === '2.5 Flash' || model === 'gemini-4-hydrogen' || model === 'gemini-3.5-flash' || taskComplexity === 'general') {
+      modelName = 'gemini-4-hydrogen';
     }
 
     // Daily free limit check (3 prompts / day for free tier)
@@ -455,14 +455,13 @@ app.post('/api/chat', async (req, res) => {
 
     const config: any = {
       systemInstruction,
-      temperature: 0.3,
     };
 
     if (hasLocationIntent) {
-      modelName = 'gemini-3.5-flash';
+      modelName = 'gemini-4-hydrogen';
       config.tools = [{ googleMaps: {} }];
     } else if (isSearchGroundingRequested) {
-      modelName = 'gemini-3.5-flash';
+      modelName = 'gemini-4-hydrogen';
       config.tools = [{ googleSearch: {} }];
     }
 
@@ -578,9 +577,9 @@ app.post('/api/chat', async (req, res) => {
 
             // Fallback to non-streaming response if stream fails
             const fallbackRes = await ai.models.generateContent({
-              model: 'gemini-3.5-flash',
+              model: 'gemini-4-hydrogen',
               contents,
-              config: { systemInstruction, temperature: 0.3 },
+              config: { systemInstruction },
             });
             const fallbackText = fallbackRes?.text || 'Analysis complete.';
             res.write(`data: ${JSON.stringify({ type: 'token', text: fallbackText })}\n\n`);
@@ -597,7 +596,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Non-streaming standard response
     let response;
-    const chatModelsToTry = [modelName, 'gemini-3.5-flash', 'gemini-3.1-flash-lite'];
+    const chatModelsToTry = [modelName, 'gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
     const triedSet = new Set<string>();
 
     for (const currentModel of chatModelsToTry) {
@@ -607,7 +606,7 @@ app.post('/api/chat', async (req, res) => {
         response = await ai.models.generateContent({
           model: currentModel,
           contents,
-          config: currentModel === modelName ? config : { systemInstruction, temperature: 0.3 },
+          config: currentModel === modelName ? config : { systemInstruction },
         });
         if (response && response.text) {
           modelName = currentModel;
@@ -775,7 +774,7 @@ app.post('/chat', async (req, res) => {
     if (process.env.GEMINI_API_KEY) {
       try {
         const chat = await googleAi.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents: userMessage,
           config: { systemInstruction: activeInstruction },
         });
@@ -1035,13 +1034,12 @@ app.get(['/generate-video', '/video'], (_req, res) => {
 });
 
 // Modular Gemini Chat Request Handler using @google/genai
-export async function handleChatRequest(userPrompt: string, customModel: string = 'gemini-2.5-flash') {
+export async function handleChatRequest(userPrompt: string, customModel: string = 'gemini-4-hydrogen') {
   try {
     const response = await ai.models.generateContent({
       model: customModel,
       contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
       config: {
-        temperature: 0.7,
         maxOutputTokens: 2048,
       },
     });
@@ -1054,7 +1052,7 @@ export async function handleChatRequest(userPrompt: string, customModel: string 
 }
 
 app.post('/api/gemini/generate', async (req, res) => {
-  const { prompt, message, model = 'gemini-2.5-flash' } = req.body;
+  const { prompt, message, model = 'gemini-4-hydrogen' } = req.body;
   const userPrompt = prompt || message;
   if (!userPrompt) {
     return res.status(400).json({ error: 'Prompt or message is required' });
@@ -1073,44 +1071,20 @@ app.post('/api/gemini/generate', async (req, res) => {
 // ==========================================
 // SUMMARIZATION ENDPOINTS (/api/summarize & /api/summarise)
 // ==========================================
-export async function summarizeText(prompt: string, model: string = 'gemini-2.5-flash') {
+export async function summarizeText(prompt: string, model: string = 'gemini-4-hydrogen') {
   const geminiKey = process.env.GEMINI_API_KEY;
 
   // 1. Try Google Generative Language REST API / @google/genai
   if (geminiKey) {
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: `Summarise the following:\n\n${prompt}` }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
-          }),
-        }
-      );
-
-      if (res.ok) {
-        const data = await res.json();
-        const cand = data.candidates?.[0];
-
-        if (!cand) {
-          throw new Error(
-            data.promptFeedback?.blockReason
-              ? `Blocked: ${data.promptFeedback.blockReason}`
-              : 'Response contained no candidates.'
-          );
-        }
-
-        if (cand.finishReason && cand.finishReason !== 'STOP') {
-          console.warn('finishReason:', cand.finishReason);
-        }
-
-        const summaryText = (cand.content?.parts ?? []).map((p: any) => p.text ?? '').join('');
-        if (summaryText) {
-          return { success: true, text: summaryText, summary: summaryText, modelUsed: model };
-        }
+      const response = await ai.models.generateContent({
+        model,
+        contents: `Summarise the following:\n\n${prompt}`,
+        config: { maxOutputTokens: 2048 },
+      });
+      const summaryText = response.text || '';
+      if (summaryText) {
+        return { success: true, text: summaryText, summary: summaryText, modelUsed: model };
       }
     } catch (gErr: any) {
       console.warn('Gemini summarization direct notice:', gErr?.message);
@@ -1139,7 +1113,7 @@ export async function summarizeText(prompt: string, model: string = 'gemini-2.5-
 }
 
 const handleSummarizeRoute = async (req: express.Request, res: express.Response) => {
-  const { prompt, text, message, model = 'gemini-2.5-flash' } = req.body;
+  const { prompt, text, message, model = 'gemini-4-hydrogen' } = req.body;
   const inputPrompt = prompt || text || message;
 
   if (!inputPrompt) {
@@ -1164,7 +1138,12 @@ app.post('/api/summarise', handleSummarizeRoute);
 // ==========================================
 // ADMIN FEATURE SWITCH & USER AUTH (Section 1)
 // ==========================================
-const PULSENOTE_ADMIN_EMAILS = ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in'];
+const PULSENOTE_ADMIN_EMAILS = [
+  'wagh.jayesh@gmail.com',
+  'jayeshofficial@gmail.com',
+  'contact@pulsenoteai.in',
+  'contact@pulsenoteai.com',
+];
 
 export async function verifyServerFirebaseUser(req: express.Request) {
   const authHeader = req.headers.authorization;
@@ -1246,22 +1225,42 @@ export let currentFeatureSettings: ServerFeatureSettings = {
   updatedAt: new Date().toISOString(),
 };
 
-// Server-side admin email authorization check helper & middleware (Requirement 9)
-function checkAdminAccess(req: express.Request): boolean {
+// Server-side admin authorization check helper & middleware
+async function checkAdminAccess(req: express.Request): Promise<{ ok: boolean; email?: string }> {
   const auth = req.headers.authorization || '';
-  const adminEmail = (req.headers['x-admin-email'] || req.query.adminEmail || req.body?.adminEmail || '') as string;
-  return auth.includes('ADMIN_TOKEN') || store.isStrictAdminEmail(adminEmail);
+  const adminEmail = ((req.headers['x-admin-email'] || req.query.adminEmail || req.body?.adminEmail || '') as string).toLowerCase().trim();
+
+  if (auth.includes('ADMIN_TOKEN')) {
+    return { ok: true, email: adminEmail || 'admin@pulsenoteai.in' };
+  }
+
+  if (adminEmail && store.isStrictAdminEmail(adminEmail)) {
+    return { ok: true, email: adminEmail };
+  }
+
+  if (auth.startsWith('Bearer ')) {
+    const verifiedUser = await verifyServerFirebaseUser(req);
+    if (verifiedUser && isAuthorizedAdmin(verifiedUser)) {
+      return { ok: true, email: verifiedUser.email };
+    }
+  }
+
+  return { ok: false };
 }
 
-app.use('/api/admin', (req, res, next) => {
+app.use('/api/admin', async (req, res, next) => {
   if ((req.path === '/features' || req.path === '/health') && req.method === 'GET') {
     return next();
   }
-  if (!checkAdminAccess(req)) {
+  const access = await checkAdminAccess(req);
+  if (!access.ok) {
     return res.status(403).json({
       error: 'FORBIDDEN',
-      message: 'Admin access restricted to jayeshofficial@gmail.com and contact@pulsenoteai.in',
+      message: 'Admin access restricted to authorized administrators.',
     });
+  }
+  if (access.email && !req.headers['x-admin-email']) {
+    req.headers['x-admin-email'] = access.email;
   }
   next();
 });
@@ -1353,7 +1352,7 @@ app.get('/api/admin/health', async (_req, res) => {
   // 3. Gemini / Google GenAI SDK Health
   const geminiKey = process.env.GEMINI_API_KEY;
   healthResults.services.gemini = {
-    name: 'Google Gemini 2.5/3.5 Pro',
+    name: 'Google Gemini 4 / 3.5 AI Engine',
     status: geminiKey && geminiKey !== 'MY_GEMINI_API_KEY' ? 'ok' : 'not_configured',
     configured: Boolean(geminiKey && geminiKey !== 'MY_GEMINI_API_KEY'),
     message: geminiKey && geminiKey !== 'MY_GEMINI_API_KEY' ? 'GEMINI_API_KEY is configured' : 'GEMINI_API_KEY missing',
@@ -2030,7 +2029,14 @@ function extractJsonObject(text: string): any | null {
 }
 
 app.post('/api/notes/generate', async (req, res) => {
-  const { input: rawInput, templateType = 'soap', customSchema } = req.body;
+  const {
+    input: rawInput,
+    templateType = 'soap',
+    customSchema,
+    outputLength = 'standard',
+    customDictionary = [],
+    medicalCoding = false,
+  } = req.body;
   if (!rawInput || typeof rawInput !== 'string' || !rawInput.trim()) {
     return res.status(400).json({ error: 'Clinical or enterprise transcript input is required.' });
   }
@@ -2051,12 +2057,15 @@ app.post('/api/notes/generate', async (req, res) => {
     acc.notesUsedThisMonth += 1;
   }
 
+  const lengthRule = formatOutputLengthInstruction(outputLength);
+  const dictRule = formatDictionaryInstruction(customDictionary);
   const systemInstruction =
-    "You are a structured documentation formatter. Use ONLY facts in the input. Never invent names, values, drugs, doses, dates or numbers. If a section has no information, write 'Not documented'. Output JSON matching the requested schema strictly.";
+    `You are a structured documentation formatter. Use ONLY facts in the input. Never invent names, values, drugs, doses, dates or numbers. If a crucial expected detail (such as a proposed lease signing date, property ID, repair cost, or deadline) is omitted from the input, insert [MISSING: Description of required data]; if an entire clinical section has no information, write 'Not documented'. Output JSON matching the requested schema strictly. ${lengthRule}${dictRule}`;
 
   // Define strict responseSchema per template type
   let responseSchema: any;
   const normalizedType = String(templateType).toLowerCase().replace(/[-_\s]/g, '');
+  const isClinicalType = ['soap', 'dischargesummary', 'referralletter', 'progressnote'].includes(normalizedType);
 
   if (normalizedType === 'soap') {
     responseSchema = {
@@ -2066,8 +2075,9 @@ app.post('/api/notes/generate', async (req, res) => {
         objective: { type: 'STRING' },
         assessment: { type: 'STRING' },
         plan: { type: 'STRING' },
+        ...(medicalCoding ? { suggestedCoding: { type: 'STRING' } } : {}),
       },
-      required: ['subjective', 'objective', 'assessment', 'plan'],
+      required: ['subjective', 'objective', 'assessment', 'plan', ...(medicalCoding ? ['suggestedCoding'] : [])],
     };
   } else if (normalizedType === 'rfc') {
     responseSchema = {
@@ -2205,26 +2215,33 @@ app.post('/api/notes/generate', async (req, res) => {
 
   try {
     let parsed: any = null;
-    let modelUsed = 'gemini-2.5-flash';
+    let modelUsed = 'gemini-4-hydrogen';
     let providerErrorDetail = '';
 
     if (process.env.GEMINI_API_KEY) {
-      try {
-        const response = await googleAi.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: rawInput.trim(),
-          config: {
-            systemInstruction,
-            temperature: 0,
-            topP: 0.1,
-            responseMimeType: 'application/json',
-            responseSchema,
-          },
-        });
-        const responseText = response.text || '';
-        parsed = JSON.parse(responseText);
-      } catch (geminiErr: any) {
-        console.warn('[DeterministicEngine] Google GenAI attempt failed, using OpenRouter failover:', geminiErr?.message);
+      const candidateModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+      for (const m of candidateModels) {
+        try {
+          const response = await googleAi.models.generateContent({
+            model: m,
+            contents: rawInput.trim(),
+            config: {
+              systemInstruction: isClinicalType && medicalCoding
+                ? `${systemInstruction} For 'suggestedCoding', list only ICD-10-CM and CPT suggestions strictly grounded in documented diagnoses or mark [MISSING: Code specificity / encounter time].`
+                : systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+            },
+          });
+          const responseText = response.text || '';
+          parsed = extractJsonObject(responseText) || JSON.parse(responseText);
+          if (parsed) {
+            modelUsed = m;
+            break;
+          }
+        } catch (geminiErr: any) {
+          console.warn(`[DeterministicEngine] Google GenAI (${m}) failed:`, geminiErr?.message);
+        }
       }
     }
 
@@ -2392,12 +2409,10 @@ app.post('/api/notes/regenerate-section', async (req, res) => {
     if (process.env.GEMINI_API_KEY) {
       try {
         const response = await googleAi.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-4-hydrogen',
           contents: rawInput.trim(),
           config: {
             systemInstruction,
-            temperature: 0,
-            topP: 0.1,
           },
         });
         newContent = (response.text || '').trim();
@@ -2449,6 +2464,226 @@ app.post('/api/notes/regenerate-section', async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'FAILED_REGENERATE', message: err.message });
+  }
+});
+
+// Ask PulseNote (Fireflies.ai parity): cross-document grounded Q&A across saved user notes
+app.post('/api/notes/ask', async (req, res) => {
+  const { question, documents = [], userId, userEmail } = req.body;
+  if (!question || typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'A question is required.' });
+  }
+
+  // Merge explicitly sent documents with server store docs owned by the caller
+  const ownerKey = userEmail || userId || '';
+  const storeDocs = ownerKey ? store.getUserDocuments(ownerKey) : [];
+  const docMap = new Map<string, { id: string; title: string; templateType: string; content: string; createdAt?: number }>();
+
+  for (const d of storeDocs) {
+    const contentText = Object.entries(d.sections || {})
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
+    docMap.set(d.id, {
+      id: d.id,
+      title: d.title,
+      templateType: d.templateType,
+      content: `${contentText}\nRaw: ${d.rawInput || ''}`.slice(0, 3500),
+      createdAt: d.updatedAt || d.createdAt,
+    });
+  }
+
+  if (Array.isArray(documents)) {
+    for (const d of documents.slice(0, 25)) {
+      if (!d?.id) continue;
+      const contentText = d.sections
+        ? Object.entries(d.sections).map(([k, v]) => `${k}: ${v}`).join('\n')
+        : (d.markdownReport || d.rawInput || '');
+      docMap.set(d.id, {
+        id: String(d.id),
+        title: String(d.title || 'Untitled Note'),
+        templateType: String(d.templateType || d.industry || 'note'),
+        content: String(contentText).slice(0, 3500),
+      });
+    }
+  }
+
+  const corpus = Array.from(docMap.values()).slice(0, 20);
+  if (corpus.length === 0) {
+    return res.json({
+      success: true,
+      answer: 'No saved notes were found to search. Create or save at least one note first, then ask PulseNote across your workspace.',
+      citations: [],
+    });
+  }
+
+  const contextBlock = corpus
+    .map((doc, idx) => `[DOC #${idx + 1} | ID: ${doc.id} | Title: ${doc.title} | Type: ${doc.templateType}]\n${doc.content}`)
+    .join('\n\n---\n\n');
+
+  const askPrompt = `You are PulseNote AI Assistant answering a user's question strictly using ONLY their saved notes below.
+Rules:
+1. Answer clearly and concisely using only facts present in the documents.
+2. Never invent dates, dosages, dollar amounts, or names not present in the documents.
+3. Return strict JSON: { "answer": string, "citedDocIds": [string], "followUpQuestions": [string] }.
+
+User Question: ${question.trim()}
+
+Saved Workspace Documents:
+${contextBlock}`;
+
+  try {
+    let parsed: any = null;
+    if (process.env.GEMINI_API_KEY) {
+      for (const m of ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']) {
+        try {
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: askPrompt,
+            config: { responseMimeType: 'application/json' },
+          });
+          parsed = extractJsonObject(response.text || '');
+          if (parsed?.answer) break;
+        } catch { /* fallback */ }
+      }
+    }
+
+    if (!parsed && process.env.OPENROUTER_API_KEY) {
+      const orRes = await callOpenRouterChat({
+        messages: [{ role: 'user', content: askPrompt }],
+        model: 'google/gemini-2.5-flash',
+        temperature: 0.1,
+      });
+      parsed = extractJsonObject(orRes.reply || '') || { answer: orRes.reply, citedDocIds: [] };
+    }
+
+    if (!parsed?.answer) {
+      // Deterministic keyword match fallback across workspace documents
+      const terms = question.toLowerCase().split(/\W+/).filter((t) => t.length > 2);
+      const matched = corpus.filter((d) => terms.some((t) => `${d.title} ${d.content}`.toLowerCase().includes(t)));
+      return res.json({
+        success: true,
+        answer: matched.length > 0
+          ? `Found ${matched.length} matching note(s):\n` + matched.slice(0, 3).map((m) => `• **${m.title}**: ${m.content.slice(0, 180)}...`).join('\n')
+          : `No notes directly matched "${question.trim()}". Try broader keywords or save additional transcripts.`,
+        citations: matched.slice(0, 4).map((m) => ({ id: m.id, title: m.title, templateType: m.templateType })),
+      });
+    }
+
+    const citedIds = new Set(Array.isArray(parsed.citedDocIds) ? parsed.citedDocIds.map(String) : []);
+    const citations = corpus
+      .filter((d) => citedIds.has(d.id))
+      .map((d) => ({ id: d.id, title: d.title, templateType: d.templateType }));
+
+    return res.json({
+      success: true,
+      answer: parsed.answer,
+      citations,
+      followUpQuestions: Array.isArray(parsed.followUpQuestions) ? parsed.followUpQuestions.slice(0, 3) : [],
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Ask PulseNote failed.' });
+  }
+});
+
+// SuperSummary Merge (AudioPen parity): merge multiple selected notes into a master report
+app.post('/api/notes/merge', async (req, res) => {
+  const { documentIds = [], documents = [], mergeTitle, userId = 'user_guest', userEmail = '', outputLength = 'standard' } = req.body;
+
+  const ownerKey = userEmail || userId;
+  const storeDocs = store.getUserDocuments(ownerKey);
+  const selectedFromStore = Array.isArray(documentIds) && documentIds.length > 0
+    ? storeDocs.filter((d) => documentIds.includes(d.id))
+    : [];
+
+  const sourceList = selectedFromStore.length > 0
+    ? selectedFromStore.map((d) => ({
+        id: d.id,
+        title: d.title,
+        templateType: d.templateType,
+        body: Object.entries(d.sections || {}).map(([k, v]) => `### ${k}\n${v}`).join('\n\n'),
+      }))
+    : (Array.isArray(documents) ? documents : []).map((d: any) => ({
+        id: String(d.id || ''),
+        title: String(d.title || 'Untitled Note'),
+        templateType: String(d.templateType || 'note'),
+        body: d.sections
+          ? Object.entries(d.sections).map(([k, v]) => `### ${k}\n${v}`).join('\n\n')
+          : String(d.markdownReport || d.rawInput || ''),
+      }));
+
+  if (sourceList.length < 2) {
+    return res.status(400).json({ error: 'Select at least 2 notes to merge into a SuperSummary.' });
+  }
+
+  const combinedInput = sourceList
+    .map((s, i) => `## Source Note ${i + 1}: ${s.title} (${s.templateType})\n${s.body.slice(0, 4000)}`)
+    .join('\n\n---\n\n');
+
+  const lengthRule = formatOutputLengthInstruction(outputLength);
+  const mergePrompt = `Synthesize the following ${sourceList.length} PulseNote documents into one unified, non-redundant executive SuperSummary report.
+Strict Rules:
+- Preserve exact names, metrics, dates, medications, defects, and prices without inventing anything.
+- Insert [MISSING: ...] if an expected detail is absent across all notes.
+- ${lengthRule}
+Return strict JSON with keys: { "executiveOverview": string, "keyThemesAndFindings": string, "consolidatedActionItems": string, "risksAndOpenGaps": string }.
+
+${combinedInput}`;
+
+  try {
+    let parsed: any = null;
+    if (process.env.GEMINI_API_KEY) {
+      for (const m of ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']) {
+        try {
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: mergePrompt,
+            config: { responseMimeType: 'application/json' },
+          });
+          parsed = extractJsonObject(response.text || '');
+          if (parsed?.executiveOverview) break;
+        } catch { /* fallback */ }
+      }
+    }
+
+    if (!parsed && process.env.OPENROUTER_API_KEY) {
+      const orRes = await callOpenRouterChat({
+        messages: [{ role: 'user', content: mergePrompt }],
+        model: 'google/gemini-2.5-flash',
+        temperature: 0.1,
+      });
+      parsed = extractJsonObject(orRes.reply || '');
+    }
+
+    if (!parsed) {
+      parsed = {
+        executiveOverview: `Merged synthesis across ${sourceList.length} notes: ${sourceList.map((s) => s.title).join(', ')}.`,
+        keyThemesAndFindings: sourceList.map((s) => `- **${s.title}**: ${s.body.slice(0, 320)}...`).join('\n'),
+        consolidatedActionItems: '[MISSING: Review source documents for specific deadlines and owners]',
+        risksAndOpenGaps: 'Verify cross-document consistency prior to final distribution.',
+      };
+    }
+
+    const title = (mergeTitle && String(mergeTitle).trim()) || `SuperSummary (${sourceList.length} Notes Merged)`;
+    const savedDoc = store.saveDocument(
+      userId,
+      {
+        title,
+        templateType: 'supersummary',
+        rawInput: combinedInput.slice(0, 12000),
+        sections: {
+          executiveOverview: String(parsed.executiveOverview || ''),
+          keyThemesAndFindings: String(parsed.keyThemesAndFindings || ''),
+          consolidatedActionItems: String(parsed.consolidatedActionItems || ''),
+          risksAndOpenGaps: String(parsed.risksAndOpenGaps || ''),
+        },
+        dataRetentionNotice: 'Merged via PulseNote SuperSummary.',
+      },
+      userEmail
+    );
+
+    return res.json({ success: true, document: savedDoc });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'SuperSummary merge failed.' });
   }
 });
 
@@ -3255,7 +3490,7 @@ app.all('/api/codecraft/*', async (req, res) => {
   }
 });
 
-// Google Maps Grounding Specialized Search Endpoint (gemini-3.5-flash with googleMaps tool)
+// Google Maps Grounding Specialized Search Endpoint (gemini-4-hydrogen with googleMaps tool)
 app.post('/api/maps/query', async (req, res) => {
   try {
     const { query: searchQuery } = req.body;
@@ -3264,7 +3499,7 @@ app.post('/api/maps/query', async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-4-hydrogen',
       contents: `Provide accurate location intelligence, addresses, hours, ratings, and practical visiting advice for: ${searchQuery}`,
       config: {
         tools: [{ googleMaps: {} }],
@@ -3277,7 +3512,7 @@ app.post('/api/maps/query', async (req, res) => {
     return res.json({
       result: text,
       groundingMetadata,
-      modelUsed: 'gemini-3.5-flash (Google Maps Grounded)',
+      modelUsed: 'gemini-4-hydrogen (Google Maps Grounded)',
     });
   } catch (err: any) {
     console.error('Maps query error:', err);
@@ -3285,7 +3520,7 @@ app.post('/api/maps/query', async (req, res) => {
   }
 });
 
-// Real-Time Voice Conversation & Live Session Info (gemini-3.8-live)
+// Real-Time Voice Conversation & Live Session Info
 app.get('/api/live/config', (_req, res) => {
   res.json({
     liveModel: 'gemini-3.8-live',
@@ -3295,8 +3530,8 @@ app.get('/api/live/config', (_req, res) => {
     musicModelClip: 'lyria-3-clip-preview',
     musicModelPro: 'lyria-3-pro-preview',
     chatModels: {
-      complex: 'gemini-3.1-pro-preview',
-      general: 'gemini-3.5-flash',
+      complex: 'gemini-4-hydrogen',
+      general: 'gemini-4-hydrogen',
       fast: 'gemini-3.1-flash-lite',
     },
     audioSampleRate: 24000,
@@ -3455,10 +3690,15 @@ app.post('/api/transform/stream', async (req, res) => {
     }
 
     // 3. Construct Gemini Streaming Instruction & Contents
-    const systemPrompt = `${SYSTEM_INSTRUCTION_BASE}
+    const industryInstruction = targetIndustry && targetIndustry !== 'general'
+      ? `\n\n${getSystemPromptForMode(targetIndustry)}`
+      : '';
+    const systemPrompt = `${SYSTEM_INSTRUCTION_BASE}${industryInstruction}
 
-Output format requirement:
-Provide a comprehensive, high-clarity response structured strictly as follows:
+Strict Anti-Hallucination & Compliance Guardrails:
+- Never invent, guess, or hallucinate missing critical data (such as lease/inspection dates, dollar figures/repair costs, property addresses/IDs, vital signs, dosages, or deadlines).
+- If a crucial data point is missing from the raw input, explicitly insert an audit-ready placeholder formatted as [MISSING: Description of required data] (for example, [MISSING: Proposed Lease Signing Date] or [MISSING: Repair Cost Estimate]).
+- If target industry is specialized (Medical/Clinical SOAP, Real Estate/Property Inspection, Software/Technical Sprint, or Client Consulting), strictly follow that industry template structure above; otherwise use the structured executive summary format below:
 ### 1. Direct Summary
 [A concise, clear opening overview giving the core answer immediately]
 
@@ -3499,7 +3739,7 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ''
       };
     }
 
-    let modelToUse = formatLens === 'code_generation' ? 'gemini-3.1-pro-preview' : 'gemini-3.8-flash';
+    let modelToUse = formatLens === 'code_generation' ? 'gemini-4-hydrogen' : 'gemini-4-hydrogen';
     let responseStream;
     try {
       responseStream = await ai.models.generateContentStream({
@@ -3507,7 +3747,6 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ''
         contents: geminiContents,
         config: {
           systemInstruction: systemPrompt,
-          temperature: 0.2,
         },
       });
     } catch (streamErr: any) {
@@ -3517,7 +3756,6 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ''
         contents: geminiContents,
         config: {
           systemInstruction: systemPrompt,
-          temperature: 0.2,
         },
       });
     }
@@ -3931,9 +4169,19 @@ Return a valid JSON object matching this schema:
       };
     }
 
-    // Call Gemini with automatic fallback for transient 503 capacity spikes
+    const outputLengthHint = formatOutputLengthInstruction(req.body.outputLength);
+    const dictHint = formatDictionaryInstruction(req.body.customDictionary);
+    const industryModePrompt = targetIndustry && targetIndustry !== 'general'
+      ? `\n\n${getSystemPromptForMode(targetIndustry)}`
+      : '';
+    const antiHallucinationRule = `\n\nStrict Anti-Hallucination & Compliance Guardrails:
+- Never invent, guess, or hallucinate missing critical data (such as proposed lease/closing dates, inspection dates, property IDs/addresses, financial figures/repair costs, medical metrics/dosages, or deadlines).
+- Whenever a crucial data point is absent from the raw input, explicitly insert an audit-ready placeholder formatted as [MISSING: Description of required data] inside markdownReport, sections, and actionItems (e.g., [MISSING: Proposed Lease Signing Date], [MISSING: Repair Cost Estimate], [MISSING: Property ID]).`;
+    const augmentedInstruction = `${SYSTEM_INSTRUCTION_BASE}${industryModePrompt}${antiHallucinationRule}\n${outputLengthHint}${dictHint}`;
+
+    // Call Gemini with automatic fallback for transient capacity spikes
     let response;
-    const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3.8-flash'];
+    const modelsToTry = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
     let lastError: any = null;
 
     for (const modelName of modelsToTry) {
@@ -3942,9 +4190,8 @@ Return a valid JSON object matching this schema:
           model: modelName,
           contents: geminiContents,
           config: {
-            systemInstruction: SYSTEM_INSTRUCTION_BASE,
+            systemInstruction: augmentedInstruction,
             responseMimeType: 'application/json',
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -3952,7 +4199,6 @@ Return a valid JSON object matching this schema:
         }
       } catch (err: any) {
         lastError = err;
-        // Graceful retry without alarming log monitors
         await new Promise((r) => setTimeout(r, 150));
       }
     }
@@ -6147,6 +6393,33 @@ const SUPPORTED_AUDIO_FORMATS = new Set([
   'video/webm',
 ]);
 
+// Helper to compute speaker talk-time analytics from diarized transcripts (Fireflies parity)
+function computeSpeakerStats(transcript: string): Array<{ speaker: string; turns: number; words: number; sharePercent: number }> {
+  const lines = transcript.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const statsMap = new Map<string, { turns: number; words: number }>();
+  let totalWords = 0;
+
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9\s._-]{1,28}):\s+(.+)$/);
+    if (!match) continue;
+    const speaker = match[1].trim();
+    const words = match[2].trim().split(/\s+/).filter(Boolean).length;
+    totalWords += words;
+    const prev = statsMap.get(speaker) || { turns: 0, words: 0 };
+    statsMap.set(speaker, { turns: prev.turns + 1, words: prev.words + words });
+  }
+
+  if (statsMap.size === 0 || totalWords === 0) return [];
+  return Array.from(statsMap.entries())
+    .map(([speaker, data]) => ({
+      speaker,
+      turns: data.turns,
+      words: data.words,
+      sharePercent: Math.round((data.words / totalWords) * 100),
+    }))
+    .sort((a, b) => b.words - a.words);
+}
+
 // Helper to transcribe audio part with model fallback
 async function transcribeAudioPayload(audioBase64: string, cleanMime: string, customInstruction?: string) {
   const audioPart = {
@@ -6156,7 +6429,7 @@ async function transcribeAudioPayload(audioBase64: string, cleanMime: string, cu
     },
   };
 
-  const CANDIDATE_MODELS = ['gemini-3.5-transcribe', 'gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'];
+  const CANDIDATE_MODELS = ['gemini-3.5-transcribe', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
   let lastModelError: any = null;
   let transcriptText = '';
 
@@ -6208,7 +6481,9 @@ app.post('/api/transcribe/chunk', async (req, res) => {
       chunkIndex = 0, 
       sessionId, 
       isFinal = false,
-      priorContext = '' 
+      priorContext = '',
+      ambientMode = false,
+      customDictionary = [],
     } = req.body;
 
     if (!audioBase64 || typeof audioBase64 !== 'string') {
@@ -6232,17 +6507,24 @@ app.post('/api/transcribe/chunk', async (req, res) => {
     if (cleanMime === 'audio/x-m4a' || cleanMime === 'audio/m4a') cleanMime = 'audio/mp4';
     if (cleanMime === 'audio/x-wav' || cleanMime === 'audio/wave') cleanMime = 'audio/wav';
 
+    const dictSuffix = formatDictionaryInstruction(customDictionary);
+    const ambientSuffix = ambientMode
+      ? ' Identify speaker changes clearly using labels like "Clinician:" / "Patient:" or "Speaker 1:" / "Speaker 2:" on new lines when multiple speakers alternate.'
+      : '';
+
     const instruction = priorContext
-      ? `Transcribe this incremental spoken audio chunk word-for-word into English text. The previous spoken context was: "${priorContext.slice(-150)}". Transcribe only the new words spoken in this segment without repeating prior context. Do not add conversational comments.`
-      : 'Transcribe this spoken audio chunk word-for-word into English text. Retain names, numbers, medical, and technical terminology accurately.';
+      ? `Transcribe this incremental spoken audio chunk word-for-word into English text. The previous spoken context was: "${priorContext.slice(-150)}". Transcribe only the new words spoken in this segment without repeating prior context.${ambientSuffix}${dictSuffix} Do not add conversational comments.`
+      : `Transcribe this spoken audio chunk word-for-word into English text. Retain names, numbers, medical, and technical terminology accurately.${ambientSuffix}${dictSuffix}`;
 
     const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime, instruction);
     const durationMs = Date.now() - startTime;
+    const speakerStats = computeSpeakerStats(transcriptText);
 
     console.log(`[STT_CHUNK_SUCCESS] Processed chunk #${chunkIndex} (${transcriptText.length} chars, ${durationMs}ms, final: ${isFinal})`);
 
     return res.json({
       transcript: transcriptText,
+      speakerStats,
       chunkIndex,
       sessionId,
       isFinal,
@@ -6278,7 +6560,7 @@ app.post('/api/transcribe', async (req, res) => {
   res.setHeader('Keep-Alive', 'timeout=120');
 
   try {
-    const { audioBase64, mimeType = 'audio/webm' } = req.body;
+    const { audioBase64, mimeType = 'audio/webm', ambientMode = false, customDictionary = [] } = req.body;
 
     // 1. Guardrail: Validate payload existence
     if (!audioBase64 || typeof audioBase64 !== 'string') {
@@ -6323,14 +6605,21 @@ app.post('/api/transcribe', async (req, res) => {
     if (cleanMime === 'audio/x-m4a' || cleanMime === 'audio/m4a') cleanMime = 'audio/mp4';
     if (cleanMime === 'audio/x-wav' || cleanMime === 'audio/wave') cleanMime = 'audio/wav';
 
+    const dictSuffix = formatDictionaryInstruction(customDictionary);
+    const ambientPrompt = ambientMode
+      ? `Transcribe this spoken encounter audio word-for-word with speaker labels (e.g., "Clinician:" / "Patient:" or "Speaker 1:" / "Speaker 2:") on separate lines whenever the speaker changes. Retain all clinical/technical terms, numbers, and dates.${dictSuffix}`
+      : (dictSuffix ? `Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates.${dictSuffix}` : undefined);
+
     // 5. Model Execution with multi-model fallback
-    const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime);
+    const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime, ambientPrompt);
+    const speakerStats = computeSpeakerStats(transcriptText);
 
     const durationMs = Date.now() - startTime;
     console.log(`[STT_SUCCESS] Audio successfully transcribed (${transcriptText.length} chars, ${durationMs}ms)`);
 
     return res.json({ 
       transcript: transcriptText,
+      speakerStats,
       durationMs,
       status: 'success'
     });

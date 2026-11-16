@@ -80,13 +80,13 @@
   .text-white,
   .text-\[\#e3e3e3\],
   .text-\[\#c4c7c5\],
-  .text-[#9aa0a6],
+  .text-\[\#9aa0a6\],
   .text-slate-300,
   .text-slate-400 {
     color: #1e293b !important;
   }
 
-  .text-[#4e8cff],
+  .text-\[\#4e8cff\],
   .text-purple-400,
   .text-purple-300 {
     color: #4338ca !important;
@@ -111,10 +111,48 @@
     border-color: #cbd5e1 !important;
   }
 
-  /* Audit Log items formatting for print */
+  /* Printer-friendly table formatting for User Management & Audit Logs */
+  .printable-admin-container table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 9.5pt !important;
+    background: #ffffff !important;
+  }
+
+  .printable-admin-container thead {
+    display: table-header-group !important;
+  }
+
+  .printable-admin-container th {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    text-align: left !important;
+    font-weight: 700 !important;
+  }
+
+  .printable-admin-container td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    color: #1e293b !important;
+    vertical-align: top !important;
+  }
+
+  .printable-admin-container tr,
   .printable-admin-container div {
     page-break-inside: avoid;
     break-inside: avoid;
+  }
+
+  /* Ensure Recharts SVG keeps dimensions during PDF print */
+  .recharts-responsive-container {
+    min-height: 220px !important;
+    width: 100% !important;
+  }
+
+  .recharts-wrapper {
+    margin: 0 auto !important;
   }
 
   /* Badges formatting in print */
@@ -128,6 +166,7 @@
 
   /* Ensure maximum width and clean margins */
   .max-w-4xl,
+  .max-w-6xl,
   .max-w-md {
     max-width: 100% !important;
     width: 100% !important;
@@ -137,7 +176,9 @@
 
   /* Prevent truncated scrollable containers in print */
   .max-h-\[500px\],
-  .overflow-y-auto {
+  .max-h-\[600px\],
+  .overflow-y-auto,
+  .overflow-x-auto {
     max-height: none !important;
     overflow: visible !important;
   }

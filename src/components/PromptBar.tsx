@@ -15,7 +15,8 @@ import {
   Eye,
   Image as ImageIcon,
   Sparkles,
-  Wand2
+  Wand2,
+  Stethoscope,
 } from 'lucide-react';
 import { AttachedFile } from '../types';
 
@@ -39,6 +40,10 @@ interface PromptBarProps {
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
   imageGenerationEnabled?: boolean;
   videoGenerationEnabled?: boolean;
+  outputLength?: 'concise' | 'standard' | 'detailed';
+  onChangeOutputLength?: (len: 'concise' | 'standard' | 'detailed') => void;
+  medicalCoding?: boolean;
+  onToggleMedicalCoding?: () => void;
 }
 
 export default function PromptBar({
@@ -59,6 +64,10 @@ export default function PromptBar({
   onShowToast,
   imageGenerationEnabled = false,
   videoGenerationEnabled = false,
+  outputLength = 'standard',
+  onChangeOutputLength,
+  medicalCoding = false,
+  onToggleMedicalCoding,
 }: PromptBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -285,6 +294,42 @@ export default function PromptBar({
               <Palette size={14} />
               <span>Canvas</span>
             </button>
+
+            {onChangeOutputLength && (
+              <div className="hidden lg:flex items-center bg-[#131314] border border-[#3c4043]/60 rounded-full p-0.5 text-[11px]">
+                {(['concise', 'standard', 'detailed'] as const).map((len) => (
+                  <button
+                    key={len}
+                    type="button"
+                    onClick={() => onChangeOutputLength(len)}
+                    className={`px-2 py-0.5 rounded-full capitalize transition cursor-pointer ${
+                      outputLength === len
+                        ? 'bg-[#2d2e30] text-white font-semibold'
+                        : 'text-[#9aa0a6] hover:text-white'
+                    }`}
+                    title={`Output length: ${len}`}
+                  >
+                    {len}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {onToggleMedicalCoding && (
+              <button
+                type="button"
+                onClick={onToggleMedicalCoding}
+                className={`hidden lg:flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border transition cursor-pointer ${
+                  medicalCoding
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-semibold'
+                    : 'bg-[#2d2e30] border-transparent text-[#c4c7c5] hover:text-white'
+                }`}
+                title="Suggest grounded ICD-10-CM & CPT codes for clinical notes"
+              >
+                <Stethoscope size={12} />
+                <span>ICD-10/CPT</span>
+              </button>
+            )}
           </div>
 
           <div className="flex gap-2 items-center">

@@ -3,10 +3,31 @@
   "adminPasswordHash": "01de853923f474a2a8701c3779959d9c:c514bfdd654776c16381b4ccc69a19d005ca423a8e1091797ff99d30af9fd9cfcc3a80ca091b6aba9ed2359c7e4fa5b751e5eeeef774bc7eeb1e5c92e609390b",
   "users": [
     {
+      "id": "admin_root_wagh_jayesh",
+      "name": "Jayesh Wagh (Super Admin)",
+      "email": "wagh.jayesh@gmail.com",
+      "mobile": "+919860215449",
+      "role": "admin",
+      "status": "active",
+      "isActivated": true,
+      "privacyConsent": true,
+      "consentTimestamp": "2026-11-16T10:33:55.203Z",
+      "subscription": {
+        "tier": "admin_grant",
+        "isPro": true,
+        "startDate": 1794825235203,
+        "expiresAt": null,
+        "grantedByAdmin": true
+      },
+      "dailyPromptCount": 0,
+      "lastPromptDate": "2026-11-16",
+      "createdAt": 1794825235203
+    },
+    {
       "id": "admin_root_contact",
       "name": "PulseNote Admin",
       "email": "contact@pulsenoteai.in",
-      "mobile": "+91 98765 43211",
+      "mobile": "+919860215449",
       "role": "admin",
       "status": "active",
       "isActivated": true,
@@ -27,7 +48,7 @@
       "id": "admin_root_jayesh",
       "name": "Jayesh (Super Admin)",
       "email": "jayeshofficial@gmail.com",
-      "mobile": "+91 98765 43210",
+      "mobile": "+919860215449",
       "role": "admin",
       "status": "active",
       "isActivated": true,
@@ -91,7 +112,8 @@
     "admin_root_jayesh": "01de853923f474a2a8701c3779959d9c:c514bfdd654776c16381b4ccc69a19d005ca423a8e1091797ff99d30af9fd9cfcc3a80ca091b6aba9ed2359c7e4fa5b751e5eeeef774bc7eeb1e5c92e609390b",
     "user_sample_doctor": "f0f2316e38f22d03bba3f3ddcf6dbc05:9b850cf5d57db04e06672dfb196861452e993cebda4c1e118a0825ecc9ea6dd297ae9abc5e99b2e03f1490e01d2dd7891dd5771c98e68716f7228424b62ee389",
     "user_sample_realtor": "ef8ca207b947c730c5adad64f4765eb1:80184b1c6c2f28e405fc835dda56c5ec85f952bfefe104b67f29ea5403e57170ce6580f90ea02096961a42693f5dbb471f0e64caaa2fd1795cc571e21e10428f",
-    "admin_root_contact": "a918c54dc6d145bc59ef5bb781f4c9d2:5ae1df666b38a3cfdb2ed57ccebf9fb52af5fd226b9166d91a1a8a87a09e3cbd4dbfcada1534d5b66ee5930df501bf920b4bd408dc712a2ccc8172f06af6d889"
+    "admin_root_contact": "a918c54dc6d145bc59ef5bb781f4c9d2:5ae1df666b38a3cfdb2ed57ccebf9fb52af5fd226b9166d91a1a8a87a09e3cbd4dbfcada1534d5b66ee5930df501bf920b4bd408dc712a2ccc8172f06af6d889",
+    "admin_root_wagh_jayesh": "2f0b8246f19016c3d648f2766092ffe3:70eaa6eab73fb481e44d800c05cbc4c19b870de26dbec64deb4f75179f4ab30202c3b13b3fd2e3a8f3ff6d5088458db46cfabbdd3d171726ff1effa90896c117"
   },
   "passwordResetOtps": {},
   "payments": [
@@ -129,6 +151,46 @@
     }
   ],
   "activityLogs": [
+    {
+      "id": "LOG_1794825541598_b5hf",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Client User",
+      "industry": "medical",
+      "rawInput": "Patient Sarah Jenkins came in complaining of a persistent dry cough and mild fever for 3 days. Throat is red, lungs clear on auscultation. Diagnosed with acute viral pharyngitis. Prescribed saline gargles and rest, follow up in 5 days if symptoms worsen.",
+      "solutionTitle": "SOAP Clinical Documentation: Sarah Jenkins — Acute Viral Pharyngitis",
+      "timestamp": 1794825541598
+    },
+    {
+      "id": "LOG_1794825510757_30t0",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Client User",
+      "industry": "real_estate",
+      "rawInput": "Walked through the 4th floor apartment with client Mike today. Kitchen sink is leaking pretty bad, water damage on the baseboard. HVAC filter hasnt been changed in two years, completely black. Mike wants it fixed before signing.",
+      "solutionTitle": "Property Condition Report (PCR) & Pre-Lease Remediation Plan — 4th Floor Apartment",
+      "timestamp": 1794825510757
+    },
+    {
+      "id": "LOG_1794825403781_t66y",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Client User",
+      "industry": "real_estate",
+      "rawInput": "Walked through the 4th floor apartment with client Mike today. Kitchen sink is leaking pretty bad, water damage on the baseboard. HVAC filter hasnt been changed in two years, completely black. Mike wants it fixed before signing.",
+      "solutionTitle": "4th Floor Apartment Walkthrough: Defect Remediation & Pre-Lease Action Plan",
+      "timestamp": 1794825403781
+    },
+    {
+      "id": "LOG_1794825371633_ody3",
+      "userId": "usr_guest",
+      "userEmail": "client@pulsenote.ai",
+      "userName": "Client User",
+      "industry": "real_estate",
+      "rawInput": "Walked through the 4th floor apartment with client Mike today. Kitchen sink is leaking pretty bad, water damage on the baseboard. HVAC filter hasnt been changed in two years, completely black. Mike wants it fixed before signing.",
+      "solutionTitle": "4th-Floor Apartment Pre-Signing Inspection & Remediation Plan (Client: Mike)",
+      "timestamp": 1794825371633
+    },
     {
       "id": "LOG_1790181932446_6s3i",
       "userId": "usr_guest",
@@ -210,5 +272,7 @@
     "customComplianceNote": "Mandatory verification required by a licensed professional prior to clinical or legal submission.",
     "updatedAt": 1790172417285,
     "lastUpdatedBy": "jayeshofficial@gmail.com"
-  }
+  },
+  "auditLogs": [],
+  "documents": []
 }

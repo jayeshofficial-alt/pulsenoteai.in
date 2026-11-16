@@ -105,10 +105,12 @@ const DEFAULT_SETTINGS: AppInterfaceSettings = {
   lastUpdatedBy: 'jayeshofficial@gmail.com',
 };
 
-// STRICT ALLOWED ADMIN EMAILS (As specified in section 1)
+// STRICT ALLOWED ADMIN EMAILS
 export const STRICT_ADMIN_EMAILS = [
+  'wagh.jayesh@gmail.com',
   'jayeshofficial@gmail.com',
   'contact@pulsenoteai.in',
+  'contact@pulsenoteai.com',
 ];
 
 class Store {
@@ -197,6 +199,41 @@ class Store {
     }
     if (!db.userPasswords[admin2.id]) {
       db.userPasswords[admin2.id] = defaultPassHash;
+    }
+
+    // 3. wagh.jayesh@gmail.com
+    let admin3 = db.users.find((u) => u.email.toLowerCase() === 'wagh.jayesh@gmail.com');
+    if (!admin3) {
+      admin3 = {
+        id: 'admin_root_wagh_jayesh',
+        name: 'Jayesh Wagh (Super Admin)',
+        email: 'wagh.jayesh@gmail.com',
+        mobile: SUPERADMIN_MOBILE,
+        role: 'admin',
+        status: 'active',
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: new Date().toISOString(),
+        subscription: {
+          tier: 'admin_grant',
+          isPro: true,
+          startDate: Date.now(),
+          expiresAt: null,
+          grantedByAdmin: true,
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: new Date().toISOString().slice(0, 10),
+        createdAt: Date.now(),
+      };
+      db.users.unshift(admin3);
+    } else {
+      admin3.role = 'admin';
+      admin3.status = 'active';
+      admin3.isActivated = true;
+      admin3.mobile = SUPERADMIN_MOBILE;
+    }
+    if (!db.userPasswords[admin3.id]) {
+      db.userPasswords[admin3.id] = defaultPassHash;
     }
 
     // Deduplicate db.users by ID and email to prevent any duplicate key errors
@@ -851,10 +888,9 @@ class Store {
   // =========================================================================
 
   public static readonly SUBSCRIPTION_ADMIN_EMAILS = [
+    'wagh.jayesh@gmail.com',
     'jayeshofficial@gmail.com',
     'contact@pulsenoteai.com',
-    // Included alongside .com because the codebase uses .in everywhere.
-    // Remove to restrict to exactly the two requested addresses.
     'contact@pulsenoteai.in',
   ];
 

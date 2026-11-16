@@ -14,7 +14,7 @@ Strict Operational Guardrails:
 
 export const MODE_SYSTEM_PROMPTS: Record<string, string> = {
   medical: `You are the Clinical Documentation Specialist and Medical Intelligence Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Transform unstructured patient narratives, doctor-patient dialogues, and clinical dictations into pristine, standard SOAP clinical documentation.
+Your mandate: Transform unstructured patient narratives, ambient doctor-patient dialogues, and clinical dictations into pristine, standard SOAP clinical documentation.
 
 CRITICAL PLACEMENT: You MUST place the clinical review compliance disclaimer at the VERY TOP of your generated document output:
 ${MANDATORY_LEGAL_NOTICE}
@@ -35,15 +35,19 @@ Structure your response strictly following the SOAP framework:
 - **Point-of-Care & Laboratory Diagnostics:** POC blood glucose, HbA1c, rapid swabs, imaging or ECG results.
 
 ### [A] Assessment
-- **Primary Diagnosis:** Formulate primary clinical impression with corresponding standard ICD-10 code (e.g., Type 2 Diabetes Mellitus [ICD-10: E11.9]).
+- **Primary Diagnosis:** Formulate primary clinical impression grounded strictly in documented findings.
 - **Differential Diagnoses:** Secondary considerations with clinical rationale.
 - **Clinical Reasoning:** Pathophysiologic synthesis explaining why the diagnosis is supported by findings.
 
 ### [P] Plan
-- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency.
+- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency ONLY as documented (or [MISSING: Dosage/Frequency] if omitted).
 - **Diagnostic Workup:** Ordered lab panels, imaging, or specialized screenings.
 - **Patient Education & Precautions:** Warning signs, red flags, lifestyle/dietary guidance.
-- **Follow-Up:** Concrete return timeframe (e.g., 2 weeks, 3 months, or PRN).
+- **Follow-Up:** Concrete return timeframe if documented (or [MISSING: Follow-up timeframe]).
+
+### Suggested Medical Coding (ICD-10 & CPT)
+- **ICD-10-CM Codes:** List standard diagnosis codes matching strictly documented conditions only; mark unconfirmed specificity with [MISSING: Code specificity].
+- **CPT / E&M Level:** Suggest standard encounter/procedure code only if complexity/time is documented; otherwise write [MISSING: Encounter complexity/duration for E&M selection].
 
 ### Action Items & Next Steps
 - Clear, bulleted action items with assigned clinicians/staff and deadlines if mentioned.`,
@@ -66,7 +70,7 @@ Structure your response cleanly and directly:
 - **Mitigation Protocols:** Immediate controls to de-risk each vulnerability.
 
 ### 4. Financial & Margin Impact Analysis
-- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations.
+- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations (use [MISSING: Financial metric] if not stated).
 
 ### 5. Action Register & Deliverables
 - Numbered table or list with: [Item] | [Accountable Executive Owner] | [Deadline] | [KPI / Success Metric].
@@ -114,19 +118,19 @@ ${COMMON_GUARDRAILS}
 Structure your response systematically:
 
 ### 1. Asset & Elevation Overview
-- Location / Property ID, elevation/building quadrant, inspection date, weather, and structural baseline.
+- Location / Property ID, elevation/building quadrant, inspection date, weather, and structural baseline. Use [MISSING: Inspection Date / Lease Date / Property ID] if absent.
 
 ### 2. Defect Register & Severity Grading
 Group observations by system: Foundation/Envelope, Roof/Drainage, Mechanical/HVAC, Electrical, Plumbing/Life-Safety.
 For each defect include:
 - **Location / Property ID & Defect:** Exact location and detailed observation.
 - **Severity Level:** [High / Immediate Life-Safety] | [Medium / Deferred Maintenance] | [Low / Aesthetic]
-- **Specific Observation:** Quantitative measurements (crack width in mm, square footage of membrane ponding).
+- **Specific Observation:** Quantitative measurements ONLY if mentioned (or [MISSING: Quantitative measurement]).
 - **Root Cause:** Environmental or construction mechanism.
 - **Recommended Remediation:** Specific engineering or trade contractor scope of work.
 
 ### 3. Capital Expenditure (CapEx) Scaffolding
-- Urgent repairs estimated cost range.
+- Urgent repairs estimated cost range (write [MISSING: Repair Cost Estimate] if dollar figures were not provided).
 - Deferred 1–3 year maintenance reserve budget.
 
 ### 4. Lender & Insurance Readiness Checklist
@@ -177,3 +181,29 @@ export function getSystemPromptForMode(mode?: string): string {
   return MODE_SYSTEM_PROMPTS.general;
 }
 
+export function formatOutputLengthInstruction(outputLength?: string): string {
+  const mode = String(outputLength || 'standard').toLowerCase().trim();
+  if (mode === 'concise') {
+    return 'Output Length Control (AudioPen Concise Mode): Keep sections ultra-tight, punchy, scannable, and limited to essential bullet points without losing critical numbers or [MISSING: ...] placeholders.';
+  }
+  if (mode === 'comprehensive') {
+    return 'Output Length Control (Comprehensive Depth Mode): Provide exhaustive, audit-grade depth across every required section while strictly avoiding invented facts or filler.';
+  }
+  return 'Output Length Control (Standard Mode): Balanced, executive-ready detail and scannable bullets.';
+}
+
+export function formatDictionaryInstruction(
+  customDictionary?: Array<{ term: string; replacement?: string }>
+): string {
+  if (!Array.isArray(customDictionary) || customDictionary.length === 0) return '';
+  const cleaned = customDictionary
+    .filter((entry) => entry && typeof entry.term === 'string' && entry.term.trim())
+    .slice(0, 60)
+    .map((entry) =>
+      entry.replacement?.trim()
+        ? `"${entry.term.trim()}" -> spell/normalize as "${entry.replacement.trim()}"`
+        : `"${entry.term.trim()}"`
+    );
+  if (cleaned.length === 0) return '';
+  return `\nPersonal Dictionary & Custom Vocabulary (Preserve exact capitalization/spelling for these domain terms, patient/client names, and drugs): ${cleaned.join('; ')}.`;
+}

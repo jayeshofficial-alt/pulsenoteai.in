@@ -1,13 +1,23 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Deny all access by default unless explicitly permitted
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     function isAuthenticated() {
       return request.auth != null;
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-        (request.auth.token.email == 'jayeshofficial@gmail.com' || request.auth.token.email == 'contact@pulsenoteai.in' || request.auth.token.email == 'contact@pulsenoteai.com') &&
+      return isAuthenticated() &&
+        request.auth.token.email in [
+          'wagh.jayesh@gmail.com',
+          'jayeshofficial@gmail.com',
+          'contact@pulsenoteai.in',
+          'contact@pulsenoteai.com'
+        ] &&
         request.auth.token.email_verified == true;
     }
 
@@ -15,38 +25,62 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // settings/features: anyone signed in may read; only the two admin emails may write
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && !id.matches('.*[/\\\\].*');
+    }
+
+    function isValidUserCreate() {
+      return (!request.resource.data.keys().hasAny(['plan', 'credits', 'notesUsedThisMonth']) ||
+        (request.resource.data.plan == 'free' &&
+         request.resource.data.credits == 0 &&
+         request.resource.data.notesUsedThisMonth == 0)) &&
+        (!('email' in request.resource.data) || (request.resource.data.email is string && request.resource.data.email.size() <= 320)) &&
+        (!('displayName' in request.resource.data) || (request.resource.data.displayName is string && request.resource.data.displayName.size() <= 150));
+    }
+
+    // settings/features: anyone signed in may read; only admin emails may write
     match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidId(settingId);
     }
 
     // users/{userId}
-    // Users can read their own profile.
-    // Users CANNOT write plan, credits, or notesUsedThisMonth directly.
+    // Users can read/update their own safe profile fields; protected billing fields require admin.
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && 
-        (!request.resource.data.keys().hasAny(['plan', 'credits', 'notesUsedThisMonth']) || 
-         (request.resource.data.plan == 'free' && request.resource.data.credits == 0 && request.resource.data.notesUsedThisMonth == 0));
-      allow update: if isOwner(userId) && 
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'credits', 'notesUsedThisMonth', 'monthResetAt']);
-      allow write: if isAdmin();
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserCreate();
+      allow update: if (isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'credits', 'notesUsedThisMonth', 'monthResetAt']) &&
+        (!('displayName' in request.resource.data) || (request.resource.data.displayName is string && request.resource.data.displayName.size() <= 150))) || isAdmin();
+      allow delete: if isAdmin();
 
       match /threads/{threadId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(threadId);
       }
 
       match /documents/{documentId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(documentId);
       }
 
       match /media/{mediaId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(mediaId);
       }
 
       match /customTemplates/{templateId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(templateId);
+      }
+
+      match /dictionary/{termId} {
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) &&
+          isValidId(termId) &&
+          request.resource.data.term is string &&
+          request.resource.data.term.size() > 0 &&
+          request.resource.data.term.size() <= 120;
       }
     }
 
@@ -64,25 +98,30 @@ service cloud.firestore {
       }
 
       allow read: if isTeamMember() || isAdmin();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidId(teamId) && request.resource.data.ownerUid == request.auth.uid;
       allow update, delete: if isTeamOwner() || isAdmin();
 
       match /templates/{templateId} {
         allow read: if isTeamMember() || isAdmin();
-        allow write: if isTeamOwner() || isAdmin();
+        allow write: if (isTeamOwner() || isAdmin()) && isValidId(templateId);
       }
     }
 
     // videoJobs/{jobId}
     match /videoJobs/{jobId} {
       allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
-      allow write: if isAdmin();
+      allow write: if isAdmin() && isValidId(jobId);
     }
 
     // partnerLeads
     match /partnerLeads/{leadId} {
-      allow create: if true;
-      allow read, write: if isAdmin();
+      allow create: if isValidId(leadId) &&
+        request.resource.data.email is string &&
+        request.resource.data.email.size() > 0 &&
+        request.resource.data.email.size() <= 320 &&
+        request.resource.data.organization is string &&
+        request.resource.data.organization.size() <= 200;
+      allow read, update, delete: if isAdmin();
     }
   }
 }

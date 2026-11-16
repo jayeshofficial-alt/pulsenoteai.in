@@ -14,12 +14,12 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   collection,
   query,
   getDocs,
   deleteDoc,
   onSnapshot,
-  serverTimestamp,
   addDoc,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -36,21 +36,70 @@ export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestore
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error:', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+if (typeof window !== 'undefined') {
+  getDocFromServer(doc(db, 'test', 'connection')).catch((err) => {
+    if (err instanceof Error && err.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration. Client reported offline.');
+    }
+  });
+}
+
 // Admin Email Allowlist
-export const ADMIN_EMAILS = ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in'];
+export const ADMIN_EMAILS = [
+  'wagh.jayesh@gmail.com',
+  'jayeshofficial@gmail.com',
+  'contact@pulsenoteai.in',
+  'contact@pulsenoteai.com',
+];
 
 export function isPulseNoteAdmin(email?: string | null, emailVerified?: boolean): boolean {
   if (!email) return false;
   const clean = email.toLowerCase().trim();
-  return ADMIN_EMAILS.includes(clean);
+  if (!ADMIN_EMAILS.includes(clean)) return false;
+  return emailVerified === undefined ? true : Boolean(emailVerified);
 }
 
 // Revenue Dashboard Admin Allowlist — ONLY these emails may open the
 // Admin Subscription & Revenue Dashboard (client gate; server re-verifies).
-// NOTE: contact@pulsenoteai.in is included alongside the requested
-// contact@pulsenoteai.com because the whole codebase uses the .in address.
-// Remove it if access must be restricted to exactly the two addresses below.
 export const REVENUE_ADMIN_EMAILS = [
+  'wagh.jayesh@gmail.com',
   'jayeshofficial@gmail.com',
   'contact@pulsenoteai.com',
   'contact@pulsenoteai.in',
@@ -198,7 +247,11 @@ export async function updateFeatureSettings(
   };
 
   // 1. Write to Firestore directly
-  await setDoc(settingsRef, payload, { merge: true });
+  try {
+    await setDoc(settingsRef, payload, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'settings/features');
+  }
 
   // 2. Also notify server-side route
   try {
@@ -207,7 +260,8 @@ export async function updateFeatureSettings(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(adminEmail ? { 'x-admin-email': adminEmail } : {}),
       },
       body: JSON.stringify(payload),
     });
@@ -552,5 +606,76 @@ export async function deleteDocumentFromFirestore(userId: string, docId: string)
     await deleteDoc(docRef);
   } catch (e) {
     console.warn('Could not delete document from Firestore:', e);
+  }
+}
+
+// -------------------------------------------------------------
+// Personal Dictionary / Custom Vocabulary (AudioPen & Nabla parity)
+// -------------------------------------------------------------
+export interface DictionaryTermDoc {
+  id: string;
+  term: string;
+  replacement?: string;
+  category?: string;
+  createdAt?: string;
+}
+
+export function subscribeToDictionary(
+  userId: string,
+  callback: (terms: DictionaryTermDoc[]) => void
+): () => void {
+  if (!userId) {
+    callback([]);
+    return () => {};
+  }
+  const dictRef = collection(db, 'users', userId, 'dictionary');
+  return onSnapshot(
+    dictRef,
+    (snap) => {
+      const list: DictionaryTermDoc[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        list.push({
+          id: d.id,
+          term: String(data.term || ''),
+          replacement: data.replacement ? String(data.replacement) : undefined,
+          category: data.category ? String(data.category) : undefined,
+          createdAt: data.createdAt ? String(data.createdAt) : undefined,
+        });
+      });
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      callback(list);
+    },
+    (err) => {
+      console.warn('Dictionary listener warning:', err);
+    }
+  );
+}
+
+export async function saveDictionaryTerm(
+  userId: string,
+  entry: { term: string; replacement?: string; category?: string }
+): Promise<string> {
+  const termRef = doc(collection(db, 'users', userId, 'dictionary'));
+  const payload = {
+    id: termRef.id,
+    term: entry.term.trim(),
+    ...(entry.replacement?.trim() ? { replacement: entry.replacement.trim() } : {}),
+    ...(entry.category?.trim() ? { category: entry.category.trim() } : {}),
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await setDoc(termRef, payload);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `users/${userId}/dictionary/${termRef.id}`);
+  }
+  return termRef.id;
+}
+
+export async function deleteDictionaryTerm(userId: string, termId: string) {
+  try {
+    await deleteDoc(doc(db, 'users', userId, 'dictionary', termId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `users/${userId}/dictionary/${termId}`);
   }
 }

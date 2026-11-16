@@ -4,7 +4,7 @@
  * 1. Image generation & editing (gemini-3.1-flash-image-preview)
  * 2. Text-to-video generation (veo-3.1-fast-generate-preview)
  * 3. Photo-to-video animation (veo-3.1-fast-generate-preview)
- * 4. Search Grounding with Google Search (gemini-3.5-flash)
+ * 4. Search Grounding with Google Search (gemini-4-hydrogen)
  * 5. Multi-turn chat with role system instructions and model routing
  */
 

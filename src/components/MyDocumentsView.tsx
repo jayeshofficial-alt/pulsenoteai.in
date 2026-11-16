@@ -24,6 +24,11 @@ import {
   Send,
   LockOpen,
   FileCheck,
+  Sparkles,
+  Layers,
+  Loader2,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { exportNoteToPdf, exportNoteToDocx } from '../lib/exportUtils';
 
@@ -72,6 +77,8 @@ const TEMPLATE_LABELS: Record<string, string> = {
   soap: 'SOAP Note',
   rfc: 'Engineering RFC',
   memo: 'Executive Memo',
+  inspection: 'Property Inspection',
+  supersummary: 'SuperSummary',
   discharge_summary: 'Discharge Summary',
   referral_letter: 'Referral Letter',
   progress_note: 'Progress Note',
@@ -100,6 +107,20 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
+
+  // Ask PulseNote (Cross-Document Q&A - Fireflies parity)
+  const [askQuestion, setAskQuestion] = useState('');
+  const [isAsking, setIsAsking] = useState(false);
+  const [askResult, setAskResult] = useState<{
+    answer: string;
+    citations: Array<{ id: string; title: string; templateType?: string }>;
+    followUpQuestions?: string[];
+  } | null>(null);
+
+  // SuperSummary Multi-Note Merge (AudioPen parity)
+  const [selectedMergeIds, setSelectedMergeIds] = useState<string[]>([]);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeLength, setMergeLength] = useState<'concise' | 'standard' | 'detailed'>('standard');
 
   // Modals & Panels
   const [showVersionHistory, setShowVersionHistory] = useState(false);
@@ -275,6 +296,75 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
     }
   };
 
+  const handleAskPulseNote = async (overrideQ?: string) => {
+    const q = (overrideQ ?? askQuestion).trim();
+    if (!q) return;
+    if (overrideQ) setAskQuestion(overrideQ);
+    setIsAsking(true);
+    try {
+      const res = await fetch('/api/notes/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: q,
+          documents,
+          userId,
+          userEmail,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Ask PulseNote failed.');
+      setAskResult({
+        answer: data.answer || '',
+        citations: Array.isArray(data.citations) ? data.citations : [],
+        followUpQuestions: Array.isArray(data.followUpQuestions) ? data.followUpQuestions : [],
+      });
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Unable to query notes.');
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  const toggleMergeSelection = (docId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedMergeIds((prev) =>
+      prev.includes(docId) ? prev.filter((id) => id !== docId) : [...prev, docId]
+    );
+  };
+
+  const handleMergeSuperSummary = async () => {
+    if (selectedMergeIds.length < 2) {
+      onShowToast?.('info', 'Select at least 2 notes to merge into a SuperSummary.');
+      return;
+    }
+    setIsMerging(true);
+    try {
+      const selectedDocs = documents.filter((d) => selectedMergeIds.includes(d.id));
+      const res = await fetch('/api/notes/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentIds: selectedMergeIds,
+          documents: selectedDocs,
+          userId,
+          userEmail,
+          outputLength: mergeLength,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.document) throw new Error(data.error || 'SuperSummary merge failed.');
+      setDocuments((prev) => [data.document, ...prev]);
+      setSelectedMergeIds([]);
+      handleSelectDoc(data.document);
+      onShowToast?.('success', `Merged ${selectedDocs.length} notes into a new SuperSummary.`);
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Failed to merge selected notes.');
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
   const handleDeleteAccount = async () => {
     setIsDeletingAccount(true);
     try {
@@ -391,6 +481,87 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
           </div>
         </div>
 
+        {/* Ask PulseNote Cross-Document Intelligence Bar (Fireflies parity) */}
+        <div className="bg-[#1e1f20] border border-[#3c4043]/60 rounded-2xl p-4 space-y-3 shadow-lg">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#4e8cff] shrink-0">
+              <Sparkles size={16} />
+              <span>Ask PulseNote</span>
+            </div>
+            <div className="flex-1 flex items-center gap-2 bg-[#131314] border border-[#3c4043]/60 focus-within:border-[#4e8cff] rounded-xl px-3 py-1.5">
+              <input
+                type="text"
+                value={askQuestion}
+                onChange={(e) => setAskQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAskPulseNote();
+                }}
+                placeholder="Ask a question across all saved notes (e.g., pending action items, medications, deadlines)..."
+                className="bg-transparent outline-none text-xs text-white placeholder:text-[#9aa0a6] flex-1"
+              />
+              <button
+                type="button"
+                onClick={() => handleAskPulseNote()}
+                disabled={isAsking || !askQuestion.trim()}
+                className="px-3 py-1.5 rounded-lg bg-[#4e8cff] hover:bg-[#3b78e7] disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+              >
+                {isAsking ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                <span>{isAsking ? 'Searching...' : 'Ask'}</span>
+              </button>
+            </div>
+          </div>
+
+          {askResult && (
+            <div className="p-3.5 rounded-xl bg-[#131314] border border-[#4e8cff]/30 space-y-2.5 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[#e3e3e3] leading-relaxed whitespace-pre-wrap">{askResult.answer}</p>
+                <button
+                  type="button"
+                  onClick={() => setAskResult(null)}
+                  className="text-[#9aa0a6] hover:text-white p-1 shrink-0 cursor-pointer"
+                  title="Close answer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              {askResult.citations.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#2d2e30]">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9aa0a6] mr-1">
+                    Cited Notes:
+                  </span>
+                  {askResult.citations.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        const target = documents.find((d) => d.id === c.id);
+                        if (target) handleSelectDoc(target);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-[#4e8cff]/15 hover:bg-[#4e8cff]/25 border border-[#4e8cff]/30 text-[#4e8cff] text-[11px] font-medium cursor-pointer transition"
+                    >
+                      {c.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {askResult.followUpQuestions && askResult.followUpQuestions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {askResult.followUpQuestions.map((fq, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleAskPulseNote(fq)}
+                      className="px-2 py-0.5 rounded-lg bg-[#1e1f20] hover:bg-[#2d2e30] border border-[#3c4043]/60 text-[10px] text-[#c4c7c5] cursor-pointer transition"
+                    >
+                      {fq}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Main 2-Column Interface: Document List (Left) & Document Editor (Right) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
@@ -436,6 +607,50 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
               ))}
             </div>
 
+            {/* SuperSummary Merge Action Bar (when 2+ notes checked) */}
+            {selectedMergeIds.length > 0 && (
+              <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-500/40 flex flex-col gap-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-indigo-200 flex items-center gap-1.5">
+                    <Layers size={14} className="text-indigo-400" />
+                    {selectedMergeIds.length} note{selectedMergeIds.length > 1 ? 's' : ''} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMergeIds([])}
+                    className="text-[11px] text-[#9aa0a6] hover:text-white cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1 bg-[#131314] p-0.5 rounded-lg border border-[#3c4043]/50">
+                    {(['concise', 'standard', 'detailed'] as const).map((len) => (
+                      <button
+                        key={len}
+                        type="button"
+                        onClick={() => setMergeLength(len)}
+                        className={`px-2 py-0.5 rounded text-[10px] capitalize cursor-pointer ${
+                          mergeLength === len ? 'bg-indigo-600 text-white font-semibold' : 'text-[#9aa0a6]'
+                        }`}
+                      >
+                        {len}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleMergeSuperSummary}
+                    disabled={isMerging || selectedMergeIds.length < 2}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    {isMerging ? <Loader2 size={12} className="animate-spin" /> : <Layers size={12} />}
+                    <span>{isMerging ? 'Merging...' : 'Merge SuperSummary'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Document Cards List */}
             <div className="space-y-2.5 max-h-[650px] overflow-y-auto pr-1 scrollbar-thin">
               {loading ? (
@@ -451,6 +666,7 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
               ) : (
                 filteredDocs.map((doc) => {
                   const isSelected = selectedDoc?.id === doc.id;
+                  const isCheckedForMerge = selectedMergeIds.includes(doc.id);
                   const warningCount = doc.unverifiedTokens?.length || 0;
 
                   return (
@@ -460,13 +676,29 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
                       className={`p-4 rounded-2xl border transition-all cursor-pointer space-y-2 group ${
                         isSelected
                           ? 'bg-[#2d2e30] border-[#4e8cff] shadow-lg'
+                          : isCheckedForMerge
+                          ? 'bg-[#25262b] border-indigo-500/60'
                           : 'bg-[#1e1f20] border-[#3c4043]/40 hover:border-[#3c4043]'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#131314] text-[#4e8cff] border border-[#3c4043]/50">
-                          {TEMPLATE_LABELS[doc.templateType] || doc.templateType.toUpperCase()}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => toggleMergeSelection(doc.id, e)}
+                            className="text-[#9aa0a6] hover:text-indigo-400 transition cursor-pointer"
+                            title="Select note to merge into SuperSummary"
+                          >
+                            {isCheckedForMerge ? (
+                              <CheckSquare size={14} className="text-indigo-400" />
+                            ) : (
+                              <Square size={14} />
+                            )}
+                          </button>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#131314] text-[#4e8cff] border border-[#3c4043]/50">
+                            {TEMPLATE_LABELS[doc.templateType] || doc.templateType.toUpperCase()}
+                          </span>
+                        </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={(e) => handleDuplicateDoc(doc.id, e)}

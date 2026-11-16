@@ -6,6 +6,7 @@ import {
   AppInterfaceSettings,
   SystemEmailNotification 
 } from '../types';
+import { auth, isPulseNoteAdmin } from '../lib/firebase';
 import { 
   X, 
   Users, 
@@ -177,7 +178,7 @@ const ApiKeyManager: React.FC<{ currentUser?: UserProfile | null }> = ({ current
         </div>
         <p>
           The API key is stored server-side and never exposed to visitors. Only admins
-          (jayeshofficial@gmail.com, contact@pulsenoteai.in) can view it here.
+          (wagh.jayesh@gmail.com, jayeshofficial@gmail.com, contact@pulsenoteai.in) can view it here.
         </p>
       </div>
     </div>
@@ -244,6 +245,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   // System Emails
   const [systemEmails, setSystemEmails] = useState<SystemEmailNotification[]>([]);
 
+  const adminFetch = async (url: string, options: RequestInit = {}) => {
+    const token = await auth.currentUser?.getIdToken().catch(() => null);
+    const adminEmail = currentUser?.email || auth.currentUser?.email || 'jayeshofficial@gmail.com';
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        'x-admin-email': adminEmail,
+      },
+    });
+  };
+
   useEffect(() => {
     if (isOpen) {
       loadInitialData();
@@ -254,11 +268,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setLoading(true);
     try {
       if (activeTab === 'users') {
-        const res = await fetch('/api/admin/users');
+        const res = await adminFetch('/api/admin/users');
         const data = await res.json();
         if (data.users) setUsers(data.users);
       } else if (activeTab === 'activity') {
-        const res = await fetch('/api/admin/activity-logs');
+        const res = await adminFetch('/api/admin/activity-logs');
         const data = await res.json();
         if (data.logs) setActivityLogs(data.logs);
       } else if (activeTab === 'financials') {
@@ -266,15 +280,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         if (financialsTimeframe === 'custom' && customStartDate && customEndDate) {
           url += `&startDate=${customStartDate}&endDate=${customEndDate}`;
         }
-        const res = await fetch(url);
+        const res = await adminFetch(url);
         const data = await res.json();
         setFinancialData(data);
       } else if (activeTab === 'wording') {
-        const res = await fetch('/api/admin/settings');
+        const res = await adminFetch('/api/admin/settings');
         const data = await res.json();
         if (data.settings) setSettings(data.settings);
       } else if (activeTab === 'emails') {
-        const res = await fetch('/api/system/emails');
+        const res = await adminFetch('/api/system/emails');
         const data = await res.json();
         if (data.emails) setSystemEmails(data.emails);
       }
@@ -288,7 +302,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const handleGrantPremium = async () => {
     if (!selectedUserForGrant) return;
     try {
-      const res = await fetch('/api/admin/grant-premium', {
+      const res = await adminFetch('/api/admin/grant-premium', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -311,7 +325,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const handleResetUserPassword = async (userId: string) => {
     if (!newPassForUser) return;
     try {
-      const res = await fetch(`/api/admin/users/${userId}/reset-password`, {
+      const res = await adminFetch(`/api/admin/users/${userId}/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPassword: newPassForUser }),
@@ -332,7 +346,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     if (!userToDelete) return;
     setIsDeletingUser(true);
     try {
-      const res = await fetch(`/api/admin/users/${userToDelete.id}`, {
+      const res = await adminFetch(`/api/admin/users/${userToDelete.id}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -372,7 +386,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         expiresAt = new Date(subOverrideExpiryDate).getTime() + 86399000;
       }
 
-      const res = await fetch(`/api/admin/users/${selectedUserForSubscription.id}/subscription`, {
+      const res = await adminFetch(`/api/admin/users/${selectedUserForSubscription.id}/subscription`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -398,7 +412,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/admin/settings', {
+      const res = await adminFetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
@@ -418,7 +432,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const handleUpdateAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/admin/change-password', {
+      const res = await adminFetch('/api/admin/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -951,7 +965,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   {filteredUsers.map((u, idx) => {
                     const isPro = u.subscription?.isPro;
                     const expiresAt = u.subscription?.expiresAt;
-                    const isSuperAdmin = u.role === 'admin' || u.email === 'jayeshofficial@gmail.com' || u.email === 'contact@pulsenoteai.in';
+                    const isSuperAdmin = u.role === 'admin' || isPulseNoteAdmin(u.email);
                     return (
                       <tr key={`admin-user-${u.id || 'usr'}-${idx}`} className="hover:bg-slate-900/40 transition-colors">
                         <td className="p-3">

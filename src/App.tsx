@@ -27,11 +27,11 @@ import {
   Menu,
   ChevronDown,
   Settings,
-  Key,
   Film,
   Layers,
   Lock,
-  Plus
+  Plus,
+  ShieldAlert
 } from 'lucide-react';
 import Sidebar, { AppActiveView } from './components/Sidebar';
 import PromptBar, { GeminiToolMode } from './components/PromptBar';
@@ -48,7 +48,6 @@ import { AuthModal } from './components/AuthModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { ClientBillingModal } from './components/ClientBillingModal';
 import { GeminiStudioModal } from './components/GeminiStudioModal';
-import { ApiKeyModal } from './components/ApiKeyModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { MarketingSite } from './components/marketing/MarketingSite';
 import { ImageStudio } from './components/ImageStudio';
@@ -72,6 +71,8 @@ import {
   saveDocumentToFirestore,
   subscribeToFeatureSettings,
   subscribeToUserProfile,
+  subscribeToDictionary,
+  type DictionaryTermDoc,
   isPulseNoteAdmin,
   isRevenueAdmin
 } from './lib/firebase';
@@ -80,7 +81,6 @@ import {
   streamChatCompletion,
   understandImageWithOpenRouter,
   generateAnimationWithOpenRouter,
-  getOpenRouterApiKey,
   setAdminEmail,
   OPENROUTER_MODELS,
   SYSTEM_PROMPT,
@@ -106,10 +106,21 @@ export function App() {
   const [isClientBillingOpen, setIsClientBillingOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGeminiStudioOpen, setIsGeminiStudioOpen] = useState(false);
-  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [isTemplateBuilderOpen, setIsTemplateBuilderOpen] = useState(false);
   const [legalModalType, setLegalModalType] = useState<'privacy' | 'terms' | 'testimonials' | 'demo' | null>(null);
   const [toolMode, setToolMode] = useState<GeminiToolMode>('chat');
+  const [outputLength, setOutputLength] = useState<'concise' | 'standard' | 'detailed'>('standard');
+  const [medicalCoding, setMedicalCoding] = useState(false);
+  const [personalDictionary, setPersonalDictionary] = useState<DictionaryTermDoc[]>(() => {
+    try {
+      const saved = localStorage.getItem('pulsenote_personal_dictionary_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isVoiceDictating, setIsVoiceDictating] = useState(false);
+  const speechRecRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [hasAcceptedLegalOnboarding, setHasAcceptedLegalOnboarding] = useState(true);
@@ -378,11 +389,64 @@ export function App() {
   useEffect(() => {
     const uid = currentUser?.id || (currentUser as any)?.uid || auth.currentUser?.uid;
     if (!uid) return;
-    const unsub = subscribeToUserProfile(uid, (data) => {
+    const unsubProfile = subscribeToUserProfile(uid, (data) => {
       setUserFirestore(data);
     });
-    return () => unsub();
+    const unsubDict = subscribeToDictionary(uid, (terms) => {
+      setPersonalDictionary(terms);
+    });
+    return () => {
+      unsubProfile();
+      unsubDict();
+    };
   }, [currentUser?.id, (currentUser as any)?.uid, auth.currentUser?.uid]);
+
+  // Toggle browser speech-to-text dictation in PromptBar
+  const toggleVoiceDictation = () => {
+    if (isVoiceDictating && speechRecRef.current) {
+      try {
+        speechRecRef.current.stop();
+      } catch {}
+      setIsVoiceDictating(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      addToast('info', 'Live voice dictation is not supported in this browser. Try Chrome/Edge or AudioRecorder.');
+      return;
+    }
+
+    try {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = 'en-US';
+      rec.onresult = (event: any) => {
+        let spoken = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          spoken += event.results[i][0].transcript;
+        }
+        if (spoken.trim()) {
+          setInput((prev) => (prev ? `${prev.trim()} ${spoken.trim()}` : spoken.trim()));
+        }
+      };
+      rec.onerror = () => {
+        setIsVoiceDictating(false);
+      };
+      rec.onend = () => {
+        setIsVoiceDictating(false);
+      };
+      speechRecRef.current = rec;
+      rec.start();
+      setIsVoiceDictating(true);
+      addToast('info', 'Listening... Speak into your microphone.');
+    } catch {
+      setIsVoiceDictating(false);
+      addToast('error', 'Could not access microphone for dictation.');
+    }
+  };
 
   // URL routes & referral parameter (Section 8 & 9)
   useEffect(() => {
@@ -950,6 +1014,12 @@ export function App() {
             body: JSON.stringify({
               input: userPrompt,
               templateType: detectedTemplate,
+              outputLength,
+              medicalCoding,
+              customDictionary: personalDictionary.map((d) => ({
+                term: d.term,
+                replacement: d.replacement,
+              })),
             }),
           });
 
@@ -966,7 +1036,11 @@ export function App() {
           let formattedText = '';
 
           if (noteData.templateType === 'soap') {
-            formattedText = `### Subjective\n${sectionsObj.subjective || 'Not documented'}\n\n### Objective\n${sectionsObj.objective || 'Not documented'}\n\n### Assessment\n${sectionsObj.assessment || 'Not documented'}\n\n### Plan\n${sectionsObj.plan || 'Not documented'}`;
+            formattedText = `### Subjective\n${sectionsObj.subjective || 'Not documented'}\n\n### Objective\n${sectionsObj.objective || 'Not documented'}\n\n### Assessment\n${sectionsObj.assessment || 'Not documented'}\n\n### Plan\n${sectionsObj.plan || 'Not documented'}${
+              sectionsObj.suggestedCoding
+                ? `\n\n### Suggested Medical Coding (ICD-10 & CPT)\n${sectionsObj.suggestedCoding}`
+                : ''
+            }`;
           } else if (noteData.templateType === 'rfc') {
             formattedText = `### Summary\n${sectionsObj.summary || 'Not documented'}\n\n### Motivation\n${sectionsObj.motivation || 'Not documented'}\n\n### Proposal\n${sectionsObj.proposal || 'Not documented'}\n\n### Risks\n${sectionsObj.risks || 'Not documented'}\n\n### Timeline\n${sectionsObj.timeline || 'Not documented'}`;
           } else if (noteData.templateType === 'memo') {
@@ -1327,10 +1401,7 @@ export function App() {
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
         onOpenUpgrade={() => setIsPricingModalOpen(true)}
-        onOpenSettings={() => {
-          if (isSuperAdmin) setActiveView('admin');
-          else setIsSettingsOpen(true);
-        }}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         activeView={activeView}
         onToggleView={setActiveView}
         imageGenerationEnabled={features.imageGenerationEnabled}
@@ -1402,14 +1473,14 @@ export function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveView('canvas')}
+                onClick={() => setActiveView('documents')}
                 className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
-                  activeView === 'canvas'
+                  activeView === 'documents'
                     ? 'bg-[#2d2e30] text-white shadow-sm'
                     : 'text-[#9aa0a6] hover:text-white'
                 }`}
               >
-                Canvas
+                My Docs
               </button>
               <button
                 type="button"
@@ -1421,17 +1492,6 @@ export function App() {
                 }`}
               >
                 Templates
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveView('chat')}
-                className={`px-3 py-1 rounded-full transition-colors font-medium cursor-pointer ${
-                  activeView === 'chat'
-                    ? 'bg-[#2d2e30] text-white shadow-sm'
-                    : 'text-[#9aa0a6] hover:text-white'
-                }`}
-              >
-                Notes
               </button>
 
               {/* Real-time feature switch: ONLY show Image tab when enabled */}
@@ -1489,7 +1549,7 @@ export function App() {
               title="Custom template builder"
             >
               <Layers size={13} className="text-amber-400" />
-              <span>Templates</span>
+              <span>Builder</span>
             </button>
 
             {/* Admin Switch Quick Button: strictly for verified admins */}
@@ -1504,7 +1564,7 @@ export function App() {
                 }`}
                 title="Admin Feature Switch Portal (/admin)"
               >
-                <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+                <ShieldAlert size={13} className="text-red-400 shrink-0" />
                 <span>Admin</span>
               </button>
             )}
@@ -1731,8 +1791,15 @@ export function App() {
                 isDeepResearch={isDeepResearch}
                 onToggleDeepResearch={() => setIsDeepResearch(!isDeepResearch)}
                 onToggleCanvas={() => setActiveView('canvas')}
-                onStartVoice={() => addToast('info', 'Voice dictation active. Speak into your microphone.')}
+                onStartVoice={toggleVoiceDictation}
+                isRecording={isVoiceDictating}
                 onShowToast={addToast}
+                imageGenerationEnabled={features.imageGenerationEnabled}
+                videoGenerationEnabled={features.videoGenerationEnabled}
+                outputLength={outputLength}
+                onChangeOutputLength={setOutputLength}
+                medicalCoding={medicalCoding}
+                onToggleMedicalCoding={() => setMedicalCoding((v) => !v)}
               />
               <p className="text-[11px] text-center text-[#9aa0a6] mt-2.5">
                 Built on Google Cloud. Do not enter patient-identifying information.
@@ -1873,14 +1940,13 @@ export function App() {
         />
       )}
 
-      {/* Settings & Help Modal (non-admin) */}
+      {/* Settings & Vocabulary Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         currentUser={currentUser}
         usageState={usageState}
         onOpenPricing={() => setIsPricingModalOpen(true)}
-        onOpenApiKey={() => setIsApiKeyModalOpen(true)}
       />
 
       {/* Legal Onboarding Modal */}
@@ -1904,13 +1970,6 @@ export function App() {
           setIsGeminiStudioOpen(false);
           addToast('info', 'Loaded into prompt bar');
         }}
-      />
-
-      {/* Standalone Gemini API Key Configuration Modal */}
-      <ApiKeyModal
-        isOpen={isApiKeyModalOpen}
-        onClose={() => setIsApiKeyModalOpen(false)}
-        onSave={(key) => addToast('success', key ? 'Gemini API key updated' : 'Key removed')}
       />
 
       {/* Global Toast Notifications */}

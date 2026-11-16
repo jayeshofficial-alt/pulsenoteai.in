@@ -472,7 +472,7 @@ class MediaFIFOQueue {
     // Lyria generative audio prompt synthesis & fallback waveform
     try {
       await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-4-hydrogen',
         contents: `Generate musical composition metadata (BPM, Key, Genre, Instrumentation, Structure) for prompt: ${job.prompt}`,
       });
     } catch (e) {

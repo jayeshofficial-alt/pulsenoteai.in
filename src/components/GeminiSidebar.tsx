@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChatThread, UserUsageState, UserProfile } from '../types';
+import { isPulseNoteAdmin } from '../lib/firebase';
 import { 
   Plus, 
   MessageSquare, 
@@ -60,9 +61,7 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
 
-  const isAdmin = currentUser?.role === 'admin' 
-    || currentUser?.email === 'jayeshofficial@gmail.com' 
-    || currentUser?.email === 'contact@pulsenoteai.in';
+  const isAdmin = currentUser?.role === 'admin' || isPulseNoteAdmin(currentUser?.email);
 
   const handleStartRename = (thread: ChatThread, e: React.MouseEvent) => {
     e.stopPropagation();

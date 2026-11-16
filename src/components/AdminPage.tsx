@@ -32,8 +32,9 @@ import {
   X,
   Download,
   TrendingUp,
-  BarChart3,
   Printer,
+  Users,
+  Ban,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -46,7 +47,7 @@ import {
   Legend,
 } from 'recharts';
 import { FeatureSettingsDoc } from '../types';
-import { updateFeatureSettings, isPulseNoteAdmin, ADMIN_EMAILS } from '../lib/firebase';
+import { auth, updateFeatureSettings, isPulseNoteAdmin, ADMIN_EMAILS } from '../lib/firebase';
 
 interface AuditLogItem {
   id: string;
@@ -56,6 +57,19 @@ interface AuditLogItem {
   targetUserEmail?: string;
   details: string;
   timestamp: number;
+}
+
+interface ManagedUserItem {
+  id: string;
+  name: string;
+  email: string;
+  plan: 'free' | 'premium';
+  isBanned: boolean;
+  status?: string;
+  role?: string;
+  chats?: number;
+  createdAt?: string;
+  premiumUntil?: string | null;
 }
 
 interface HealthResponse {
@@ -91,7 +105,7 @@ export function AdminPage({
   onBack,
   onShowToast,
 }: AdminPageProps) {
-  const [activeTab, setActiveTab] = useState<'controls' | 'audit'>('controls');
+  const [activeTab, setActiveTab] = useState<'controls' | 'users' | 'audit'>('controls');
   const [isUpdating, setIsUpdating] = useState(false);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
@@ -103,7 +117,29 @@ export function AdminPage({
   const [auditEndDate, setAuditEndDate] = useState('');
   const [selectedUserFilter, setSelectedUserFilter] = useState('ALL');
   const [chartViewMode, setChartViewMode] = useState<'stacked' | 'total'>('stacked');
+
+  // User Management Tab State
+  const [managedUsers, setManagedUsers] = useState<ManagedUserItem[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const [userTierFilter, setUserTierFilter] = useState<'all' | 'premium' | 'free' | 'banned'>('all');
+  const [actionUserId, setActionUserId] = useState<string | null>(null);
+  const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<string | null>(null);
+
   const isAdmin = isPulseNoteAdmin(currentUser?.email, currentUser?.emailVerified);
+
+  const adminFetch = async (url: string, options: RequestInit = {}) => {
+    let token = '';
+    try {
+      token = (await auth.currentUser?.getIdToken()) || '';
+    } catch {}
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string> | undefined),
+      ...(currentUser?.email ? { 'x-admin-email': currentUser.email } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    return fetch(url, { ...options, headers });
+  };
 
   const auditChartData = useMemo(() => {
     const days: {
@@ -318,7 +354,7 @@ export function AdminPage({
   const fetchHealthStatus = async () => {
     setHealthLoading(true);
     try {
-      const res = await fetch('/api/admin/health');
+      const res = await adminFetch('/api/admin/health');
       if (res.ok) {
         const data = await res.json();
         setHealthData(data);
@@ -333,11 +369,7 @@ export function AdminPage({
   const fetchAuditLogs = async () => {
     setAuditLoading(true);
     try {
-      const res = await fetch('/api/admin/audit-logs', {
-        headers: {
-          'x-admin-email': currentUser?.email || 'jayeshofficial@gmail.com',
-        },
-      });
+      const res = await adminFetch('/api/admin/audit-logs');
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.logs)) {
@@ -351,12 +383,140 @@ export function AdminPage({
     }
   };
 
+  const fetchManagedUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/users?limit=250');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.users)) {
+          setManagedUsers(data.users);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch managed users:', e);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isAdmin) {
       fetchHealthStatus();
       fetchAuditLogs();
+      fetchManagedUsers();
     }
   }, [isAdmin]);
+
+  const handleToggleBan = async (u: ManagedUserItem) => {
+    if (ADMIN_EMAILS.includes((u.email || '').toLowerCase())) {
+      onShowToast?.('error', 'Administrator accounts cannot be banned.');
+      return;
+    }
+    setActionUserId(u.id);
+    try {
+      const res = await adminFetch(`/api/admin/users/${u.id}/ban`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isBanned: !u.isBanned, reason: 'Admin Portal Moderation' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update ban state');
+      onShowToast?.('success', data.message || `Updated ban status for ${u.email}`);
+      await Promise.all([fetchManagedUsers(), fetchAuditLogs()]);
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Ban action failed.');
+    } finally {
+      setActionUserId(null);
+    }
+  };
+
+  const handleTogglePremium = async (u: ManagedUserItem) => {
+    setActionUserId(u.id);
+    const nextPlan = u.plan === 'premium' ? 'free' : 'premium';
+    try {
+      const res = await adminFetch(`/api/admin/users/${u.id}/premium`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: nextPlan }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update plan');
+      onShowToast?.('success', data.message || `Updated ${u.email} to ${nextPlan}`);
+      await Promise.all([fetchManagedUsers(), fetchAuditLogs()]);
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Plan update failed.');
+    } finally {
+      setActionUserId(null);
+    }
+  };
+
+  const handleDeleteManagedUser = async (u: ManagedUserItem) => {
+    if (ADMIN_EMAILS.includes((u.email || '').toLowerCase())) {
+      onShowToast?.('error', 'Administrator accounts cannot be deleted.');
+      return;
+    }
+    setActionUserId(u.id);
+    try {
+      const res = await adminFetch(`/api/admin/users/${u.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+      setConfirmDeleteUserId(null);
+      onShowToast?.('success', data.message || `Deleted ${u.email}`);
+      await Promise.all([fetchManagedUsers(), fetchAuditLogs()]);
+    } catch (err: any) {
+      onShowToast?.('error', err?.message || 'Delete user failed.');
+    } finally {
+      setActionUserId(null);
+    }
+  };
+
+  const filteredManagedUsers = useMemo(() => {
+    const q = userSearch.toLowerCase().trim();
+    return managedUsers.filter((u) => {
+      const matchesSearch =
+        !q ||
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q);
+      if (!matchesSearch) return false;
+      if (userTierFilter === 'premium') return u.plan === 'premium';
+      if (userTierFilter === 'free') return u.plan !== 'premium';
+      if (userTierFilter === 'banned') return Boolean(u.isBanned || u.status === 'banned');
+      return true;
+    });
+  }, [managedUsers, userSearch, userTierFilter]);
+
+  const handleDownloadUsersCSV = () => {
+    if (filteredManagedUsers.length === 0) {
+      onShowToast?.('info', 'No users match the current filter.');
+      return;
+    }
+    const headers = ['ID', 'Name', 'Email', 'Plan', 'Status', 'Joined Date', 'Premium Until'];
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = filteredManagedUsers.map((u) =>
+      [
+        esc(u.id),
+        esc(u.name),
+        esc(u.email),
+        esc(u.plan.toUpperCase()),
+        esc(u.isBanned ? 'BANNED' : 'ACTIVE'),
+        esc(u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-IN') : ''),
+        esc(u.premiumUntil ? new Date(u.premiumUntil).toLocaleDateString('en-IN') : '-'),
+      ].join(',')
+    );
+    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.setAttribute('download', `pulsenote_users_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    onShowToast?.('success', `Exported ${filteredManagedUsers.length} user records.`);
+  };
 
   const handleToggle = async (key: 'image' | 'video') => {
     if (!isAdmin) {
@@ -454,7 +614,7 @@ export function AdminPage({
             </button>
             <div>
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <ShieldCheck size={20} className="text-emerald-400 shrink-0" />
                 <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
                   Admin Control & Audit Portal
                 </h1>
@@ -487,10 +647,10 @@ export function AdminPage({
         </div>
 
         {/* Admin Navigation Tabs (Hidden during print) */}
-        <div className="flex items-center gap-2 border-b border-[#2d2e30] pb-3 no-print">
+        <div className="flex items-center gap-2 border-b border-[#2d2e30] pb-3 no-print overflow-x-auto">
           <button
             onClick={() => setActiveTab('controls')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 ${
               activeTab === 'controls'
                 ? 'bg-gradient-to-r from-[#4e8cff] to-[#8b5cf6] text-white shadow-md'
                 : 'bg-[#1e1f20] hover:bg-[#2d2e30] text-[#9aa0a6] hover:text-white border border-[#2d2e30]'
@@ -502,10 +662,28 @@ export function AdminPage({
 
           <button
             onClick={() => {
+              setActiveTab('users');
+              fetchManagedUsers();
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 ${
+              activeTab === 'users'
+                ? 'bg-gradient-to-r from-[#4e8cff] to-[#8b5cf6] text-white shadow-md'
+                : 'bg-[#1e1f20] hover:bg-[#2d2e30] text-[#9aa0a6] hover:text-white border border-[#2d2e30]'
+            }`}
+          >
+            <Users size={15} />
+            <span>User Management</span>
+            <span className="ml-1 text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-white/20 text-white tabular-nums">
+              {managedUsers.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
               setActiveTab('audit');
               fetchAuditLogs();
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer shrink-0 ${
               activeTab === 'audit'
                 ? 'bg-gradient-to-r from-[#4e8cff] to-[#8b5cf6] text-white shadow-md'
                 : 'bg-[#1e1f20] hover:bg-[#2d2e30] text-[#9aa0a6] hover:text-white border border-[#2d2e30]'
@@ -513,13 +691,216 @@ export function AdminPage({
           >
             <FileText size={15} />
             <span>Audit Log</span>
-            <span className="ml-1 text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-white/20 text-white">
+            <span className="ml-1 text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-white/20 text-white tabular-nums">
               {auditLogs.length}
             </span>
           </button>
         </div>
 
-        {activeTab === 'controls' ? (
+        {activeTab === 'users' ? (
+          /* User Management Tab (Printer-Friendly Table + Moderation Actions) */
+          <div className="bg-[#1e1f20] border border-[#2d2e30] rounded-2xl p-5 space-y-5 shadow-xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#2d2e30] pb-4">
+              <div>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Users size={18} className="text-[#4e8cff]" />
+                  User Directory & Subscription Controls
+                </h3>
+                <p className="text-xs text-[#9aa0a6] mt-0.5">
+                  Manage active accounts, grant or revoke Pro subscriptions, moderate banned accounts, and print clean tables.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 no-print">
+                <button
+                  type="button"
+                  onClick={handlePrintReport}
+                  className="px-3.5 py-2 rounded-xl bg-[#2d2e30] hover:bg-[#35363a] text-xs font-semibold text-white flex items-center gap-2 transition cursor-pointer border border-[#3c4043]"
+                >
+                  <Printer size={14} className="text-[#4e8cff]" />
+                  <span>Print Users</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadUsersCSV}
+                  disabled={usersLoading || filteredManagedUsers.length === 0}
+                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-xs font-semibold text-white flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                >
+                  <Download size={14} />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={fetchManagedUsers}
+                  disabled={usersLoading}
+                  className="px-3.5 py-2 rounded-xl bg-[#2d2e30] hover:bg-[#35363a] text-xs text-white flex items-center gap-2 transition cursor-pointer"
+                >
+                  <RefreshCw size={14} className={usersLoading ? 'animate-spin' : ''} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Controls (Hidden on Print) */}
+            <div className="flex flex-col md:flex-row items-center gap-3 no-print">
+              <div className="flex-1 bg-[#131314] border border-[#2d2e30] focus-within:border-[#4e8cff] rounded-xl flex items-center px-3.5 py-2 w-full">
+                <Search size={15} className="text-[#9aa0a6] shrink-0" />
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Search users by name or email..."
+                  className="bg-transparent outline-none text-xs text-white placeholder:text-[#9aa0a6] ml-2 w-full"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto">
+                {(['all', 'premium', 'free', 'banned'] as const).map((tier) => (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() => setUserTierFilter(tier)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold uppercase transition cursor-pointer border ${
+                      userTierFilter === tier
+                        ? 'bg-[#4e8cff]/20 text-[#4e8cff] border-[#4e8cff]/40'
+                        : 'bg-[#131314] text-[#9aa0a6] hover:text-white border-[#2d2e30]'
+                    }`}
+                  >
+                    {tier}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* User Management Data Table (Fully Print-Formatted) */}
+            <div className="overflow-x-auto rounded-xl border border-[#2d2e30] bg-[#131314]">
+              <table className="w-full text-xs text-left tabular-nums">
+                <thead className="bg-[#1e1f20] text-[#9aa0a6] uppercase text-[10px] tracking-wider border-b border-[#2d2e30]">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">User</th>
+                    <th className="py-3 px-4 font-semibold">Email</th>
+                    <th className="py-3 px-4 font-semibold">Plan</th>
+                    <th className="py-3 px-4 font-semibold">Status</th>
+                    <th className="py-3 px-4 font-semibold">Joined</th>
+                    <th className="py-3 px-4 font-semibold text-right no-print">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#2d2e30]/70">
+                  {usersLoading ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-[#9aa0a6]">
+                        Loading platform users...
+                      </td>
+                    </tr>
+                  ) : filteredManagedUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-[#9aa0a6]">
+                        No users match the selected filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredManagedUsers.map((u) => {
+                      const isTargetAdmin = ADMIN_EMAILS.includes((u.email || '').toLowerCase());
+                      const isBusy = actionUserId === u.id;
+                      return (
+                        <tr key={u.id} className="hover:bg-[#1e1f20]/60 transition-colors">
+                          <td className="py-3 px-4 font-medium text-white">
+                            <div className="flex items-center gap-2">
+                              <span>{u.name || 'User'}</span>
+                              {isTargetAdmin && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                  ADMIN
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[#c4c7c5]">{u.email}</td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-semibold ${
+                                u.plan === 'premium'
+                                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                                  : 'bg-slate-700/30 text-slate-300 border-slate-600/40'
+                              }`}
+                            >
+                              {u.plan === 'premium' ? 'PRO' : 'FREE'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-semibold ${
+                                u.isBanned
+                                  ? 'bg-red-500/20 text-red-300 border-red-500/30'
+                                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              }`}
+                            >
+                              {u.isBanned ? 'BANNED' : 'ACTIVE'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[#9aa0a6]">
+                            {u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-IN') : '—'}
+                          </td>
+                          <td className="py-3 px-4 text-right no-print">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={isBusy || isTargetAdmin}
+                                onClick={() => handleTogglePremium(u)}
+                                className="px-2 py-1 rounded-lg bg-[#1e1f20] hover:bg-purple-500/20 border border-[#3c4043] hover:border-purple-500/40 text-[10px] font-semibold text-purple-300 disabled:opacity-40 transition cursor-pointer flex items-center gap-1"
+                                title={u.plan === 'premium' ? 'Downgrade to Free' : 'Upgrade to Pro'}
+                              >
+                                <Crown size={11} />
+                                <span>{u.plan === 'premium' ? 'Revoke Pro' : 'Grant Pro'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isBusy || isTargetAdmin}
+                                onClick={() => handleToggleBan(u)}
+                                className={`px-2 py-1 rounded-lg border text-[10px] font-semibold disabled:opacity-40 transition cursor-pointer flex items-center gap-1 ${
+                                  u.isBanned
+                                    ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-300'
+                                    : 'bg-red-500/15 hover:bg-red-500/25 border-red-500/30 text-red-300'
+                                }`}
+                                title={u.isBanned ? 'Unban User' : 'Ban User'}
+                              >
+                                <Ban size={11} />
+                                <span>{u.isBanned ? 'Unban' : 'Ban'}</span>
+                              </button>
+
+                              {!isTargetAdmin && (
+                                confirmDeleteUserId === u.id ? (
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => handleDeleteManagedUser(u)}
+                                    className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold transition cursor-pointer"
+                                  >
+                                    Confirm
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => setConfirmDeleteUserId(u.id)}
+                                    className="p-1.5 rounded-lg bg-[#1e1f20] hover:bg-red-500/20 border border-[#3c4043] text-[#9aa0a6] hover:text-red-300 transition cursor-pointer"
+                                    title="Delete Account"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : activeTab === 'controls' ? (
           <>
             {/* System & External Services Health Status (/api/admin/health) */}
             <div className="bg-[#1e1f20] border border-[#2d2e30] rounded-2xl p-5 space-y-4 shadow-xl">
@@ -906,7 +1287,7 @@ export function AdminPage({
               </div>
 
               {/* Stat Metric Summary Pills */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs tabular-nums">
                 <div className="p-3 rounded-xl bg-[#1e1f20] border border-[#2d2e30]">
                   <span className="text-[10px] text-[#9aa0a6] block uppercase tracking-wider font-semibold">30-Day Volume</span>
                   <span className="text-lg font-bold font-mono text-white mt-0.5 block">{total30DayActions}</span>
@@ -923,6 +1304,30 @@ export function AdminPage({
                   <span className="text-[10px] text-blue-400 block uppercase tracking-wider font-semibold">Feature Switches</span>
                   <span className="text-lg font-bold font-mono text-blue-300 mt-0.5 block">{total30DaySwitches}</span>
                 </div>
+              </div>
+
+              {/* Print-only 30-Day Activity Table Summary (fallback if browser clips SVG charts) */}
+              <div className="hidden print:block pt-2">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>30-Day Total Actions</th>
+                      <th>User Bans</th>
+                      <th>Premium Updates</th>
+                      <th>Feature Switches</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Audit Summary</td>
+                      <td>{total30DayActions}</td>
+                      <td>{total30DayBans}</td>
+                      <td>{total30DayPremium}</td>
+                      <td>{total30DaySwitches}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
 
               {/* Chart Canvas Container */}

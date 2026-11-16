@@ -21,6 +21,19 @@
       },
       "required": ["id", "email"]
     },
+    "DictionaryTerm": {
+      "title": "DictionaryTerm",
+      "description": "User custom vocabulary / spelling hints for voice transcription & clinical notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "term": { "type": "string", "maxLength": 120 },
+        "replacement": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "term"]
+    },
     "FeatureSettings": {
       "title": "FeatureSettings",
       "description": "Admin toggle for image and video generation",
@@ -81,39 +94,28 @@
   },
   "firestore": {
     "/settings/{settingId}": {
-      "entity": "FeatureSettings",
-      "rules": {
-        "read": "request.auth != null",
-        "write": "request.auth != null && (request.auth.token.email == 'jayeshofficial@gmail.com' || request.auth.token.email == 'contact@pulsenoteai.in') && request.auth.token.email_verified == true"
-      }
+      "schema": { "$ref": "#/entities/FeatureSettings" },
+      "description": "Global feature toggles readable by authenticated users and editable by admins"
     },
     "/users/{userId}": {
-      "entity": "User",
-      "rules": {
-        "read": "request.auth != null && (request.auth.uid == userId || request.auth.token.email in ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in'])",
-        "write": "request.auth != null && request.auth.uid == userId"
-      }
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile document owned by userId or accessible by admins"
+    },
+    "/users/{userId}/dictionary/{termId}": {
+      "schema": { "$ref": "#/entities/DictionaryTerm" },
+      "description": "Personal custom vocabulary terms scoped to a user"
     },
     "/teams/{teamId}": {
-      "entity": "Team",
-      "rules": {
-        "read": "request.auth != null",
-        "write": "request.auth != null && resource.data.ownerUid == request.auth.uid"
-      }
+      "schema": { "$ref": "#/entities/Team" },
+      "description": "Team workspaces shared among invited members"
     },
     "/videoJobs/{jobId}": {
-      "entity": "VideoJob",
-      "rules": {
-        "read": "request.auth != null",
-        "write": "false"
-      }
+      "schema": { "$ref": "#/entities/VideoJob" },
+      "description": "Server-managed video generation jobs readable by owner or admin"
     },
     "/partnerLeads/{leadId}": {
-      "entity": "PartnerLead",
-      "rules": {
-        "read": "request.auth != null && request.auth.token.email in ['jayeshofficial@gmail.com', 'contact@pulsenoteai.in']",
-        "write": "true"
-      }
+      "schema": { "$ref": "#/entities/PartnerLead" },
+      "description": "Inbound partner inquiries readable and manageable by admins"
     }
   }
 }

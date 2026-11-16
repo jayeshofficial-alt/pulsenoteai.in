@@ -12,9 +12,25 @@ import {
   Wifi,
   WifiOff,
   Radio,
-  Activity,
-  Layers
+  Layers,
+  Users,
+  BookOpen,
+  Plus,
+  X,
 } from 'lucide-react';
+import {
+  auth,
+  subscribeToDictionary,
+  saveDictionaryTerm,
+  deleteDictionaryTerm,
+  type DictionaryTermDoc,
+} from '../lib/firebase';
+
+export interface SpeakerStatItem {
+  speaker: string;
+  words: number;
+  percentage: number;
+}
 
 interface AudioRecorderProps {
   onTranscriptReady: (transcriptText: string) => void;
@@ -23,6 +39,7 @@ interface AudioRecorderProps {
   onPreserveAudio?: (audioBlob: Blob, mimeType: string, fileName?: string) => void;
   preservedAudio?: { blob: Blob; mimeType: string; fileName?: string } | null;
   onClearPreservedAudio?: () => void;
+  onSpeakerStats?: (stats: SpeakerStatItem[]) => void;
 }
 
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB max
@@ -56,6 +73,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   onPreserveAudio,
   preservedAudio,
   onClearPreservedAudio,
+  onSpeakerStats,
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -66,11 +84,67 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('ready');
   const [networkLatencyMs, setNetworkLatencyMs] = useState<number | null>(null);
   const [chunkCount, setChunkCount] = useState<number>(0);
+  const [ambientMode, setAmbientMode] = useState<boolean>(true);
+  const [speakerStats, setSpeakerStats] = useState<SpeakerStatItem[]>([]);
+  const [showDictDrawer, setShowDictDrawer] = useState(false);
+  const [dictionaryTerms, setDictionaryTerms] = useState<DictionaryTermDoc[]>(() => {
+    try {
+      const saved = localStorage.getItem('pulsenote_personal_dictionary_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newTermInput, setNewTermInput] = useState('');
+  const [newReplacementInput, setNewReplacementInput] = useState('');
   const [localPreservedAudio, setLocalPreservedAudio] = useState<{
     blob: Blob;
     mimeType: string;
     fileName?: string;
   } | null>(null);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const unsub = subscribeToDictionary(uid, (terms) => {
+      setDictionaryTerms(terms);
+    });
+    return () => unsub();
+  }, [auth.currentUser?.uid]);
+
+  const handleAddDictionaryTerm = async () => {
+    const term = newTermInput.trim();
+    if (!term) return;
+    const replacement = newReplacementInput.trim();
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      await saveDictionaryTerm(uid, { term, replacement: replacement || undefined });
+    } else {
+      const updated: DictionaryTermDoc[] = [
+        { id: `local_${Date.now()}`, term, ...(replacement ? { replacement } : {}) },
+        ...dictionaryTerms,
+      ];
+      setDictionaryTerms(updated);
+      try {
+        localStorage.setItem('pulsenote_personal_dictionary_v1', JSON.stringify(updated));
+      } catch {}
+    }
+    setNewTermInput('');
+    setNewReplacementInput('');
+  };
+
+  const handleRemoveDictionaryTerm = async (id: string) => {
+    const uid = auth.currentUser?.uid;
+    if (uid && !id.startsWith('local_')) {
+      await deleteDictionaryTerm(uid, id);
+    } else {
+      const updated = dictionaryTerms.filter((t) => t.id !== id);
+      setDictionaryTerms(updated);
+      try {
+        localStorage.setItem('pulsenote_personal_dictionary_v1', JSON.stringify(updated));
+      } catch {}
+    }
+  };
 
   // References to preserve state across asynchronous event loops
   const streamRef = useRef<MediaStream | null>(null);
@@ -334,6 +408,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           sessionId: sessionIdRef.current,
           isFinal,
           priorContext: priorContextRef.current,
+          ambientMode,
+          customDictionary: dictionaryTerms.map((d) => ({ term: d.term, replacement: d.replacement })),
         }),
         signal: controller.signal,
       });
@@ -349,6 +425,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         const newText = data.transcript.trim();
         priorContextRef.current += (priorContextRef.current ? ' ' : '') + newText;
         onAppendText(newText + ' ');
+      }
+      if (Array.isArray(data.speakerStats) && data.speakerStats.length > 0) {
+        setSpeakerStats(data.speakerStats);
+        onSpeakerStats?.(data.speakerStats);
       }
 
       setChunkCount((prev) => prev + 1);
@@ -584,6 +664,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
         body: JSON.stringify({
           audioBase64: base64Data,
           mimeType: mimeType || 'audio/webm',
+          ambientMode,
+          customDictionary: dictionaryTerms.map((d) => ({ term: d.term, replacement: d.replacement })),
         }),
         signal: controller.signal,
       });
@@ -596,6 +678,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       }
 
       const data = await response.json();
+      if (Array.isArray(data.speakerStats) && data.speakerStats.length > 0) {
+        setSpeakerStats(data.speakerStats);
+        onSpeakerStats?.(data.speakerStats);
+      }
       if (data.transcript && data.transcript.trim()) {
         onTranscriptReady(data.transcript);
         setStatusMessage('Voice audio transcribed and preserved in editor!');
@@ -827,8 +913,36 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
           )}
         </div>
 
-        {/* Secondary upload option */}
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800/60 w-full justify-center">
+        {/* Secondary options: Ambient Diarization, Personal Dictionary & File Upload */}
+        <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-slate-800/60 w-full justify-center">
+          <button
+            type="button"
+            onClick={() => setAmbientMode(!ambientMode)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+              ambientMode
+                ? 'bg-teal-500/15 border-teal-500/40 text-teal-300'
+                : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white'
+            }`}
+            title="Diarize speakers (Clinician / Patient or Speaker 1 / Speaker 2)"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Ambient Diarization: {ambientMode ? 'On' : 'Off'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowDictDrawer(!showDictDrawer)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+              showDictDrawer
+                ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300'
+                : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:text-white'
+            }`}
+            title="Add custom names, drug spellings, or acronyms"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Dictionary ({dictionaryTerms.length})</span>
+          </button>
+
           <input
             ref={fileInputRef}
             type="file"
@@ -845,6 +959,101 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
             <span>Upload Audio File (.mp3, .wav, .m4a, .webm)</span>
           </button>
         </div>
+
+        {/* Personal Dictionary Popover Panel */}
+        {showDictDrawer && (
+          <div className="w-full mt-2 p-3 rounded-xl bg-slate-950/90 border border-indigo-500/30 space-y-2.5 text-left">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider">
+                Personal Vocabulary & Custom Spellings
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDictDrawer(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={newTermInput}
+                onChange={(e) => setNewTermInput(e.target.value)}
+                placeholder="Exact spelling (e.g. Dr. Rao, Ozempic)"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+              />
+              <input
+                type="text"
+                value={newReplacementInput}
+                onChange={(e) => setNewReplacementInput(e.target.value)}
+                placeholder="Optional alias / misheard form"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={handleAddDictionaryTerm}
+                disabled={!newTermInput.trim()}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add</span>
+              </button>
+            </div>
+            {dictionaryTerms.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {dictionaryTerms.map((t) => (
+                  <span
+                    key={t.id}
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-[11px] text-indigo-200"
+                  >
+                    <span>
+                      {t.term}
+                      {t.replacement ? ` (← ${t.replacement})` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveDictionaryTerm(t.id)}
+                      className="text-indigo-400 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Speaker Talk-Time Analytics Breakdown (Fireflies / Nabla parity) */}
+        {speakerStats.length > 0 && (
+          <div className="w-full mt-2 p-3 rounded-xl bg-slate-950/90 border border-teal-500/30 space-y-2 text-left">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-teal-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5" /> Speaker Talk-Time Analytics
+              </span>
+              <span className="text-slate-400 font-mono tabular-nums">{speakerStats.length} speakers detected</span>
+            </div>
+            <div className="space-y-1.5">
+              {speakerStats.map((s) => (
+                <div key={s.speaker} className="space-y-0.5 text-[11px] tabular-nums">
+                  <div className="flex items-center justify-between text-slate-300">
+                    <span className="font-semibold">{s.speaker}</span>
+                    <span className="font-mono text-teal-300">
+                      {s.percentage}% ({s.words} words)
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-400"
+                      style={{ width: `${Math.min(100, s.percentage)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
