@@ -205,7 +205,10 @@ export const PricingModal: React.FC<PricingModalProps> = ({
     seats?: number;
     description: string;
   }) => {
-    const activeKeyId = opts.key || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || 'REDACTED_RAZORPAY_KEY_ID';
+    const activeKeyId = opts.key || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
+    if (!activeKeyId) {
+      throw new Error('VITE_RAZORPAY_KEY_ID is not set. Add it to your .env file.');
+    }
     const checkoutOptions: any = {
       key: activeKeyId,
       name: 'PulseNote AI',

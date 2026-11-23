@@ -2346,14 +2346,21 @@ app.post(['/api/auth/logout', '/api/logout'], (req, res) => {
 const RAZORPAY_KEY_ID =
   process.env.RAZORPAY_KEY_ID ||
   process.env.VITE_RAZORPAY_KEY_ID ||
-  process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ||
-  'REDACTED_RAZORPAY_KEY_ID';
+  process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
-const RAZORPAY_KEY_SECRET =
-  process.env.RAZORPAY_KEY_SECRET || 'REDACTED_RAZORPAY_SECRET';
+if (!RAZORPAY_KEY_ID) {
+  throw new Error('RAZORPAY_KEY_ID is not set. Add it to your .env file.');
+}
 
-const RAZORPAY_WEBHOOK_SECRET =
-  process.env.RAZORPAY_WEBHOOK_SECRET || 'pulse_webhook_secret_123';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+if (!RAZORPAY_KEY_SECRET) {
+  throw new Error('RAZORPAY_KEY_SECRET is not set. Add it to your .env file.');
+}
+
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET;
+if (!RAZORPAY_WEBHOOK_SECRET) {
+  throw new Error('RAZORPAY_WEBHOOK_SECRET is not set. Add it to your .env file.');
+}
 
 const razorpayClient = new Razorpay({
   key_id: RAZORPAY_KEY_ID,
