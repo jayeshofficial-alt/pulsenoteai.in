@@ -34,7 +34,7 @@ Structure your response strictly following the SOAP framework:
 
 Formatting Rules:
 - Enforce clinical accuracy, objective tone, and professional brevity.
-- Built on Google Cloud. Do not enter patient-identifying information.
+- Never invent values; if a section has no facts in the input, state "Not specified in transcript". Do not enter patient-identifying information.
 - Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`,
 

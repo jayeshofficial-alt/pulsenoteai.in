@@ -40,7 +40,7 @@ export const TEMPLATE_GALLERY_DATA: GalleryTemplate[] = [
     structuredOutput: {
       Subjective: '45-year-old male presenting with chest pain of 2 days duration, described as worse on physical exertion.',
       Objective: 'Vital Signs: Blood Pressure 150/95 mmHg, Heart Rate 92 bpm. Diagnostics: ECG performed and reported normal.',
-      Assessment: 'Not documented',
+      Assessment: 'Not specified in transcript',
       Plan: 'Initiated Aspirin 75mg daily. Scheduled clinical review in 1 week.',
     },
   },
@@ -57,10 +57,10 @@ export const TEMPLATE_GALLERY_DATA: GalleryTemplate[] = [
       Summary: 'Proposal to deprecate local passwords in favor of Google OAuth single sign-on.',
       Motivation: 'Eliminate password reset support tickets and reduce authentication friction.',
       Proposal: 'Integrate Google Sign-In SDK across web and mobile client applications.',
-      Alternatives: 'Not documented',
+      Alternatives: 'Not specified in transcript',
       Risks: 'Impact on users without active Google accounts.',
       Rollout: 'Targeted rollout schedule over the next 2 weeks.',
-      'Open Questions': 'Not documented',
+      'Open Questions': 'Not specified in transcript',
     },
   },
   {
@@ -74,12 +74,12 @@ export const TEMPLATE_GALLERY_DATA: GalleryTemplate[] = [
     structuredOutput: {
       To: 'All Staff',
       From: 'Ops',
-      Date: 'Not documented',
+      Date: 'Not specified in transcript',
       Subject: 'Office Closure for Scheduled Maintenance',
       Purpose: 'Notify employees regarding physical facility maintenance.',
       Background: 'Scheduled facility maintenance operations on Friday.',
       Recommendation: 'All personnel to work remotely from home on Friday.',
-      'Next Steps': 'Not documented',
+      'Next Steps': 'Not specified in transcript',
     },
   },
   {
@@ -182,7 +182,7 @@ export const TEMPLATE_GALLERY_DATA: GalleryTemplate[] = [
       Scope: 'Electronic Medical Record system databases.',
       Responsibilities: 'System Administrator',
       'Step-by-Step Procedure': '1. Execute backup script nightly at 23:00.\n2. Verify backup file checksum.\n3. Log successful completion in operational ledger.',
-      'Quality Checks': 'Not documented',
+      'Quality Checks': 'Not specified in transcript',
     },
   },
 ];
@@ -349,7 +349,15 @@ export const TemplateGalleryView: React.FC<TemplateGalleryViewProps> = ({
                       <span className="text-[10px] font-bold text-[#4e8cff] uppercase block mb-0.5">
                         {k}
                       </span>
-                      <span className="text-[#e3e3e3] leading-relaxed">{v}</span>
+                      <span
+                        className={
+                          v.trim().toLowerCase() === 'not specified in transcript'
+                            ? 'text-[#80868b] italic leading-relaxed'
+                            : 'text-[#e3e3e3] leading-relaxed'
+                        }
+                      >
+                        {v}
+                      </span>
                     </div>
                   ))}
                 </div>

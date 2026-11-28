@@ -133,66 +133,115 @@ async function ensureUserDocument(user: FirebaseUser, customName?: string) {
 }
 
 // -------------------------------------------------------------
-// Settings: Feature Switches (Image & Video Generation)
+// Settings: Feature Switches & Per-User Gemini AI Gating (Task 2.5)
 // -------------------------------------------------------------
+export function isGeminiEnabledForUser(
+  settings: FeatureSettingsDoc | null | undefined,
+  userEmail?: string | null
+): boolean {
+  if (!settings) return true;
+  const normalizedEmail = (userEmail || '').toLowerCase().trim();
+  const denied = (settings.geminiDisabledEmails || []).map((e) => e.toLowerCase().trim()).filter(Boolean);
+  const allowed = (settings.geminiAllowedEmails || []).map((e) => e.toLowerCase().trim()).filter(Boolean);
+
+  if (normalizedEmail && denied.includes(normalizedEmail)) {
+    return false;
+  }
+  if (normalizedEmail && allowed.includes(normalizedEmail)) {
+    return true;
+  }
+  return settings.geminiEnabledDefault !== false;
+}
+
+const DEFAULT_FEATURE_SETTINGS: FeatureSettingsDoc = {
+  imageGenerationEnabled: false,
+  videoGenerationEnabled: false,
+  geminiEnabledDefault: true,
+  geminiAllowedEmails: [],
+  geminiDisabledEmails: [],
+  updatedBy: 'system',
+  updatedAt: new Date().toISOString(),
+};
+
+function normalizeFeatureSettings(data: Partial<FeatureSettingsDoc> | undefined): FeatureSettingsDoc {
+  return {
+    imageGenerationEnabled: Boolean(data?.imageGenerationEnabled),
+    videoGenerationEnabled: Boolean(data?.videoGenerationEnabled),
+    geminiEnabledDefault:
+      typeof data?.geminiEnabledDefault === 'boolean' ? data.geminiEnabledDefault : true,
+    geminiAllowedEmails: Array.isArray(data?.geminiAllowedEmails)
+      ? data.geminiAllowedEmails.map((e) => String(e).toLowerCase().trim()).filter(Boolean)
+      : [],
+    geminiDisabledEmails: Array.isArray(data?.geminiDisabledEmails)
+      ? data.geminiDisabledEmails.map((e) => String(e).toLowerCase().trim()).filter(Boolean)
+      : [],
+    updatedBy: data?.updatedBy || 'system',
+    updatedAt: data?.updatedAt || new Date().toISOString(),
+  };
+}
+
 export function subscribeToFeatureSettings(
   callback: (settings: FeatureSettingsDoc) => void
 ): () => void {
   const settingsRef = doc(db, 'settings', 'features');
+
+  // Always hydrate from server endpoint for guests or while Firestore connects
+  let cancelled = false;
+  fetch('/api/admin/features')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((payload) => {
+      if (!cancelled && payload?.features) {
+        callback(normalizeFeatureSettings(payload.features));
+      }
+    })
+    .catch(() => {});
+
   // Firestore rules allow reading /settings only when authenticated. Skip the
-  // listener entirely for signed-out visitors to avoid permission errors.
+  // Firestore listener for signed-out visitors to avoid permission errors.
   if (!auth.currentUser) {
-    callback({
-      imageGenerationEnabled: false,
-      videoGenerationEnabled: false,
-      updatedBy: 'system',
-      updatedAt: new Date().toISOString(),
-    });
-    return () => {};
+    callback(DEFAULT_FEATURE_SETTINGS);
+    return () => {
+      cancelled = true;
+    };
   }
-  return onSnapshot(
+  const unsub = onSnapshot(
     settingsRef,
     (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data() as FeatureSettingsDoc;
-        callback({
-          imageGenerationEnabled: Boolean(data.imageGenerationEnabled),
-          videoGenerationEnabled: Boolean(data.videoGenerationEnabled),
-          updatedBy: data.updatedBy || 'system',
-          updatedAt: data.updatedAt || new Date().toISOString(),
-        });
+        callback(normalizeFeatureSettings(docSnap.data() as Partial<FeatureSettingsDoc>));
       } else {
-        // Default both to false as required
-        callback({
-          imageGenerationEnabled: false,
-          videoGenerationEnabled: false,
-          updatedBy: 'system',
-          updatedAt: new Date().toISOString(),
-        });
+        callback(DEFAULT_FEATURE_SETTINGS);
       }
     },
     (err) => {
       console.warn('Feature settings listener warning:', err);
-      // Fallback safe default
-      callback({
-        imageGenerationEnabled: false,
-        videoGenerationEnabled: false,
-        updatedBy: 'system',
-        updatedAt: new Date().toISOString(),
-      });
+      callback(DEFAULT_FEATURE_SETTINGS);
     }
   );
+  return () => {
+    cancelled = true;
+    unsub();
+  };
 }
 
 export async function updateFeatureSettings(
-  imageGenerationEnabled: boolean,
-  videoGenerationEnabled: boolean,
+  nextSettings: Partial<FeatureSettingsDoc>,
   adminEmail: string
 ) {
   const settingsRef = doc(db, 'settings', 'features');
   const payload: FeatureSettingsDoc = {
-    imageGenerationEnabled,
-    videoGenerationEnabled,
+    imageGenerationEnabled: Boolean(nextSettings.imageGenerationEnabled),
+    videoGenerationEnabled: Boolean(nextSettings.videoGenerationEnabled),
+    geminiEnabledDefault:
+      typeof nextSettings.geminiEnabledDefault === 'boolean'
+        ? nextSettings.geminiEnabledDefault
+        : true,
+    geminiAllowedEmails: Array.isArray(nextSettings.geminiAllowedEmails)
+      ? Array.from(new Set(nextSettings.geminiAllowedEmails.map((e) => e.toLowerCase().trim()).filter(Boolean)))
+      : [],
+    geminiDisabledEmails: Array.isArray(nextSettings.geminiDisabledEmails)
+      ? Array.from(new Set(nextSettings.geminiDisabledEmails.map((e) => e.toLowerCase().trim()).filter(Boolean)))
+      : [],
     updatedBy: adminEmail,
     updatedAt: new Date().toISOString(),
   };
@@ -200,19 +249,36 @@ export async function updateFeatureSettings(
   // 1. Write to Firestore directly
   await setDoc(settingsRef, payload, { merge: true });
 
-  // 2. Also notify server-side route
+  // 2. Sync to server-side route for backend enforcement safety net
   try {
     const token = await auth.currentUser?.getIdToken();
     await fetch('/api/admin/features', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: token ? `Bearer ${token}` : '',
       },
       body: JSON.stringify(payload),
     });
   } catch (e) {
     console.warn('Server features sync warning:', e);
+  }
+}
+
+export async function recordReferralInFirestore(userId: string, referredByCode: string) {
+  if (!userId || !referredByCode) return;
+  try {
+    const userRef = doc(db, 'users', userId);
+    await setDoc(
+      userRef,
+      {
+        referredBy: referredByCode.toUpperCase().trim(),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn('Referral Firestore sync notice:', e);
   }
 }
 
@@ -240,6 +306,8 @@ export function subscribeToUserProfile(
           teamId: d.teamId,
           referralCode: d.referralCode || uid.slice(0, 8).toUpperCase(),
           referredBy: d.referredBy,
+          bonusNotes: typeof d.bonusNotes === 'number' ? d.bonusNotes : 0,
+          referralsCount: typeof d.referralsCount === 'number' ? d.referralsCount : 0,
         });
       }
     },

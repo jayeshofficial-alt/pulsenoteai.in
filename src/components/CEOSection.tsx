@@ -34,59 +34,59 @@ export const CEO_PROFILE = {
   upiHandle: 'Razorpay Gateway',
   initials: 'JW',
   
-  tagline: 'Full-stack AI architect and engineer pioneering deterministic clinical synthesis and multimodal workflow engines.',
+  tagline: 'Full-stack AI architect and engineer building deterministic clinical and enterprise documentation engines.',
 
-  quote: 
+  quote:
     'Clinicians and technical leaders should never have to fight software just to record what happened in the room. When you replace administrative friction with deterministic intelligence, you don\'t just save hours—you restore human focus and empathy.',
 
-  shortBio: 
-    'Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, secure healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders. Built on Google Cloud. Do not enter patient-identifying information.',
+  shortBio:
+    'Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), a clinical and enterprise documentation platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, schema-validated healthcare documentation, and input-grounded verification workflows. Do not enter patient-identifying information.',
 
   longBio: [
-    'Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern generative AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.',
-    'Under Jayesh\'s leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from structured SOAP clinical dictation to software RFC generation and commercial property defect grading. Built on Google Cloud. Do not enter patient-identifying information.',
-    'An active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and video generation models like Veo, continuously pushing the boundaries of what assistive generative software can achieve.'
+    'Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining full-stack architecture and modern language model engineering, Jayesh founded PulseNote AI to help clinicians and technical teams cut down on repetitive charting and memo writing.',
+    'Under Jayesh\'s leadership, PulseNote AI built deterministic JSON documentation schemas covering SOAP notes, discharge summaries, specialist referrals, engineering RFCs, and executive decision memos—backed by a single-provider API architecture with automatic fallback model routing.',
+    'An active open-source builder (GitHub: @jayeshwagh), Jayesh focuses on reliable structured extraction, fact-checking generated sections against raw transcripts, and fast EHR-ready exports.'
   ],
 
   welcomeMessage: {
     greeting: 'Dear Innovator, Physician, and Builder,',
     p1: 'Every great product begins with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical founders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters.',
-    p2: 'We didn\'t build PulseNote AI to be another conversational novelty that writes rambling paragraphs. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly. Built on Google Cloud. Do not enter patient-identifying information.',
-    p3: 'Whether you\'re charting your 30th patient encounter of the day or documenting a pivotal architecture decision, PulseNote AI is engineered to give you your time and presence back. Thank you for trusting our platform. Let\'s build a future where software serves you, not the other way around.',
+    p2: 'We didn\'t build PulseNote AI to be another conversational novelty that writes rambling paragraphs. We built it as a deterministic documentation engine—one that turns raw encounter transcripts and technical notes into structured, fact-checked records in seconds.',
+    p3: 'Whether you\'re charting your 30th patient encounter of the day or documenting a pivotal architecture decision, PulseNote AI is engineered to give you your time and presence back. Thank you for trusting our platform.',
     signature: 'Jayesh Wagh\nFounder & CEO, PulseNote AI'
   },
 
-  headshotPrompt: 
-    'Editorial executive studio headshot of Jayesh Wagh, Founder and CEO of PulseNote AI. Confident, charismatic, and visionary Indian tech entrepreneur in his early 30s. Warm, intelligent, focused direct eye contact with the camera, subtle natural smile. Wearing a tailored midnight-navy blazer over a minimal dark charcoal crewneck. Modern high-tech executive office backdrop with soft bokeh, subtle slate-gray ambient lighting and subtle cyan (#4e8cff) and crimson (#ff5757) rim light accents reflecting the brand tones. Shot on Hasselblad H6D-100c with 85mm f/1.4 lens, natural cinematic rim lighting, ultra-sharp skin textures, magazine cover editorial photography for Forbes 30 Under 30 or Bloomberg Businessweek, photorealistic 8k resolution, perfectly color-graded --ar 1:1 --v 6.0',
+  headshotPrompt:
+    'Editorial executive studio headshot of Jayesh Wagh, Founder and CEO of PulseNote AI. Wearing a tailored midnight-navy blazer over a dark charcoal crewneck in a modern office with soft ambient lighting.',
 
   fastFacts: [
     { label: 'Executive', value: 'Jayesh Wagh', highlight: false },
     { label: 'Role', value: 'Founder & CEO', highlight: true, color: 'text-[#4e8cff]' },
     { label: 'GitHub', value: '@jayeshwagh', link: 'https://github.com/jayeshwagh', highlight: true, color: 'text-[#ff5757]' },
     { label: 'Official Domain', value: 'pulsenoteai.in', link: 'https://pulsenoteai.in', highlight: false },
-    { label: 'Core Architecture', value: 'Dual-Rail Gemini + OpenRouter', highlight: false },
-    { label: 'Compliance Standard', value: 'Built on Google Cloud. Do not enter patient-identifying information.', highlight: true, color: 'text-[#10b981]' },
-    { label: 'Industry Modes', value: '5 Domain Lenses (Clinical, Exec, Dev, RE, Multimodal)', highlight: false },
+    { label: 'Core Architecture', value: 'Single-provider with fallback model', highlight: false },
+    { label: 'Data Practice', value: 'Do not enter patient-identifying information.', highlight: true, color: 'text-[#10b981]' },
+    { label: 'Core Templates', value: 'SOAP, Discharge Summary, Referral, RFC, Memo', highlight: false },
     { label: 'Direct Press Desk', value: 'contact@pulsenoteai.in', link: 'mailto:contact@pulsenoteai.in', highlight: false }
   ],
 
   pillars: [
     {
       icon: ShieldCheck,
-      title: 'Built on Google Cloud',
-      description: 'Built on Google Cloud. Do not enter patient-identifying information.',
+      title: 'Fact-Checking Against Input',
+      description: 'Flags unverified numbers or terms not present in your source transcript and marks missing fields cleanly.',
       accent: '#10b981'
     },
     {
       icon: Cpu,
-      title: 'Deterministic Schemas',
-      description: 'Structured JSON output with ICD-10 codings, eliminating hallucinated text.',
+      title: 'Deterministic Clinical Schemas',
+      description: 'Fixed JSON section ordering for SOAP notes, discharge summaries, referrals, memos, and RFCs.',
       accent: '#4e8cff'
     },
     {
       icon: Layers,
-      title: 'Dual-Rail Resilience',
-      description: 'Google Gemini 2.5 Pro primary engine with high-throughput OpenRouter failover.',
+      title: 'Single-Provider with Fallback Model',
+      description: 'Streamlined OpenRouter gateway with automatic fallback model routing for reliable note generation.',
       accent: '#ff5757'
     }
   ]
@@ -499,9 +499,8 @@ export const CEOSection: React.FC<{ className?: string }> = ({ className = '' })
                     </div>
 
                     <div className="p-3.5 rounded-xl bg-[#1e1f20] border border-[#3c4043]/40 text-[11px] text-[#9aa0a6] space-y-1">
-                      <div className="font-semibold text-white">Generation Parameters:</div>
-                      <div>• Compatible with: Midjourney v6, FLUX.1 Pro, DALL-E 3, and Google Imagen 3</div>
-                      <div>• Recommended aspect ratio: 1:1 (Profile Avatar) or 3:4 (Executive Editorial)</div>
+                      <div className="font-semibold text-white">Usage Notes:</div>
+                      <div>• Recommended aspect ratio: 1:1 (Profile Avatar) or 3:4 (Editorial Bio)</div>
                     </div>
                   </div>
                 )}

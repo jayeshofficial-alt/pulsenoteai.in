@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "start": "node server.js",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --test tests/core.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -1,5 +1,6 @@
 import React from 'react';
-import { X, Shield, FileText, Star, Calendar, Mail, ExternalLink, Lock } from 'lucide-react';
+import { X, Shield, FileText, Star, Calendar, ExternalLink } from 'lucide-react';
+import { TESTIMONIALS, hasRealTestimonials } from '../data/testimonials';
 
 export const DEMO_BOOKING_URL = 'https://calendar.google.com/calendar/appointments/schedules/pulsenoteai-demo';
 
@@ -40,34 +41,34 @@ export function LegalTrustModal({ type, onClose }: LegalTrustModalProps) {
         {type === 'privacy' && (
           <div className="space-y-4 text-xs text-[#c4c7c5] leading-relaxed">
             <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-200">
-              <strong>Core Privacy Notice:</strong> Built on Google Cloud. Do not enter patient-identifying information.
+              <strong>Core Privacy Notice:</strong> Do not enter direct patient-identifying information into transcripts or prompts.
             </div>
 
             <section className="space-y-1">
               <h3 className="font-semibold text-white text-sm">1. What Data Is Stored</h3>
               <p>
-                PulseNote AI stores your registered account email, subscription status, note counts, and saved documentation records in your private account workspace.
+                PulseNote AI stores your registered account email, subscription status, monthly note counts, referral code, and saved documentation records in your private account workspace.
               </p>
             </section>
 
             <section className="space-y-1">
               <h3 className="font-semibold text-white text-sm">2. Where Data Is Stored & Processed</h3>
               <p>
-                All account data, Firestore records, and secure rules are hosted on <strong>Google Cloud Platform & Firebase</strong> data centers.
+                Account authentication and saved workspace records are stored using <strong>Firebase Authentication & Cloud Firestore</strong> with per-user access controls.
               </p>
             </section>
 
             <section className="space-y-1">
               <h3 className="font-semibold text-white text-sm">3. Payment Processing by Razorpay</h3>
               <p>
-                Subscription billing and credit orders are processed directly through <strong>Razorpay</strong>. PulseNote AI never sees or stores full credit card numbers or banking passwords.
+                Subscription billing and custom template setup orders are processed directly through <strong>Razorpay</strong>. PulseNote AI never sees or stores full credit card numbers or banking passwords.
               </p>
             </section>
 
             <section className="space-y-1">
-              <h3 className="font-semibold text-white text-sm">4. AI Processing by Google Gemini</h3>
+              <h3 className="font-semibold text-white text-sm">4. AI Document Processing</h3>
               <p>
-                Deterministic note extraction is executed by Google Gemini models via the official Google GenAI API. Prompts are processed strictly to populate requested document schemas.
+                Structured clinical and enterprise note extraction is processed through our <strong>OpenRouter</strong> single-provider API gateway with a configured fallback model. Transcripts are processed strictly to populate requested document schemas and verify facts against input.
               </p>
             </section>
 
@@ -108,9 +109,9 @@ export function LegalTrustModal({ type, onClose }: LegalTrustModalProps) {
             </section>
 
             <section className="space-y-1">
-              <h3 className="font-semibold text-white text-sm">3. Plans & Credits</h3>
+              <h3 className="font-semibold text-white text-sm">3. Plans & Usage Limits</h3>
               <p>
-                Free users receive 5 notes per month. Pro and Team subscriptions provide unlimited notes and monthly credit allowances for multimedia features. Credit packs are non-refundable once consumed.
+                Free users receive 5 structured notes per month with a PulseNote AI footer on exported files, plus bonus notes earned through colleague referrals. Pro and Clinic / Team subscriptions unlock unlimited notes, clean unwatermarked exports, custom templates, and ICD-10-CM code suggestions.
               </p>
             </section>
 
@@ -126,50 +127,31 @@ export function LegalTrustModal({ type, onClose }: LegalTrustModalProps) {
 
         {type === 'testimonials' && (
           <div className="space-y-4 text-xs">
-            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-200">
-              <strong>Notice:</strong> The testimonials below are sample reviews clearly marked for demonstration until replaced by verified enterprise case studies.
-            </div>
-
-            <div className="space-y-3">
-              <div className="p-4 rounded-xl bg-[#131314] border border-[#2d2e30] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-xs">Dr. A. Sharma, Cardiologist</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                    SAMPLE REVIEW
-                  </span>
-                </div>
-                <p className="text-[#9aa0a6] italic">
-                  "PulseNote AI cut my charting time in half while keeping every SOAP fact 100% accurate. The deterministic schema eliminates hallucinations."
-                </p>
-                <span className="text-[10px] text-slate-500 block">Apollo Specialty Clinic Network</span>
+            {hasRealTestimonials() ? (
+              <div className="space-y-3">
+                {TESTIMONIALS.map((item) => (
+                  <div key={item.id} className="p-4 rounded-xl bg-[#131314] border border-[#2d2e30] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs">{item.authorName}</span>
+                      <span className="text-[10px] text-[#9aa0a6]">{item.authorRole}</span>
+                    </div>
+                    <p className="text-[#c4c7c5] italic">"{item.quote}"</p>
+                    <span className="text-[10px] text-slate-500 block">{item.organization}</span>
+                  </div>
+                ))}
               </div>
-
-              <div className="p-4 rounded-xl bg-[#131314] border border-[#2d2e30] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-xs">R. Patel, Lead Systems Architect</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                    SAMPLE REVIEW
-                  </span>
-                </div>
-                <p className="text-[#9aa0a6] italic">
-                  "The RFC formatting is crisp, deterministic, and board-ready. No AI fluff—just pure motivation, risks, and timeline extraction."
+            ) : (
+              <div className="p-4 rounded-xl bg-[#131314] border border-[#2d2e30] text-[#9aa0a6] space-y-2">
+                <p className="text-white font-semibold">Verified Beta Customer Reviews</p>
+                <p>
+                  We publish only verified feedback from practicing clinicians and enterprise teams. Contact{' '}
+                  <a href="mailto:contact@pulsenoteai.in" className="text-[#4e8cff] underline font-mono">
+                    contact@pulsenoteai.in
+                  </a>{' '}
+                  to join our beta review program or request a live clinical walkthrough.
                 </p>
-                <span className="text-[10px] text-slate-500 block">Fintech Infrastructure Group</span>
               </div>
-
-              <div className="p-4 rounded-xl bg-[#131314] border border-[#2d2e30] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-xs">S. Desai, Senior Property Inspector</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                    SAMPLE REVIEW
-                  </span>
-                </div>
-                <p className="text-[#9aa0a6] italic">
-                  "Commercial inspection registers generate on-site from raw voice dictation effortlessly. The structured findings save our team 15 hours every week."
-                </p>
-                <span className="text-[10px] text-slate-500 block">Metro Commercial Inspections</span>
-              </div>
-            </div>
+            )}
           </div>
         )}
 

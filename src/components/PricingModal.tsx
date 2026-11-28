@@ -404,7 +404,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
               </h2>
             </div>
             <p className="text-xs text-[#9aa0a6] mt-1">
-              Deterministic documentation and multimodal intelligence built on Google Cloud.
+              Competitors charge $100–300/clinician/month. PulseNote starts free.
             </p>
           </div>
           <button
@@ -506,9 +506,9 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                     <Check size={14} className="text-[#4e8cff] shrink-0" />
                     <span>All 5 standard domain lenses</span>
                   </li>
-                  <li className="flex items-center gap-2 text-[#70757a]">
-                    <Lock size={13} className="shrink-0" />
-                    <span>No exports (PDF/Word locked)</span>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-[#4e8cff] shrink-0" />
+                    <span>PDF & Word exports (with watermark)</span>
                   </li>
                 </ul>
               </div>
@@ -576,11 +576,15 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   </li>
                   <li className="flex items-center gap-2">
                     <Check size={14} className="text-emerald-400 shrink-0" />
-                    <span>PDF & Word (.docx) export</span>
+                    <span>Clean PDF & Word (.docx) export (no watermark)</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <Check size={14} className="text-emerald-400 shrink-0" />
-                    <span>Copy as FHIR / HL7-ready text</span>
+                    <span>ICD-10-CM code suggestions for SOAP notes</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span>Copy as FHIR / HL7-ready JSON</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <Check size={14} className="text-emerald-400 shrink-0" />
@@ -753,7 +757,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         <div className="pt-3 border-t border-[#2d2e30] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#9aa0a6]">
           <div className="flex items-center gap-2">
             <ShieldCheck size={16} className="text-emerald-400" />
-            <span>Secure Razorpay Checkout • Built on Google Cloud</span>
+            <span>Secure Razorpay Checkout • Cancel Anytime</span>
           </div>
           <div className="flex items-center gap-4 text-[11px]">
             <span>Do not enter patient-identifying information.</span>

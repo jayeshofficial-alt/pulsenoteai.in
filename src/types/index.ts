@@ -513,6 +513,10 @@ export interface FlowProject {
 export interface FeatureSettingsDoc {
   imageGenerationEnabled: boolean;
   videoGenerationEnabled: boolean;
+  /** Per-user Gemini AI feature gating (Task 2.5) */
+  geminiEnabledDefault?: boolean;
+  geminiAllowedEmails?: string[];
+  geminiDisabledEmails?: string[];
   updatedBy: string;
   updatedAt: string;
 }
@@ -527,6 +531,15 @@ export interface UserFirestoreData {
   teamId?: string;
   referralCode?: string;
   referredBy?: string;
+  bonusNotes?: number;
+  referralsCount?: number;
+}
+
+export interface Icd10Suggestion {
+  code: string;
+  description: string;
+  rationale: string;
+  specificityNote?: string;
 }
 
 export type TeamMemberRole = 'owner' | 'doctor' | 'viewer';

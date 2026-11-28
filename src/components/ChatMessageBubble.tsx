@@ -1,26 +1,21 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { 
-  Sparkles, 
-  Copy, 
-  Check, 
-  Download, 
-  Play, 
-  Film, 
-  Image as ImageIcon, 
-  Code, 
-  RotateCcw, 
-  Maximize2, 
+import {
+  Sparkles,
+  Copy,
+  Check,
+  RotateCcw,
   AlertCircle,
   Loader2,
-  ExternalLink,
   Lock,
   FileDown,
   FileText,
   FileCode,
-  RefreshCw
+  Stethoscope,
 } from 'lucide-react';
 import { exportNoteToPdf, exportNoteToDocx, generateFhirHl7ReadyJson, NoteExportSection } from '../lib/exportUtils';
+import type { Icd10Suggestion } from '../types';
+import { auth } from '../lib/firebase';
 
 export interface ChatMessage {
   id: string;
@@ -37,7 +32,7 @@ export interface ChatMessage {
     title?: string;
     aspectRatio?: string;
   };
-  imageResults?: any[];
+  imageResults?: unknown[];
   userAttachment?: {
     previewUrl?: string;
     name?: string;
@@ -54,16 +49,46 @@ interface ChatMessageBubbleProps {
   message: ChatMessage;
   isPaidPlan?: boolean;
   onOpenPricing?: () => void;
-  onAnimateImage?: (imageUrl: string, title: string) => void;
   onShowToast?: (type: 'success' | 'error' | 'info', message: string) => void;
   onRetry?: (message: ChatMessage) => void;
+}
+
+const NOT_SPECIFIED_REGEX = /(Not specified in transcript\.?|Not documented\.?)/gi;
+
+function renderMutedNotSpecified(children: React.ReactNode): React.ReactNode {
+  return React.Children.map(children, (child) => {
+    if (typeof child !== 'string') return child;
+    if (!NOT_SPECIFIED_REGEX.test(child)) return child;
+    NOT_SPECIFIED_REGEX.lastIndex = 0;
+    const parts = child.split(NOT_SPECIFIED_REGEX);
+    return parts.map((part, idx) => {
+      if (/^(Not specified in transcript\.?|Not documented\.?)$/i.test(part)) {
+        return (
+          <span key={idx} className="text-slate-400 italic">
+            Not specified in transcript
+          </span>
+        );
+      }
+      return part;
+    });
+  });
+}
+
+function isSoapNoteMessage(message: ChatMessage): boolean {
+  if (message.structuredNote) {
+    const keys = Object.keys(message.structuredNote).map((k) => k.toLowerCase());
+    if (keys.includes('subjective') && keys.includes('assessment')) {
+      return true;
+    }
+  }
+  const text = message.content || '';
+  return /\bSUBJECTIVE\b/i.test(text) && /\bASSESSMENT\b/i.test(text) && /\bPLAN\b/i.test(text);
 }
 
 export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   message,
   isPaidPlan = false,
   onOpenPricing,
-  onAnimateImage,
   onShowToast,
   onRetry,
 }) => {
@@ -72,9 +97,11 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   const [copiedFhir, setCopiedFhir] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
-  const [showCode, setShowCode] = useState(false);
-  const [iframeKey, setIframeKey] = useState(0);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [icdLoading, setIcdLoading] = useState(false);
+  const [icdSuggestions, setIcdSuggestions] = useState<Icd10Suggestion[] | null>(null);
+  const [icdDisclaimer, setIcdDisclaimer] = useState<string | null>(null);
+
+  const showIcdButton = !isUser && !message.isStreaming && Boolean(message.content) && isSoapNoteMessage(message);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -83,42 +110,56 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownloadImage = (url: string, filename: string = 'gemini-image.png') => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    onShowToast?.('success', 'Image download started');
-  };
+  const handleSuggestIcd10 = async () => {
+    if (!isPaidPlan) {
+      onShowToast?.('info', 'ICD-10 code suggestions are included in Pro, Team, and Enterprise plans.');
+      onOpenPricing?.();
+      return;
+    }
 
-  const handleDownloadVideo = (url: string, filename: string = 'veo-video.mp4', blob?: Blob) => {
+    setIcdLoading(true);
     try {
-      const link = document.createElement('a');
-      if (blob) {
-        const blobUrl = URL.createObjectURL(blob);
-        link.href = blobUrl;
-        link.download = filename.replace(/\.mp4$/i, '.webm');
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-      } else {
-        link.href = url;
-        link.download = filename;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (auth?.currentUser?.email) headers['x-user-email'] = auth.currentUser.email;
+
+      const soapText = message.structuredNote
+        ? Object.entries(message.structuredNote)
+            .map(([k, v]) => `${k.toUpperCase()}: ${v}`)
+            .join('\n')
+        : message.content;
+
+      const res = await fetch('/api/notes/suggest-icd10', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          soapNote: message.structuredNote || undefined,
+          noteText: soapText,
+          userId: auth?.currentUser?.uid || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data?.error === 'UPGRADE_REQUIRED') {
+          onOpenPricing?.();
+        }
+        throw new Error(data?.message || 'Failed to suggest ICD-10 codes.');
       }
-      onShowToast?.('success', 'Video download started');
-    } catch {
-      onShowToast?.('error', 'Video download failed');
+
+      setIcdSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+      setIcdDisclaimer(
+        data.disclaimer || 'Coding suggestions only — verify against current ICD-10-CM guidelines before billing.'
+      );
+      onShowToast?.('success', `Generated ${data.suggestions?.length || 0} ICD-10-CM code suggestions.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to suggest ICD-10 codes.';
+      onShowToast?.('error', msg);
+    } finally {
+      setIcdLoading(false);
     }
   };
 
-  // User Message
   if (isUser) {
     return (
       <div className="flex justify-end w-full">
@@ -127,12 +168,9 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             <div className="relative rounded-xl overflow-hidden max-w-xs border border-[#3c4043] bg-black">
               <img
                 src={message.userAttachment.previewUrl}
-                alt={message.userAttachment.name || 'Uploaded visual'}
+                alt={message.userAttachment.name || 'Attached document'}
                 className="w-full max-h-48 object-cover rounded-lg"
               />
-              <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded text-[10px] bg-black/70 text-cyan-300 font-mono">
-                Image Understanding
-              </span>
             </div>
           )}
           <div className="whitespace-pre-wrap">{message.content}</div>
@@ -141,11 +179,10 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
     );
   }
 
-  // Model Assistant Message
   return (
     <div className="flex gap-4 w-full text-[15px] leading-relaxed group">
       {/* PulseNote AI Avatar */}
-      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#4e8cff] to-[#ff5757] flex items-center justify-center text-white shrink-0 shadow-md mt-1">
+      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#4e8cff] to-[#6366f1] flex items-center justify-center text-white shrink-0 shadow-md mt-1">
         <Sparkles size={16} />
       </div>
 
@@ -165,7 +202,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               <button
                 type="button"
                 onClick={() => onRetry(message)}
-                className="px-3 py-1 bg-red-800/50 hover:bg-red-700/60 text-white rounded-lg transition-colors shrink-0 font-medium text-xs flex items-center gap-1"
+                className="px-3 py-1 bg-red-800/50 hover:bg-red-700/60 text-white rounded-lg transition-colors shrink-0 font-medium text-xs flex items-center gap-1 cursor-pointer"
               >
                 <RotateCcw size={12} />
                 <span>Retry</span>
@@ -174,168 +211,85 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           </div>
         )}
 
-        {/* Video Generation Progress Indicator (Veo) */}
-        {message.mediaType === 'video' && message.isStreaming && (
-          <div className="p-4 bg-slate-900 border border-purple-800/40 rounded-2xl space-y-3 max-w-[640px]">
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2 text-purple-300 font-medium">
-                <Loader2 size={16} className="animate-spin text-purple-400" />
-                <span>{message.statusMessage || 'Veo is rendering your cinematic video...'}</span>
-              </div>
-              <span className="font-mono text-purple-400 font-semibold">
-                {message.progressPercent || 25}%
-              </span>
-            </div>
-            <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-purple-900/40">
-              <div 
-                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
-                style={{ width: `${message.progressPercent || 25}%` }}
-              />
-            </div>
-            <p className="text-[11px] text-slate-400">
-              Polling every 10 seconds via Google GenAI Veo operations pipeline.
-            </p>
-          </div>
-        )}
-
-        {/* Rendered Media: Generated Image (gemini-2.5-flash-image) */}
-        {message.mediaType === 'image' && message.mediaUrl && (
-          <div className="rounded-2xl overflow-hidden bg-black border border-[#3c4043] p-2 space-y-2 max-w-[640px]">
-            <div className="relative aspect-square sm:aspect-auto max-h-[500px] w-full rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center">
-              <img
-                src={message.mediaUrl}
-                alt={message.content || 'Generated Visual'}
-                className="w-full h-full object-contain max-h-[500px] rounded-lg"
-              />
-            </div>
-            <div className="flex items-center justify-between px-1 text-xs text-slate-400">
-              <span className="truncate font-mono text-[11px] text-amber-300">imagen-4.0-generate-001</span>
-              <button
-                type="button"
-                onClick={() => handleDownloadImage(message.mediaUrl!, 'imagen-generated-image.png')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition cursor-pointer"
-              >
-                <Download size={13} />
-                <span>Download PNG</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Rendered Media: Veo Video */}
-        {message.mediaType === 'video' && (message.videoParams?.videoUrl || message.mediaUrl) && (
-          <div className="rounded-2xl overflow-hidden bg-black border border-[#3c4043] p-2 space-y-2 max-w-[640px]">
-            <video
-              src={message.videoParams?.videoUrl || message.mediaUrl}
-              controls
-              autoPlay
-              loop
-              poster={message.videoParams?.previewPosterUrl}
-              className="w-full aspect-video rounded-xl object-contain bg-black"
-            />
-            <div className="flex items-center justify-between px-1 text-xs text-slate-400">
-              <span className="truncate font-mono text-[11px] text-purple-300">veo-3.0-generate-001</span>
-              <button
-                type="button"
-                onClick={() => handleDownloadVideo(message.videoParams?.videoUrl || message.mediaUrl!, 'veo-generated-video.mp4', message.videoBlob)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2d2e30] hover:bg-[#3c4043] text-white text-xs transition cursor-pointer"
-              >
-                <Download size={13} />
-                <span>Download MP4</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Rendered Media: Live Animation in Sandboxed Iframe */}
-        {message.mediaType === 'animation' && message.animationCode && (
-          <div className="rounded-2xl overflow-hidden bg-[#090a0f] border border-[#3c4043] p-3 space-y-3 max-w-[680px] shadow-xl">
-            <div className="flex items-center justify-between text-xs text-slate-400 px-1 border-b border-slate-800 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="font-semibold text-slate-200">Live Sandboxed Animation</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">
-                  60 FPS
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIframeKey((prev) => prev + 1)}
-                  className="p-1 hover:bg-[#2d2e30] text-slate-300 hover:text-white rounded-md transition"
-                  title="Replay animation"
-                >
-                  <RotateCcw size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCode(!showCode)}
-                  className="px-2.5 py-1 bg-[#2d2e30] hover:bg-[#3c4043] text-slate-200 text-xs rounded-md transition flex items-center gap-1"
-                >
-                  <Code size={13} />
-                  <span>{showCode ? 'View Preview' : 'View Code'}</span>
-                </button>
-              </div>
-            </div>
-
-            {showCode ? (
-              <pre className="p-3 bg-black/80 rounded-xl overflow-x-auto text-[11px] font-mono text-cyan-200 max-h-72 border border-slate-800">
-                <code>{message.animationCode}</code>
-              </pre>
-            ) : (
-              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-800">
-                <iframe
-                  key={iframeKey}
-                  ref={iframeRef}
-                  srcDoc={message.animationCode}
-                  sandbox="allow-scripts"
-                  title="Live Animation Preview"
-                  className="w-full h-full border-none"
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Error State with prominent Retry button (Never blank output) */}
-        {message.error && (
-          <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-start justify-between gap-3 text-red-200">
-            <div className="flex items-start gap-2.5">
-              <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-semibold text-red-300">Generation Notice</p>
-                <p className="text-xs text-red-200/90 mt-0.5">{message.error}</p>
-              </div>
-            </div>
-            {onRetry && (
-              <button
-                type="button"
-                onClick={() => onRetry(message)}
-                className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
-              >
-                <RefreshCw size={13} />
-                <span>Retry</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Text Content with Markdown */}
+        {/* Text Content with Markdown & Muted "Not specified in transcript" */}
         {message.content && (
           <div className="prose prose-invert max-w-none text-[#e3e3e3] prose-p:leading-relaxed prose-pre:bg-[#1e1f20] prose-pre:border prose-pre:border-[#3c4043] prose-pre:rounded-xl">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            <ReactMarkdown
+              components={{
+                p: ({ children }) => <p>{renderMutedNotSpecified(children)}</p>,
+                li: ({ children }) => <li>{renderMutedNotSpecified(children)}</li>,
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
           </div>
         )}
 
         {/* Streaming Cursor */}
-        {message.isStreaming && !message.mediaType && (
+        {message.isStreaming && (
           <span className="inline-block w-2 h-4 bg-[#4e8cff] animate-pulse ml-1 rounded-sm" />
         )}
 
-        {/* Message Actions & Paywalled Downloads (Section 5) */}
+        {/* ICD-10-CM Suggestions Panel (Pro+) */}
+        {icdSuggestions && (
+          <div className="rounded-2xl border border-emerald-500/30 bg-[#131720] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
+                <Stethoscope size={15} />
+                <span>Suggested ICD-10-CM Codes</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const summary = icdSuggestions
+                    .map((s) => `${s.code} — ${s.description} (${s.rationale})`)
+                    .join('\n');
+                  navigator.clipboard.writeText(summary);
+                  onShowToast?.('success', 'Copied ICD-10-CM code list.');
+                }}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-[#1e1f20] hover:bg-[#2d2e30] text-slate-200 border border-[#3c4043] cursor-pointer"
+              >
+                Copy Codes
+              </button>
+            </div>
+
+            {icdSuggestions.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">
+                No billable diagnoses explicitly documented in this SOAP note.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {icdSuggestions.map((item, idx) => (
+                  <div
+                    key={`${item.code}-${idx}`}
+                    className="rounded-xl bg-[#1b1f2a] border border-white/10 p-3 flex flex-col sm:flex-row sm:items-start justify-between gap-2"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          {item.code}
+                        </span>
+                        <span className="text-xs font-semibold text-white">{item.description}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300">{item.rationale}</p>
+                      {item.specificityNote && (
+                        <p className="text-[11px] text-amber-300/90 italic">{item.specificityNote}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {icdDisclaimer && (
+              <p className="text-[11px] text-slate-400 italic">{icdDisclaimer}</p>
+            )}
+          </div>
+        )}
+
+        {/* Message Actions & Document Exports */}
         {!message.isStreaming && message.content && (
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#2d2e30]/60">
-            {/* Copy raw response button */}
             <button
               type="button"
               onClick={handleCopy}
@@ -346,74 +300,113 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               <span>{copied ? 'Copied' : 'Copy'}</span>
             </button>
 
-            {/* Export PDF Button (Pro/Team only) */}
+            {/* Suggest ICD-10 Codes (Pro+) */}
+            {showIcdButton && (
+              <button
+                type="button"
+                onClick={handleSuggestIcd10}
+                disabled={icdLoading}
+                className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
+                  isPaidPlan
+                    ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300'
+                    : 'bg-[#1e1f20] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
+                }`}
+                title={isPaidPlan ? 'Suggest ICD-10-CM codes from this SOAP note' : 'Upgrade to Pro to unlock ICD-10 code suggestions'}
+              >
+                {icdLoading ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : !isPaidPlan ? (
+                  <Lock size={12} className="text-amber-400" />
+                ) : (
+                  <Stethoscope size={13} />
+                )}
+                <span>{icdLoading ? 'Suggesting ICD-10...' : 'Suggest ICD-10 codes'}</span>
+                {!isPaidPlan && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                    Pro
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Export PDF (Free gets clickable pulsenoteai.in watermark; Pro/Team clean) */}
             <button
               type="button"
+              disabled={isExportingPdf}
               onClick={async () => {
-                if (!isPaidPlan) {
-                  onShowToast?.('info', 'PDF export is locked on the Free plan. Upgrade to Pro or Team to download.');
-                  onOpenPricing?.();
-                  return;
-                }
                 setIsExportingPdf(true);
                 try {
                   const sections = extractSectionsFromNote(message.content, message.structuredNote);
-                  exportNoteToPdf({ title: 'PulseNote Clinical & Enterprise Record', authorName: 'PulseNote AI' }, sections);
-                  onShowToast?.('success', 'PDF downloaded successfully.');
-                } catch (e: any) {
-                  onShowToast?.('error', e?.message || 'Failed to export PDF.');
+                  exportNoteToPdf(
+                    {
+                      title: 'PulseNote Clinical & Enterprise Record',
+                      authorName: 'PulseNote AI',
+                      isFreeTier: !isPaidPlan,
+                    },
+                    sections
+                  );
+                  onShowToast?.(
+                    'success',
+                    isPaidPlan
+                      ? 'Clean PDF downloaded successfully.'
+                      : 'PDF downloaded with Free tier watermark. Upgrade to Pro for watermark-free exports.'
+                  );
+                } catch (e: unknown) {
+                  const msg = e instanceof Error ? e.message : 'Failed to export PDF.';
+                  onShowToast?.('error', msg);
                 } finally {
                   setIsExportingPdf(false);
                 }
               }}
-              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
-                !isPaidPlan
-                  ? 'bg-[#1e1f20] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
-                  : 'bg-[#1e1f20] hover:bg-[#2d2e30] border-blue-500/30 text-blue-300 hover:text-white'
-              }`}
-              title={!isPaidPlan ? 'Upgrade to Pro to export PDF' : 'Download formatted PDF note'}
+              className="px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer bg-[#1e1f20] hover:bg-[#2d2e30] border-blue-500/30 text-blue-300 hover:text-white"
+              title={isPaidPlan ? 'Download clean formatted PDF' : 'Download PDF (includes Made with PulseNote AI watermark)'}
             >
-              {!isPaidPlan ? <Lock size={12} className="text-amber-400" /> : <FileDown size={13} className="text-blue-400" />}
-              <span>Export PDF</span>
+              <FileDown size={13} className="text-blue-400" />
+              <span>{isExportingPdf ? 'Exporting...' : 'Export PDF'}</span>
             </button>
 
-            {/* Export Word (.docx) Button (Pro/Team only) */}
+            {/* Export Word (.docx) (Free gets clickable pulsenoteai.in watermark; Pro/Team clean) */}
             <button
               type="button"
+              disabled={isExportingDocx}
               onClick={async () => {
-                if (!isPaidPlan) {
-                  onShowToast?.('info', 'Word (.docx) export is locked on the Free plan. Upgrade to Pro or Team to download.');
-                  onOpenPricing?.();
-                  return;
-                }
                 setIsExportingDocx(true);
                 try {
                   const sections = extractSectionsFromNote(message.content, message.structuredNote);
-                  await exportNoteToDocx({ title: 'PulseNote Clinical & Enterprise Record', authorName: 'PulseNote AI' }, sections);
-                  onShowToast?.('success', 'Word (.docx) file downloaded successfully.');
-                } catch (e: any) {
-                  onShowToast?.('error', e?.message || 'Failed to export Word file.');
+                  await exportNoteToDocx(
+                    {
+                      title: 'PulseNote Clinical & Enterprise Record',
+                      authorName: 'PulseNote AI',
+                      isFreeTier: !isPaidPlan,
+                    },
+                    sections
+                  );
+                  onShowToast?.(
+                    'success',
+                    isPaidPlan
+                      ? 'Clean Word (.docx) file downloaded.'
+                      : 'Word (.docx) downloaded with Free tier watermark. Upgrade to Pro for watermark-free exports.'
+                  );
+                } catch (e: unknown) {
+                  const msg = e instanceof Error ? e.message : 'Failed to export Word file.';
+                  onShowToast?.('error', msg);
                 } finally {
                   setIsExportingDocx(false);
                 }
               }}
-              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
-                !isPaidPlan
-                  ? 'bg-[#1e1f20] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
-                  : 'bg-[#1e1f20] hover:bg-[#2d2e30] border-indigo-500/30 text-indigo-300 hover:text-white'
-              }`}
-              title={!isPaidPlan ? 'Upgrade to Pro to export Word (.docx)' : 'Download formatted Word (.docx) note'}
+              className="px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer bg-[#1e1f20] hover:bg-[#2d2e30] border-indigo-500/30 text-indigo-300 hover:text-white"
+              title={isPaidPlan ? 'Download clean Word (.docx)' : 'Download Word (.docx) (includes Made with PulseNote AI watermark)'}
             >
-              {!isPaidPlan ? <Lock size={12} className="text-amber-400" /> : <FileText size={13} className="text-indigo-400" />}
-              <span>Export Word (.docx)</span>
+              <FileText size={13} className="text-indigo-400" />
+              <span>{isExportingDocx ? 'Exporting...' : 'Export Word (.docx)'}</span>
             </button>
 
-            {/* Copy as FHIR / HL7-ready text (Pro/Team only) */}
+            {/* Copy as FHIR / HL7-ready JSON (Pro/Team only) */}
             <button
               type="button"
               onClick={() => {
                 if (!isPaidPlan) {
-                  onShowToast?.('info', 'FHIR / HL7 text export is locked on the Free plan. Upgrade to Pro or Team to unlock.');
+                  onShowToast?.('info', 'FHIR / HL7 JSON export is available on Pro & Team plans.');
                   onOpenPricing?.();
                   return;
                 }
@@ -440,7 +433,6 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
         {/* Clinical / Legal Disclaimer Line */}
         {!message.isStreaming && message.content && message.role === 'model' && (
           <div className="mt-2 text-[11px] text-[#9aa0a6] flex items-center gap-1.5 italic border-t border-[#2d2e30]/40 pt-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
             <span>AI-assisted draft. A licensed professional must review before use.</span>
           </div>
         )}
@@ -449,7 +441,6 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   );
 };
 
-// Helper to convert structured note or markdown text into NoteExportSections
 function extractSectionsFromNote(
   content: string,
   structuredNote?: Record<string, string>
@@ -457,11 +448,10 @@ function extractSectionsFromNote(
   if (structuredNote && Object.keys(structuredNote).length > 0) {
     return Object.entries(structuredNote).map(([key, val]) => ({
       title: key.toUpperCase(),
-      content: val || 'Not documented',
+      content: val || 'Not specified in transcript',
     }));
   }
 
-  // Try parsing JSON if content itself is JSON
   try {
     const parsed = JSON.parse(content);
     if (parsed && typeof parsed === 'object') {
@@ -470,9 +460,10 @@ function extractSectionsFromNote(
         content: typeof val === 'string' ? val : JSON.stringify(val),
       }));
     }
-  } catch {}
+  } catch {
+    // Fallback to markdown parsing
+  }
 
-  // Parse markdown headings
   const lines = content.split('\n');
   const sections: NoteExportSection[] = [];
   let currentTitle = 'Clinical / Enterprise Synthesis';

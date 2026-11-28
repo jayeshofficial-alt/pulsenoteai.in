@@ -3,7 +3,7 @@ import express from "express";
 import fs3 from "fs";
 import dotenv from "dotenv";
 import path3 from "path";
-import crypto2 from "crypto";
+import crypto3 from "crypto";
 import Razorpay from "razorpay";
 import { fileURLToPath } from "url";
 
@@ -2998,6 +2998,102 @@ function formatDictionaryInstruction(customDictionary) {
 [Custom Terminology / Spelling Dictionary]: Preserve exact spelling and capitalization for these terms when referenced: ${terms.slice(0, 60).join(", ")}.`;
 }
 
+// server/coreGuards.ts
+import crypto2 from "crypto";
+var NOT_SPECIFIED_PHRASE = "Not specified in transcript";
+var FREE_MONTHLY_NOTE_LIMIT = 5;
+var REFERRAL_BONUS_NOTES = 5;
+function checkFreeTierNoteLimit(input) {
+  if (input.isAdmin || input.plan === "pro" || input.plan === "team") {
+    return {
+      allowed: true,
+      status: 200,
+      limit: Number.POSITIVE_INFINITY,
+      used: input.notesUsedThisMonth,
+      remaining: Number.POSITIVE_INFINITY
+    };
+  }
+  const bonus = Math.max(0, Number(input.bonusNotes || 0));
+  const limit = input.isGuest ? FREE_MONTHLY_NOTE_LIMIT : FREE_MONTHLY_NOTE_LIMIT + bonus;
+  const effectiveUsed = input.isGuest ? Math.max(input.notesUsedThisMonth, input.guestIpNotesThisMonth || 0) : input.notesUsedThisMonth;
+  if (effectiveUsed >= limit) {
+    return {
+      allowed: false,
+      status: 403,
+      error: "NOTE_LIMIT_REACHED",
+      message: input.isGuest ? `Guest free limit reached (${FREE_MONTHLY_NOTE_LIMIT}/${FREE_MONTHLY_NOTE_LIMIT} notes this month). Sign in or upgrade to Pro for unlimited notes.` : `You have reached your ${limit} free notes limit for this month. Upgrade to Pro or refer a colleague for +${REFERRAL_BONUS_NOTES} extra notes.`,
+      limit,
+      used: effectiveUsed,
+      remaining: 0
+    };
+  }
+  return {
+    allowed: true,
+    status: 200,
+    limit,
+    used: effectiveUsed,
+    remaining: Math.max(0, limit - effectiveUsed)
+  };
+}
+function verifyRazorpayWebhookSignature(rawBody, signature, webhookSecret) {
+  if (!rawBody || !signature || !webhookSecret) {
+    return false;
+  }
+  const expected = crypto2.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+  const sigBuf = Buffer.from(signature.trim(), "utf8");
+  const expBuf = Buffer.from(expected, "utf8");
+  if (sigBuf.length !== expBuf.length) {
+    return false;
+  }
+  return crypto2.timingSafeEqual(sigBuf, expBuf);
+}
+function normalizeSectionValue(value) {
+  if (typeof value !== "string") return NOT_SPECIFIED_PHRASE;
+  const trimmed = value.trim();
+  if (!trimmed) return NOT_SPECIFIED_PHRASE;
+  if (/^not documented\.?$/i.test(trimmed)) {
+    return NOT_SPECIFIED_PHRASE;
+  }
+  return trimmed;
+}
+function normalizeStructuredSections(parsed, requiredKeys) {
+  const result = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    result[k] = normalizeSectionValue(v);
+  }
+  for (const key of requiredKeys) {
+    result[key] = normalizeSectionValue(parsed[key]);
+  }
+  return result;
+}
+function isGeminiFeatureEnabledForUser(settings, userEmail) {
+  if (!settings) return false;
+  const normalizedEmail = (userEmail || "").toLowerCase().trim();
+  const denied = (settings.geminiDisabledEmails || []).map((e) => e.toLowerCase().trim()).filter(Boolean);
+  const allowed = (settings.geminiAllowedEmails || []).map((e) => e.toLowerCase().trim()).filter(Boolean);
+  if (normalizedEmail && denied.includes(normalizedEmail)) {
+    return false;
+  }
+  if (normalizedEmail && allowed.includes(normalizedEmail)) {
+    return true;
+  }
+  return Boolean(settings.geminiEnabledDefault);
+}
+function extractClientIp(headers, fallbackIp) {
+  const xff = headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) {
+    return xff.split(",")[0].trim();
+  }
+  if (Array.isArray(xff) && xff[0]) {
+    return xff[0].split(",")[0].trim();
+  }
+  const realIp = headers["x-real-ip"];
+  if (typeof realIp === "string" && realIp.trim()) {
+    return realIp.trim();
+  }
+  return (fallbackIp || "unknown_ip").replace(/^::ffff:/, "");
+}
+
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path3.dirname(__filename);
@@ -3471,73 +3567,11 @@ app.post("/chat", async (req, res) => {
     return res.status(500).json({ type: "text", text: err?.message || "Failed to generate response. Please try again." });
   }
 });
-app.post("/generate_video", async (req, res) => {
-  try {
-    const { prompt, out_path = "output.mp4" } = req.body;
-    if (!prompt) {
-      return res.status(400).json({
-        status: "rejected",
-        message: "Please describe the scene in more detail."
-      });
-    }
-    const result = await generate_video(prompt, out_path);
-    return res.json(result);
-  } catch (err) {
-    return res.status(500).json({
-      status: "blocked",
-      message: "This prompt was blocked by the safety filter. Please try a different scene."
-    });
-  }
-});
-app.post("/api/generate-video", async (req, res) => {
-  try {
-    const { prompt, out_path } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-    const precheckErr = precheck_prompt(prompt);
-    if (precheckErr) {
-      return res.status(400).json({ error: precheckErr });
-    }
-    const videoOutFile = out_path || path3.join("/tmp", `video-${Date.now()}.mp4`);
-    const result = await generate_video(prompt, videoOutFile);
-    if (result.status === "blocked" || result.status === "rejected") {
-      return res.status(500).json({ error: result.message || "Video generation was blocked by the safety filter." });
-    }
-    if (req.query.format === "json") {
-      return res.json(result);
-    }
-    const resolvedPath = path3.resolve(process.cwd(), result.file || videoOutFile);
-    if (fs3.existsSync(resolvedPath) && fs3.statSync(resolvedPath).size > 0) {
-      res.setHeader("Content-Type", "video/mp4");
-      return res.download(resolvedPath);
-    }
-    const publicPath = path3.resolve(process.cwd(), "public", path3.basename(result.file || videoOutFile));
-    if (fs3.existsSync(publicPath) && fs3.statSync(publicPath).size > 0) {
-      res.setHeader("Content-Type", "video/mp4");
-      return res.download(publicPath);
-    }
-    if (result.videoUrl) {
-      if (result.videoUrl.startsWith("http")) {
-        const streamRes = await fetch(result.videoUrl);
-        if (streamRes.ok) {
-          res.setHeader("Content-Type", "video/mp4");
-          const arrayBuf = await streamRes.arrayBuffer();
-          return res.send(Buffer.from(arrayBuf));
-        }
-      } else {
-        const localStatic = path3.resolve(process.cwd(), result.videoUrl.replace(/^\//, "public/"));
-        if (fs3.existsSync(localStatic)) {
-          res.setHeader("Content-Type", "video/mp4");
-          return res.download(localStatic);
-        }
-      }
-    }
-    return res.status(500).json({ error: "No video returned" });
-  } catch (err) {
-    console.error("/api/generate-video error:", err);
-    return res.status(500).json({ error: err.message || "Video generation failed" });
-  }
+app.post(["/generate_video", "/api/generate-video"], (_req, res) => {
+  return res.status(410).json({
+    error: "FEATURE_RETIRED",
+    message: "Animation and video generation have been removed. PulseNote AI is focused on structured clinical and enterprise documentation."
+  });
 });
 app.post("/api/video/precheck", (req, res) => {
   const { prompt = "" } = req.body;
@@ -3617,7 +3651,7 @@ app.get("/openrouter", (_req, res) => {
   res.sendFile(path3.join(__dirname, "public", "openrouter.html"));
 });
 app.get(["/generate-video", "/video"], (_req, res) => {
-  res.sendFile(path3.join(__dirname, "public", "generate-video.html"));
+  return res.redirect(302, "/");
 });
 async function handleChatRequest(userPrompt, _customModel = "fast") {
   try {
@@ -3639,6 +3673,14 @@ async function handleChatRequest(userPrompt, _customModel = "fast") {
   }
 }
 app.post("/api/gemini/generate", async (req, res) => {
+  const user = await verifyServerFirebaseUser(req);
+  const callerEmail = user?.email || (typeof req.headers["x-user-email"] === "string" ? req.headers["x-user-email"] : void 0);
+  if (!isAuthorizedAdmin(user) && !isGeminiFeatureEnabledForUser(currentFeatureSettings, callerEmail)) {
+    return res.status(403).json({
+      error: "FEATURE_DISABLED",
+      message: "This feature is not enabled for your account."
+    });
+  }
   const { prompt, message, model = "fast" } = req.body;
   const userPrompt = prompt || message;
   if (!userPrompt) {
@@ -3750,6 +3792,9 @@ function checkUserAiAccess(email, feature) {
 var currentFeatureSettings = {
   imageGenerationEnabled: false,
   videoGenerationEnabled: false,
+  geminiEnabledDefault: true,
+  geminiAllowedEmails: [],
+  geminiDisabledEmails: [],
   updatedBy: "system",
   updatedAt: (/* @__PURE__ */ new Date()).toISOString()
 };
@@ -3870,17 +3915,27 @@ app.post("/api/admin/features", async (req, res) => {
       error: "Access denied. Only authorized admin emails (jayeshofficial@gmail.com, contact@pulsenoteai.in) with verified email may configure features."
     });
   }
-  const { imageGenerationEnabled, videoGenerationEnabled } = req.body;
+  const {
+    imageGenerationEnabled,
+    videoGenerationEnabled,
+    geminiEnabledDefault,
+    geminiAllowedEmails,
+    geminiDisabledEmails
+  } = req.body || {};
+  const normalizeEmailList = (list) => Array.isArray(list) ? Array.from(new Set(list.map((e) => String(e || "").toLowerCase().trim()).filter(Boolean))) : [];
   currentFeatureSettings = {
     imageGenerationEnabled: Boolean(imageGenerationEnabled),
     videoGenerationEnabled: Boolean(videoGenerationEnabled),
+    geminiEnabledDefault: typeof geminiEnabledDefault === "boolean" ? geminiEnabledDefault : currentFeatureSettings.geminiEnabledDefault,
+    geminiAllowedEmails: geminiAllowedEmails !== void 0 ? normalizeEmailList(geminiAllowedEmails) : currentFeatureSettings.geminiAllowedEmails,
+    geminiDisabledEmails: geminiDisabledEmails !== void 0 ? normalizeEmailList(geminiDisabledEmails) : currentFeatureSettings.geminiDisabledEmails,
     updatedBy: user?.email || "admin",
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
   store.logAdminAuditAction({
     adminEmail: user?.email || "admin@pulsenoteai.in",
     action: "TOGGLE_FEATURE_SWITCH",
-    details: `Updated feature switches: Image Generation=${Boolean(imageGenerationEnabled)}, Video Generation=${Boolean(videoGenerationEnabled)}`
+    details: `Updated feature switches: GeminiDefault=${currentFeatureSettings.geminiEnabledDefault}, Allowed=${currentFeatureSettings.geminiAllowedEmails.length}, Disabled=${currentFeatureSettings.geminiDisabledEmails.length}`
   });
   console.log("[Admin] Feature switch updated by", user?.email, currentFeatureSettings);
   return res.json({
@@ -4008,138 +4063,118 @@ app.delete("/api/admin/users/:id", (req, res) => {
   }
 });
 var userAccountState = {};
+var guestIpMonthlyUsage = {};
+var referralCodeIndex = {};
+function getCurrentMonthKey() {
+  const now = /* @__PURE__ */ new Date();
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function getGuestIpUsage(ip) {
+  const key = `${getCurrentMonthKey()}:${ip}`;
+  return guestIpMonthlyUsage[key] || 0;
+}
+function incrementGuestIpUsage(ip) {
+  const key = `${getCurrentMonthKey()}:${ip}`;
+  guestIpMonthlyUsage[key] = (guestIpMonthlyUsage[key] || 0) + 1;
+  return guestIpMonthlyUsage[key];
+}
+function buildReferralCode(uid) {
+  const hash = crypto3.createHash("sha256").update(`pulsenote_ref:${uid}`).digest("hex").slice(0, 8).toUpperCase();
+  return `PN${hash}`;
+}
 function getUserState(uid) {
   if (!userAccountState[uid]) {
+    const code = buildReferralCode(uid);
     userAccountState[uid] = {
       plan: "free",
       notesUsedThisMonth: 0,
+      bonusNotes: 0,
+      referralsCount: 0,
       credits: 0,
-      referralCode: uid.slice(0, 8).toUpperCase()
+      referralCode: code
     };
+    referralCodeIndex[code] = uid;
+  } else {
+    if (!userAccountState[uid].referralCode) {
+      userAccountState[uid].referralCode = buildReferralCode(uid);
+    }
+    referralCodeIndex[userAccountState[uid].referralCode] = uid;
   }
   return userAccountState[uid];
 }
-app.post("/api/gemini/image/generate", async (req, res) => {
-  if (!currentFeatureSettings.imageGenerationEnabled) {
-    return res.status(403).json({ error: "This feature is turned off" });
+app.get("/api/referrals/me", async (req, res) => {
+  const user = await verifyServerFirebaseUser(req);
+  const queryEmail = typeof req.query.email === "string" ? req.query.email.trim().toLowerCase() : "";
+  const uid = user?.uid || typeof req.query.userId === "string" && req.query.userId.trim() || (queryEmail ? `email_${queryEmail}` : "");
+  if (!uid) {
+    return res.status(401).json({ error: "Sign in to get your personal referral link." });
   }
-  const { prompt, aspectRatio = "1:1" } = req.body;
-  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
-    return res.status(400).json({ error: "Prompt is required for image generation." });
+  const acc = getUserState(uid);
+  if (user?.email) acc.email = user.email;
+  else if (queryEmail && !acc.email) acc.email = queryEmail;
+  const shareUrl = `https://pulsenoteai.in/?ref=${acc.referralCode}`;
+  return res.json({
+    success: true,
+    referralCode: acc.referralCode,
+    referralUrl: shareUrl,
+    shareUrl,
+    bonusNotes: acc.bonusNotes || 0,
+    referralsCount: acc.referralsCount || 0,
+    referredBy: acc.referredBy || null,
+    monthlyLimit: acc.plan === "free" ? FREE_MONTHLY_NOTE_LIMIT + (acc.bonusNotes || 0) : null
+  });
+});
+app.post("/api/referrals/redeem", async (req, res) => {
+  const user = await verifyServerFirebaseUser(req);
+  const bodyEmail = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const uid = user?.uid || typeof req.body?.userId === "string" && req.body.userId.trim() || (bodyEmail ? `email_${bodyEmail}` : "");
+  const rawCode = typeof req.body?.referralCode === "string" ? req.body.referralCode.trim().toUpperCase() : "";
+  if (!uid) {
+    return res.status(401).json({ error: "Please sign in to redeem a referral code." });
   }
-  const userPrompt = prompt.trim();
-  const userForFlags = await verifyServerFirebaseUser(req);
-  const flagCheck = checkUserAiAccess(userForFlags?.email, "image");
-  if (!flagCheck.allowed) {
-    return res.status(403).json({ error: "AI_FEATURE_DISABLED", message: flagCheck.reason });
+  if (!rawCode || rawCode.length < 4) {
+    return res.status(400).json({ error: "Valid referral code is required." });
   }
-  const user = userForFlags;
-  const isAdmin = isAuthorizedAdmin(user);
-  if (!isAdmin && user) {
-    const acc = getUserState(user.uid);
-    if (acc.plan === "free" && acc.credits < 1) {
-      return res.status(402).json({
-        error: "Image generation is a Pro feature and costs 1 credit. Please upgrade to Pro or purchase a credit pack."
-      });
-    }
-    if (acc.credits < 1) {
-      return res.status(402).json({
-        error: "Insufficient credits. Each image costs 1 credit. Please purchase a credit pack."
-      });
-    }
+  const referee = getUserState(uid);
+  if (referee.referralCode === rawCode) {
+    return res.status(400).json({ error: "You cannot redeem your own referral code." });
   }
-  try {
-    const liveResults = await searchLiveImages(userPrompt, 4).catch(() => []);
-    const fallbackSvg = generateGenerativeImageSvg(userPrompt, "Photorealistic 8K", void 0, aspectRatio);
-    const imageUrl = liveResults.length > 0 ? liveResults[0].url : fallbackSvg;
-    if (user && !isAdmin) {
-      const acc = getUserState(user.uid);
-      if (acc.credits > 0) {
-        acc.credits -= 1;
-      }
-    }
-    return res.json({
-      success: true,
-      imageUrl,
-      imageBase64: "",
-      mimeType: imageUrl.startsWith("data:image/svg") ? "image/svg+xml" : "image/jpeg",
-      modelUsed: "pulsenote-visual-pipeline",
-      prompt: userPrompt
-    });
-  } catch (err) {
-    console.error("[ImageGen] Generation error:", err);
-    return res.status(500).json({
-      error: err?.message || "Image generation failed."
+  if (referee.referredBy) {
+    return res.status(409).json({
+      error: "ALREADY_REDEEMED",
+      alreadyRedeemed: true,
+      message: "A referral reward has already been applied to this account."
     });
   }
+  referee.referredBy = rawCode;
+  referee.bonusNotes = (referee.bonusNotes || 0) + REFERRAL_BONUS_NOTES;
+  const referrerUid = referralCodeIndex[rawCode];
+  if (referrerUid && referrerUid !== uid) {
+    const referrer = getUserState(referrerUid);
+    referrer.bonusNotes = (referrer.bonusNotes || 0) + REFERRAL_BONUS_NOTES;
+    referrer.referralsCount = (referrer.referralsCount || 0) + 1;
+  }
+  return res.json({
+    success: true,
+    bonusAwarded: REFERRAL_BONUS_NOTES,
+    bonusNotes: referee.bonusNotes,
+    totalBonusNotes: referee.bonusNotes,
+    monthlyLimit: referee.plan === "free" ? FREE_MONTHLY_NOTE_LIMIT + referee.bonusNotes : null,
+    message: `Referral applied! Both you and your colleague received +${REFERRAL_BONUS_NOTES} extra notes.`
+  });
+});
+app.post("/api/gemini/image/generate", (_req, res) => {
+  return res.status(410).json({
+    error: "FEATURE_RETIRED",
+    message: "Image generation has been removed. PulseNote AI is dedicated to structured clinical and enterprise documentation."
+  });
 });
 var serverVideoJobs = {};
-app.post("/api/gemini/video/generate", async (req, res) => {
-  if (!currentFeatureSettings.videoGenerationEnabled) {
-    return res.status(403).json({ error: "This feature is turned off" });
-  }
-  const { prompt } = req.body;
-  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
-    return res.status(400).json({ error: "Prompt is required for video generation." });
-  }
-  const userPrompt = prompt.trim();
-  const user = await verifyServerFirebaseUser(req);
-  const isAdmin = isAuthorizedAdmin(user);
-  const videoFlag = checkUserAiAccess(user?.email, "video");
-  if (!videoFlag.allowed) {
-    return res.status(403).json({ error: "AI_FEATURE_DISABLED", message: videoFlag.reason });
-  }
-  if (!isAdmin && user) {
-    const acc = getUserState(user.uid);
-    if (acc.plan === "free" && acc.credits < 10) {
-      return res.status(402).json({
-        error: "Video generation is a Pro feature and costs 10 credits. Please upgrade to Pro or purchase a credit pack."
-      });
-    }
-    if (acc.credits < 10) {
-      return res.status(402).json({
-        error: "Insufficient credits. Each video costs 10 credits. Please purchase a credit pack."
-      });
-    }
-  }
-  try {
-    const precheckErr = precheck_prompt(userPrompt);
-    if (precheckErr) {
-      return res.status(400).json({ error: precheckErr });
-    }
-    const jobId = `vjob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const result = await generate_video(userPrompt, "output.mp4");
-    const jobRecord = {
-      id: jobId,
-      userId: user?.uid || "guest_user",
-      operationName: jobId,
-      prompt: userPrompt,
-      status: result.status === "ok" ? "completed" : "failed",
-      videoUrl: result.videoUrl,
-      error: result.status === "ok" ? void 0 : result.message,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    serverVideoJobs[jobId] = jobRecord;
-    if (result.status === "ok" && user && !isAdmin) {
-      const acc = getUserState(user.uid);
-      if (acc.credits >= 10) {
-        acc.credits -= 10;
-      }
-    }
-    return res.json({
-      success: result.status === "ok",
-      jobId,
-      operationName: jobId,
-      status: jobRecord.status,
-      videoUrl: jobRecord.videoUrl,
-      modelUsed: result.providerName || "pulsenote-video-pipeline",
-      prompt: userPrompt
-    });
-  } catch (err) {
-    console.error("[Video] Start error:", err);
-    return res.status(500).json({ error: err?.message || "Failed to start video generation." });
-  }
+app.post("/api/gemini/video/generate", (_req, res) => {
+  return res.status(410).json({
+    error: "FEATURE_RETIRED",
+    message: "Video generation has been removed. PulseNote AI is dedicated to structured clinical and enterprise documentation."
+  });
 });
 app.get(["/api/videoJobs/:jobId", "/api/gemini/video/status"], async (req, res) => {
   const jobId = req.params.jobId || req.query.jobId || req.query.operationName;
@@ -4206,20 +4241,42 @@ app.post("/api/notes/generate", async (req, res) => {
   }
   const user = await verifyServerFirebaseUser(req);
   const isAdmin = isAuthorizedAdmin(user);
-  const userKey = user ? user.uid : req.headers.authorization || req.ip || "guest_user";
+  const clientIp = extractClientIp(req.headers, req.ip);
+  const isGuest = !user;
+  const userKey = user ? user.uid : `guest_ip_${clientIp}`;
+  const callerEmail = user?.email || (typeof req.headers["x-user-email"] === "string" ? req.headers["x-user-email"] : void 0);
+  if (!isAdmin && !isGeminiFeatureEnabledForUser(currentFeatureSettings, callerEmail)) {
+    return res.status(403).json({
+      error: "FEATURE_DISABLED",
+      message: "This feature is not enabled for your account."
+    });
+  }
   if (!isAdmin) {
     const acc = getUserState(userKey);
-    if (acc.plan === "free" && acc.notesUsedThisMonth >= 5) {
+    const limitResult = checkFreeTierNoteLimit({
+      plan: acc.plan,
+      notesUsedThisMonth: acc.notesUsedThisMonth,
+      bonusNotes: acc.bonusNotes,
+      isAdmin,
+      isGuest,
+      guestIpNotesThisMonth: isGuest ? getGuestIpUsage(clientIp) : 0
+    });
+    if (!limitResult.allowed) {
       return res.status(403).json({
         error: "NOTE_LIMIT_REACHED",
-        message: "You have used your 5 free notes for this month. Upgrade to Pro for unlimited notes."
+        message: limitResult.message,
+        limit: limitResult.limit,
+        used: limitResult.used
       });
     }
     acc.notesUsedThisMonth += 1;
+    if (isGuest) {
+      incrementGuestIpUsage(clientIp);
+    }
   }
   const lengthRule = formatOutputLengthInstruction(outputLength);
   const dictRule = formatDictionaryInstruction(customDictionary);
-  const systemInstruction = `You are a structured documentation formatter. Use ONLY facts in the input. Never invent names, values, drugs, doses, dates or numbers. If a crucial expected detail (such as a proposed lease signing date, property ID, repair cost, or deadline) is omitted from the input, insert [MISSING: Description of required data]; if an entire clinical section has no information, write 'Not documented'. Output JSON matching the requested schema strictly. ${lengthRule}${dictRule}`;
+  const systemInstruction = `You are a structured documentation formatter. Use ONLY facts in the input. Never invent names, values, drugs, doses, dates or numbers. If a crucial expected detail (such as a proposed lease signing date, property ID, repair cost, or deadline) is omitted from the input, insert [MISSING: Description of required data]; if an entire section has no information in the input, write '${NOT_SPECIFIED_PHRASE}'. Output JSON matching the requested schema strictly. ${lengthRule}${dictRule}`;
   let responseSchema;
   const normalizedType = String(templateType).toLowerCase().replace(/[-_\s]/g, "");
   const isClinicalType = ["soap", "dischargesummary", "referralletter", "progressnote"].includes(normalizedType);
@@ -4399,10 +4456,9 @@ app.post("/api/notes/generate", async (req, res) => {
       });
     }
     const requiredKeys = responseSchema?.required || Object.keys(responseSchema?.properties || {});
-    for (const key of requiredKeys) {
-      if (!parsed[key] || typeof parsed[key] !== "string" || !parsed[key].trim()) {
-        parsed[key] = parsed[key] && typeof parsed[key] === "string" && parsed[key].trim() ? parsed[key].trim() : "Not documented";
-      }
+    const normalizedParsed = normalizeStructuredSections(parsed, requiredKeys);
+    for (const key of Object.keys(normalizedParsed)) {
+      parsed[key] = normalizedParsed[key];
     }
     const lowerInput = rawInput.toLowerCase();
     const verificationWarnings = [];
@@ -4410,8 +4466,8 @@ app.post("/api/notes/generate", async (req, res) => {
     const knownDrugSuffixes = /(statin|sartan|pril|olol|ipine|cillin|mycin|oxacin|azole|prazole|tidine|terol|mab|cept|sone|olone|formin|gliptin|gliflozin|glitazone|dopa|pam|lam|pine|done|pramine|triptan|setron|afil|xaban|parin|caine|aspirin|paracetamol|ibuprofen|tylenol|advil|insulin|metformin|gabapentin|lisinopril|atorvastatin|amlodipine|metoprolol|losartan|albuterol|omeprazole|levothyroxine)/i;
     for (const key of requiredKeys) {
       const sectionText = String(parsed[key] || "");
-      if (sectionText === "Not documented") {
-        highlightedSections[key] = sectionText;
+      if (sectionText === NOT_SPECIFIED_PHRASE || /^not documented\.?$/i.test(sectionText)) {
+        highlightedSections[key] = NOT_SPECIFIED_PHRASE;
         continue;
       }
       const numberMatches = sectionText.match(/\b\d+(?:[\.,/]\d+)?(?:\s*(?:mg|mcg|g|ml|mmhg|bpm|lbs|kg|%|f|c|weeks?|days?|months?|years?))?\b/gi) || [];
@@ -4440,11 +4496,6 @@ app.post("/api/notes/generate", async (req, res) => {
       }
       highlightedSections[key] = sectionHtml;
     }
-    if (user && !isAdmin) {
-      const acc = getUserState(user.uid);
-      acc.notesUsedThisMonth += 1;
-      console.log(`[Notes] User ${user.uid} generated note #${acc.notesUsedThisMonth}`);
-    }
     const isClinical = ["soap", "dischargesummary", "referralletter", "progressnote"].includes(normalizedType);
     return res.json({
       success: true,
@@ -4466,12 +4517,67 @@ app.post("/api/notes/generate", async (req, res) => {
     });
   }
 });
+app.post("/api/notes/suggest-icd10", async (req, res) => {
+  const { soapNote, rawText } = req.body || {};
+  const noteText = typeof rawText === "string" && rawText.trim() ? rawText.trim() : soapNote && typeof soapNote === "object" ? Object.entries(soapNote).map(([k, v]) => `${k.toUpperCase()}: ${String(v || "")}`).join("\n\n") : "";
+  if (!noteText) {
+    return res.status(400).json({ error: "SOAP note content is required to suggest ICD-10 codes." });
+  }
+  const user = await verifyServerFirebaseUser(req);
+  const isAdmin = isAuthorizedAdmin(user);
+  const callerEmail = (user?.email || (typeof req.headers["x-user-email"] === "string" ? req.headers["x-user-email"] : "")).toLowerCase().trim();
+  const storeUser = callerEmail ? store.findUserByEmail(callerEmail) : void 0;
+  const memAccount = user ? getUserState(user.uid) : void 0;
+  const isPaid = isAdmin || Boolean(storeUser?.subscription?.isPro) || memAccount?.plan === "pro" || memAccount?.plan === "team" || (callerEmail ? store.isStrictAdminEmail(callerEmail) : false);
+  if (!isPaid) {
+    return res.status(403).json({
+      error: "UPGRADE_REQUIRED",
+      message: "ICD-10 code suggestions are available on Pro and Clinic/Team plans. Upgrade to unlock automated ICD-10-CM coding."
+    });
+  }
+  const systemInstruction = `You are a certified clinical coding assistant (ICD-10-CM).
+Given ONLY the SOAP note below, suggest the most relevant billable ICD-10-CM codes supported strictly by documented clinical findings.
+Rules:
+1. Never invent diagnoses that are not supported by the SOAP note text.
+2. Return ONLY valid JSON with shape: { "suggestions": [ { "code": "E11.42", "description": "Type 2 diabetes mellitus with diabetic polyneuropathy", "rationale": "Exact evidence from note", "specificityNote": "Any laterality/acuity detail clinician should verify" } ] }.
+3. Return between 1 and 5 codes ordered by primary clinical relevance.`;
+  try {
+    const aiRes = await generateWithFallback({
+      prompt: noteText.slice(0, 6e3),
+      systemInstruction,
+      responseFormat: "json",
+      tier: "fast",
+      temperature: 0,
+      maxTokens: 1200
+    });
+    const parsed = extractJsonObject(aiRes.text || "");
+    const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions.filter((item) => item && typeof item.code === "string" && item.code.trim()).slice(0, 6).map((item) => ({
+      code: String(item.code).trim().toUpperCase(),
+      description: String(item.description || "").trim(),
+      rationale: String(item.rationale || "").trim(),
+      specificityNote: item.specificityNote ? String(item.specificityNote).trim() : void 0
+    })) : [];
+    return res.json({
+      success: true,
+      suggestions,
+      providerName: aiRes.providerName,
+      modelUsed: aiRes.modelUsed,
+      disclaimer: "AI-suggested ICD-10-CM codes for clinician review only. Confirm specificity before billing."
+    });
+  } catch (err) {
+    console.error("[ICD-10] Suggestion error:", err);
+    return res.status(500).json({
+      error: "ICD10_FAILED",
+      message: err?.message || "Could not generate ICD-10 suggestions. Please retry."
+    });
+  }
+});
 app.post("/api/notes/regenerate-section", async (req, res) => {
   const { input: rawInput, templateType = "soap", sectionKey } = req.body;
   if (!rawInput || !sectionKey) {
     return res.status(400).json({ error: "input and sectionKey are required." });
   }
-  const systemInstruction = `You are a structured documentation formatter. For the section '${sectionKey}', use ONLY facts present in the input. Never invent names, values, drugs, doses, dates or numbers. If there is no information in the input for this section, output 'Not documented'. Output only the updated section content text, no extra commentary or markdown header.`;
+  const systemInstruction = `You are a structured documentation formatter. For the section '${sectionKey}', use ONLY facts present in the input. Never invent names, values, drugs, doses, dates or numbers. If there is no information in the input for this section, output '${NOT_SPECIFIED_PHRASE}'. Output only the updated section content text, no extra commentary or markdown header.`;
   try {
     const aiRes = await generateWithFallback({
       prompt: rawInput.trim(),
@@ -4479,7 +4585,7 @@ app.post("/api/notes/regenerate-section", async (req, res) => {
       tier: "fast",
       temperature: 0
     });
-    const newContent = (aiRes.text || "").trim() || "Not documented";
+    const newContent = normalizeSectionValue(aiRes.text);
     return res.json({
       success: true,
       sectionKey,
@@ -4749,7 +4855,7 @@ function normalizeStudioDocumentPayload(parsed, modeId, modeLabel, sourceInput, 
     heading: String(s.heading || "Details").trim(),
     content: String(s.content || "").trim()
   })) : [];
-  const mdLines = [`# ${title}`, `*Mode: ${modeLabel}*`, "", "## Summary", summary || "_Not documented._", "", "## Key Decisions"];
+  const mdLines = [`# ${title}`, `*Mode: ${modeLabel}*`, "", "## Summary", summary || `_${NOT_SPECIFIED_PHRASE}._`, "", "## Key Decisions"];
   if (keyDecisions.length > 0) {
     keyDecisions.forEach((d) => mdLines.push(`- ${d}`));
   } else {
@@ -4768,7 +4874,7 @@ function normalizeStudioDocumentPayload(parsed, modeId, modeLabel, sourceInput, 
     mdLines.push("- No action items identified.");
   }
   additionalSections.forEach((sec) => {
-    mdLines.push("", `## ${sec.heading}`, sec.content || "_Not documented._");
+    mdLines.push("", `## ${sec.heading}`, sec.content || `_${NOT_SPECIFIED_PHRASE}._`);
   });
   const now = Date.now();
   return {
@@ -5268,9 +5374,9 @@ app.post(["/api/verify-payment", "/api/razorpay/verify-payment", "/api/razorpay/
         message: "Missing required parameters for signature verification."
       });
     }
-    let expectedSignature = crypto2.createHmac("sha256", keySecret).update(`${pId}|${subIdOrOrderId}`).digest("hex");
+    let expectedSignature = crypto3.createHmac("sha256", keySecret).update(`${pId}|${subIdOrOrderId}`).digest("hex");
     if (expectedSignature !== sig) {
-      const orderFormatSig = crypto2.createHmac("sha256", keySecret).update(`${subIdOrOrderId}|${pId}`).digest("hex");
+      const orderFormatSig = crypto3.createHmac("sha256", keySecret).update(`${subIdOrOrderId}|${pId}`).digest("hex");
       if (orderFormatSig === sig) {
         expectedSignature = orderFormatSig;
       }
@@ -5457,10 +5563,7 @@ app.post(["/razorpayWebhook", "/api/razorpay/webhook"], (req, res) => {
     return res.status(400).json({ status: "error", reason: "missing_signature" });
   }
   try {
-    const expectedSignature = crypto2.createHmac("sha256", RAZORPAY_WEBHOOK_SECRET).update(payload).digest("hex");
-    const sigBuf = Buffer.from(String(signature), "utf8");
-    const expBuf = Buffer.from(expectedSignature, "utf8");
-    const valid = sigBuf.length === expBuf.length && crypto2.timingSafeEqual(sigBuf, expBuf);
+    const valid = verifyRazorpayWebhookSignature(payload, signature, RAZORPAY_WEBHOOK_SECRET);
     if (!valid) {
       console.warn("[RazorpayWebhook] Rejected: signature mismatch.");
       return res.status(400).json({ status: "error", reason: "invalid_signature" });
@@ -5494,6 +5597,8 @@ app.post(["/razorpayWebhook", "/api/razorpay/webhook"], (req, res) => {
           plan: planType === "team" ? "team" : "pro",
           credits: 100,
           notesUsedThisMonth: 0,
+          bonusNotes: 0,
+          referralsCount: 0,
           createdAt: (/* @__PURE__ */ new Date()).toISOString(),
           subscriptionStatus: "active",
           nextBillingDate: new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString()
@@ -8389,7 +8494,19 @@ async function startServer() {
   });
   app.get("/sitemap.xml", (_req, res) => {
     const lastmod = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-    const urls = ["/", "/#pricing", "/#soap-demo", "/#faq", "/#about", "/#partners", "/#templates"];
+    const urls = [
+      "/",
+      "/blog",
+      "/blog/soap-note-templates-primary-care",
+      "/blog/how-to-write-discharge-summary",
+      "/blog/clinical-documentation-best-practices",
+      "/#pricing",
+      "/#soap-demo",
+      "/#faq",
+      "/#about",
+      "/#partners",
+      "/#templates"
+    ];
     const body = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ` + urls.map(

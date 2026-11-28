@@ -24,8 +24,12 @@ import {
   Send,
   LockOpen,
   FileCheck,
+  Stethoscope,
+  Loader2,
 } from 'lucide-react';
 import { exportNoteToPdf, exportNoteToDocx } from '../lib/exportUtils';
+import type { Icd10Suggestion } from '../types';
+import { auth } from '../lib/firebase';
 
 export interface DocumentVersion {
   version: number;
@@ -105,6 +109,9 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [icdLoading, setIcdLoading] = useState(false);
+  const [icdSuggestions, setIcdSuggestions] = useState<Icd10Suggestion[] | null>(null);
+  const [icdDisclaimer, setIcdDisclaimer] = useState<string | null>(null);
 
   const userId = currentUser?.uid || 'user_guest';
   const userEmail = currentUser?.email || 'guest@pulsenoteai.in';
@@ -136,6 +143,49 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
     setEditedTitle(doc.title);
     setIsEditingTitle(false);
     setShowVersionHistory(false);
+    setIcdSuggestions(null);
+    setIcdDisclaimer(null);
+  };
+
+  const handleSuggestIcd10 = async () => {
+    if (!selectedDoc) return;
+    if (!isPaidPlan) {
+      onShowToast?.('info', 'ICD-10 code suggestions are included on Pro, Team, and Enterprise plans.');
+      onOpenPricing?.();
+      return;
+    }
+
+    setIcdLoading(true);
+    try {
+      const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (currentUser?.email) headers['x-user-email'] = currentUser.email;
+
+      const res = await fetch('/api/notes/suggest-icd10', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          soapNote: editedSections,
+          userId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data?.error === 'UPGRADE_REQUIRED') onOpenPricing?.();
+        throw new Error(data?.message || 'Failed to suggest ICD-10 codes.');
+      }
+      setIcdSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+      setIcdDisclaimer(
+        data.disclaimer || 'Coding suggestions only — verify against current ICD-10-CM guidelines before billing.'
+      );
+      onShowToast?.('success', `Generated ${data.suggestions?.length || 0} ICD-10-CM code suggestions.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to suggest ICD-10 codes.';
+      onShowToast?.('error', msg);
+    } finally {
+      setIcdLoading(false);
+    }
   };
 
   const handleSaveDoc = async () => {
@@ -303,15 +353,33 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
     }
   };
 
-  // Helper to render section text with yellow warnings for unverified tokens
+  // Helper to render section text with muted 'Not specified in transcript' and amber unverified token highlights
   const renderFactCheckedText = (text: string, unverifiedTokens: string[] = []) => {
-    if (!unverifiedTokens || unverifiedTokens.length === 0) {
-      return <span>{text}</span>;
+    const trimmed = (text || '').trim();
+    if (!trimmed || /^(not specified in transcript\.?|not documented\.?)$/i.test(trimmed)) {
+      return <span className="text-slate-400 italic">Not specified in transcript</span>;
     }
 
-    // Check if any unverified token is present in the text
+    const mutedRegex = /(Not specified in transcript\.?|Not documented\.?)/gi;
+    const renderMuted = (chunk: string, keyPrefix: string) => {
+      const subParts = chunk.split(mutedRegex);
+      return subParts.map((sp, idx) =>
+        /^(Not specified in transcript\.?|Not documented\.?)$/i.test(sp) ? (
+          <span key={`${keyPrefix}-m-${idx}`} className="text-slate-400 italic">
+            Not specified in transcript
+          </span>
+        ) : (
+          <span key={`${keyPrefix}-t-${idx}`}>{sp}</span>
+        )
+      );
+    };
+
+    if (!unverifiedTokens || unverifiedTokens.length === 0) {
+      return <span>{renderMuted(text, 'plain')}</span>;
+    }
+
     const escapedTokens = unverifiedTokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    if (escapedTokens.length === 0) return <span>{text}</span>;
+    if (escapedTokens.length === 0) return <span>{renderMuted(text, 'plain')}</span>;
 
     const pattern = new RegExp(`(${escapedTokens.join('|')})`, 'gi');
     const parts = text.split(pattern);
@@ -337,7 +405,7 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
               </mark>
             );
           }
-          return <span key={i}>{part}</span>;
+          return <React.Fragment key={i}>{renderMuted(part, `p-${i}`)}</React.Fragment>;
         })}
       </span>
     );
@@ -648,49 +716,142 @@ export const MyDocumentsView: React.FC<MyDocumentsViewProps> = ({
                       <span>{isSaving ? 'Saving...' : isLocked ? 'Locked' : 'Save Version'}</span>
                     </button>
 
-                    {/* PDF Export */}
+                    {/* Suggest ICD-10 Codes for SOAP Notes (Pro+) */}
+                    {selectedDoc.templateType === 'soap' && (
+                      <button
+                        type="button"
+                        onClick={handleSuggestIcd10}
+                        disabled={icdLoading}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                          isPaidPlan
+                            ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300'
+                            : 'bg-[#2d2e30] border-amber-500/30 text-amber-300 hover:bg-amber-500/10'
+                        }`}
+                        title={isPaidPlan ? 'Suggest ICD-10-CM codes for this SOAP note' : 'Upgrade to Pro for ICD-10 code suggestions'}
+                      >
+                        {icdLoading ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : !isPaidPlan ? (
+                          <Lock size={12} className="text-amber-400" />
+                        ) : (
+                          <Stethoscope size={14} />
+                        )}
+                        <span>{icdLoading ? 'Suggesting...' : 'Suggest ICD-10'}</span>
+                      </button>
+                    )}
+
+                    {/* PDF Export (Free tier includes clickable pulsenoteai.in watermark) */}
                     <button
+                      type="button"
                       onClick={() => {
-                        if (!isPaidPlan) {
-                          onShowToast?.('info', 'PDF export is available on Pro & Team plans.');
-                          onOpenPricing?.();
-                          return;
-                        }
                         const sectionsList = Object.entries(editedSections).map(([k, v]) => ({
                           title: k.toUpperCase(),
                           content: v,
                         }));
-                        exportNoteToPdf({ title: editedTitle, signoff: selectedDoc?.signoff }, sectionsList);
-                        onShowToast?.('success', 'PDF exported successfully.');
+                        exportNoteToPdf(
+                          { title: editedTitle, signoff: selectedDoc?.signoff, isFreeTier: !isPaidPlan },
+                          sectionsList
+                        );
+                        onShowToast?.(
+                          'success',
+                          isPaidPlan
+                            ? 'Clean PDF exported successfully.'
+                            : 'PDF exported with Free tier watermark. Upgrade to Pro for clean exports.'
+                        );
                       }}
                       className="p-2 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-blue-400 border border-blue-500/30 transition cursor-pointer"
-                      title="Export PDF"
+                      title={isPaidPlan ? 'Export clean PDF' : 'Export PDF (includes PulseNote AI watermark)'}
                     >
-                      {!isPaidPlan ? <Lock size={14} className="text-amber-400" /> : <FileDown size={14} />}
+                      <FileDown size={14} />
                     </button>
 
-                    {/* Word Export */}
+                    {/* Word Export (Free tier includes clickable pulsenoteai.in watermark) */}
                     <button
+                      type="button"
                       onClick={async () => {
-                        if (!isPaidPlan) {
-                          onShowToast?.('info', 'Word (.docx) export is available on Pro & Team plans.');
-                          onOpenPricing?.();
-                          return;
-                        }
                         const sectionsList = Object.entries(editedSections).map(([k, v]) => ({
                           title: k.toUpperCase(),
                           content: v,
                         }));
-                        await exportNoteToDocx({ title: editedTitle, signoff: selectedDoc?.signoff }, sectionsList);
-                        onShowToast?.('success', 'Word document exported successfully.');
+                        await exportNoteToDocx(
+                          { title: editedTitle, signoff: selectedDoc?.signoff, isFreeTier: !isPaidPlan },
+                          sectionsList
+                        );
+                        onShowToast?.(
+                          'success',
+                          isPaidPlan
+                            ? 'Clean Word (.docx) document exported.'
+                            : 'Word (.docx) exported with Free tier watermark. Upgrade to Pro for clean exports.'
+                        );
                       }}
                       className="p-2 rounded-xl bg-[#2d2e30] hover:bg-[#3c4043] text-indigo-400 border border-indigo-500/30 transition cursor-pointer"
-                      title="Export Word (.docx)"
+                      title={isPaidPlan ? 'Export clean Word (.docx)' : 'Export Word (.docx) (includes PulseNote AI watermark)'}
                     >
-                      {!isPaidPlan ? <Lock size={14} className="text-amber-400" /> : <FileText size={14} />}
+                      <FileText size={14} />
                     </button>
                   </div>
                 </div>
+
+                {/* ICD-10-CM Suggestions Drawer */}
+                {icdSuggestions && (
+                  <div className="p-4 rounded-xl bg-[#131720] border border-emerald-500/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        <Stethoscope size={14} /> Suggested ICD-10-CM Codes
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const text = icdSuggestions
+                              .map((s) => `${s.code} — ${s.description} (${s.rationale})`)
+                              .join('\n');
+                            navigator.clipboard.writeText(text);
+                            onShowToast?.('success', 'Copied ICD-10-CM codes.');
+                          }}
+                          className="text-[11px] px-2.5 py-1 rounded-lg bg-[#1e1f20] hover:bg-[#2d2e30] text-slate-200 border border-[#3c4043] cursor-pointer"
+                        >
+                          Copy All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIcdSuggestions(null)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {icdSuggestions.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">
+                        No billable diagnoses explicitly documented in this SOAP note.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {icdSuggestions.map((item, idx) => (
+                          <div
+                            key={`${item.code}-${idx}`}
+                            className="p-2.5 rounded-lg bg-[#1b1f2a] border border-white/10 space-y-0.5"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                                {item.code}
+                              </span>
+                              <span className="text-xs font-semibold text-white">{item.description}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-300">{item.rationale}</p>
+                            {item.specificityNote && (
+                              <p className="text-[11px] text-amber-300/90 italic">{item.specificityNote}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {icdDisclaimer && (
+                      <p className="text-[11px] text-slate-400 italic">{icdDisclaimer}</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Fact Check Banner */}
                 {selectedDoc.unverifiedTokens && selectedDoc.unverifiedTokens.length > 0 && (

@@ -2,30 +2,25 @@ import React from 'react';
 import {
   Menu,
   Plus,
-  Clock,
   Settings,
   Gem,
-  LayoutGrid,
   MessageSquare,
   Trash2,
   Globe,
-  ImageIcon,
-  Film,
   ShieldAlert,
   Users,
   Handshake,
   Layers,
   IndianRupee,
+  BookOpen,
 } from 'lucide-react';
 import UserNavMenu from './UserNavMenu';
 import { isRevenueAdmin } from '../lib/firebase';
 
 export type AppActiveView =
   | 'marketing'
+  | 'blog'
   | 'chat'
-  | 'image'
-  | 'video'
-  | 'canvas'
   | 'admin'
   | 'team'
   | 'partners'
@@ -46,8 +41,7 @@ interface SidebarProps {
   onOpenSettings?: () => void;
   activeView?: AppActiveView;
   onToggleView?: (view: AppActiveView) => void;
-  imageGenerationEnabled?: boolean;
-  videoGenerationEnabled?: boolean;
+  geminiEnabled?: boolean;
   isAdmin?: boolean;
   onOpenTemplates?: () => void;
   currentUser?: { email?: string | null; name?: string } | null;
@@ -66,8 +60,7 @@ export default function Sidebar({
   onOpenSettings,
   activeView = 'marketing',
   onToggleView,
-  imageGenerationEnabled = false,
-  videoGenerationEnabled = false,
+  geminiEnabled = true,
   isAdmin = false,
   onOpenTemplates,
   currentUser,
@@ -90,7 +83,7 @@ export default function Sidebar({
           <Menu size={20} />
         </button>
 
-        {!collapsed && onNewChat && (
+        {!collapsed && geminiEnabled && onNewChat && (
           <button
             type="button"
             onClick={onNewChat}
@@ -104,85 +97,40 @@ export default function Sidebar({
 
       {/* Main View Switcher Tabs */}
       {onToggleView && !collapsed && (
-        <div className="mb-3 p-1 bg-[#131314] rounded-xl flex flex-wrap gap-1 border border-[#3c4043]/40 text-xs">
+        <div className="mb-3 p-1 bg-[#131314] rounded-xl flex gap-1 border border-[#3c4043]/40 text-xs">
           <button
             type="button"
             onClick={() => onToggleView('marketing')}
-            className={`flex-1 py-1 px-1 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[10px] ${
+            className={`flex-1 py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 font-medium transition-colors text-[11px] cursor-pointer ${
               activeView === 'marketing'
                 ? 'bg-[#2d2e30] text-white shadow-sm'
                 : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
             }`}
             title="Marketing Site"
           >
-            <Globe size={12} className="text-[#4e8cff]" />
+            <Globe size={13} className="text-[#4e8cff]" />
             <span>Home</span>
           </button>
-          <button
-            type="button"
-            onClick={() => onToggleView('chat')}
-            className={`flex-1 py-1 px-1 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[10px] ${
-              activeView === 'chat'
-                ? 'bg-[#2d2e30] text-white shadow-sm'
-                : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
-            }`}
-            title="Chat & Notes"
-          >
-            <MessageSquare size={12} />
-            <span>Notes</span>
-          </button>
 
-          {/* Conditional: Only show Image tab when imageGenerationEnabled is true */}
-          {imageGenerationEnabled && (
+          {geminiEnabled && (
             <button
               type="button"
-              onClick={() => onToggleView('image')}
-              className={`flex-1 py-1 px-1 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[10px] ${
-                activeView === 'image'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
-                  : 'text-[#9aa0a6] hover:text-amber-300'
+              onClick={() => onToggleView('chat')}
+              className={`flex-1 py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 font-medium transition-colors text-[11px] cursor-pointer ${
+                activeView === 'chat'
+                  ? 'bg-[#2d2e30] text-white shadow-sm'
+                  : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
               }`}
-              title="Imagen 4.0 Studio"
+              title="Clinical & Enterprise Notes"
             >
-              <ImageIcon size={12} className="text-amber-400" />
-              <span>Image</span>
+              <MessageSquare size={13} />
+              <span>Notes</span>
             </button>
           )}
-
-          {/* Conditional: Only show Video tab when videoGenerationEnabled is true */}
-          {videoGenerationEnabled && (
-            <button
-              type="button"
-              onClick={() => onToggleView('video')}
-              className={`flex-1 py-1 px-1 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[10px] ${
-                activeView === 'video'
-                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 shadow-sm'
-                  : 'text-[#9aa0a6] hover:text-purple-300'
-              }`}
-              title="Veo 3.0 Video Studio"
-            >
-              <Film size={12} className="text-purple-400" />
-              <span>Video</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => onToggleView('canvas')}
-            className={`flex-1 py-1 px-1 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors text-[10px] ${
-              activeView === 'canvas'
-                ? 'bg-[#2d2e30] text-white shadow-sm'
-                : 'text-[#9aa0a6] hover:text-[#e3e3e3]'
-            }`}
-            title="Flow Canvas"
-          >
-            <LayoutGrid size={12} />
-            <span>Canvas</span>
-          </button>
         </div>
       )}
 
-      {/* Sub-navigation buttons (Templates, Team, Partners, Admin) */}
+      {/* Sub-navigation buttons */}
       {!collapsed && onToggleView && (
         <div className="space-y-1 mb-3 pb-2 border-b border-[#3c4043]/30">
           {onOpenTemplates && (
@@ -206,7 +154,7 @@ export default function Sidebar({
             }`}
           >
             <MessageSquare size={14} className="text-[#4e8cff]" />
-            <span>My Documents (/documents)</span>
+            <span>My Documents</span>
           </button>
 
           <button
@@ -219,7 +167,7 @@ export default function Sidebar({
             }`}
           >
             <Layers size={14} className="text-amber-400" />
-            <span>Template Gallery (/templates)</span>
+            <span>Template Gallery</span>
           </button>
 
           <button
@@ -232,7 +180,7 @@ export default function Sidebar({
             }`}
           >
             <Users size={14} className="text-blue-400" />
-            <span>Clinic / Team (/team)</span>
+            <span>Clinic / Team</span>
           </button>
 
           <button
@@ -245,7 +193,20 @@ export default function Sidebar({
             }`}
           >
             <Handshake size={14} className="text-emerald-400" />
-            <span>Partners & Resellers (/partners)</span>
+            <span>Partners & Resellers</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onToggleView('blog')}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs transition cursor-pointer ${
+              activeView === 'blog'
+                ? 'bg-[#2d2e30] text-white font-medium'
+                : 'text-[#c4c7c5] hover:text-white hover:bg-[#2d2e30]'
+            }`}
+          >
+            <BookOpen size={14} className="text-indigo-400" />
+            <span>Documentation Blog</span>
           </button>
 
           {/* Admin Switch button: ONLY visible to verified admins */}
@@ -260,7 +221,7 @@ export default function Sidebar({
               }`}
             >
               <ShieldAlert size={14} className="text-red-400" />
-              <span>Admin Feature Portal (/admin)</span>
+              <span>Admin Feature Portal</span>
             </button>
           )}
 
@@ -282,8 +243,8 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* Recent Notes Section */}
-      {!collapsed && (
+      {/* Recent AI Notes Section — omitted completely when Gemini AI is disabled for this user */}
+      {!collapsed && geminiEnabled && (
         <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1 scrollbar-thin">
           <div className="px-2 py-1 text-[11px] font-medium text-[#9aa0a6] uppercase tracking-wider flex items-center justify-between">
             <span>Recent Encounters & Docs</span>
@@ -292,7 +253,7 @@ export default function Sidebar({
 
           {recentChats.length === 0 ? (
             <div className="px-3 py-4 text-xs text-[#70757a] text-center italic">
-              No recent documents. Speak or type to create a note.
+              No recent documents. Paste a transcript or dictation to create a note.
             </div>
           ) : (
             recentChats.map((chat) => {
@@ -325,7 +286,7 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* Footer: Upgrade to Premium & Settings */}
+      {/* Footer: Upgrade & Settings */}
       <div className="mt-auto space-y-2 pt-2 border-t border-[#3c4043]/30">
         <button
           type="button"
@@ -333,10 +294,10 @@ export default function Sidebar({
           className={`w-full bg-gradient-to-r from-[#4e8cff] to-[#8b5cf6] hover:from-[#3b7cee] hover:to-[#7c4ae6] rounded-full py-2.5 text-xs font-semibold flex items-center justify-center gap-2 text-white shadow-lg shadow-[#4e8cff]/10 transition-all cursor-pointer ${
             collapsed ? 'px-0' : 'px-4'
           }`}
-          title="Upgrade & Credits"
+          title="Upgrade Plan"
         >
           <Gem size={15} className="shrink-0" />
-          {!collapsed && <span>Upgrade / Buy Credits</span>}
+          {!collapsed && <span>Upgrade Plan</span>}
         </button>
 
         <button
@@ -345,7 +306,7 @@ export default function Sidebar({
           className={`w-full flex items-center ${
             collapsed ? 'justify-center p-2' : 'gap-3 p-2.5'
           } hover:bg-[#2d2e30] rounded-xl text-xs text-[#c4c7c5] hover:text-white transition-colors cursor-pointer`}
-          title="Settings & help"
+          title="Settings & profile"
         >
           <Settings size={18} className="shrink-0 text-[#9aa0a6]" />
           {!collapsed && <span>Settings & Profile</span>}

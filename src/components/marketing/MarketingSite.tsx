@@ -30,11 +30,13 @@ import {
   Quote
 } from 'lucide-react';
 import { CEOSection } from '../CEOSection';
-import { SubscriptionPlan, UserUsageState, UserProfile } from '../../types';
+import { UserUsageState, UserProfile } from '../../types';
+import { TESTIMONIALS, VERIFIED_CLINICS_COUNT, hasRealTestimonials } from '../../data/testimonials';
 
 interface MarketingSiteProps {
   onLaunchApp: () => void;
   onOpenPricing: () => void;
+  onOpenBlog?: (slug?: string | null) => void;
   usageState?: UserUsageState;
   currentUser?: UserProfile | null;
 }
@@ -54,7 +56,7 @@ export const CLINIC_AUDIENCE_SAMPLES = [
     sections: [
       { label: 'Subjective', text: '45-year-old male presents with acute onset substernal chest pain for 2 days, worse on exertion. No other symptoms reported.' },
       { label: 'Objective', text: 'Blood pressure: 150/95 mmHg, heart rate: 92 bpm. Electrocardiogram (ECG): normal.' },
-      { label: 'Assessment', text: 'Not documented' },
+      { label: 'Assessment', text: 'Not specified in transcript' },
       { label: 'Plan', text: 'Started aspirin 75mg orally. Review in 1 week.' },
     ],
     isClinical: true,
@@ -108,10 +110,10 @@ export const COMPANY_AUDIENCE_SAMPLES = [
       { label: 'Summary', text: 'Move login to Google sign-in to cut password resets.' },
       { label: 'Motivation', text: 'Cut password resets and streamline employee access.' },
       { label: 'Proposal', text: 'Move login to Google sign-in as primary identity provider.' },
-      { label: 'Alternatives', text: 'Not documented' },
+      { label: 'Alternatives', text: 'Not specified in transcript' },
       { label: 'Risks', text: 'Users without Google accounts may be unable to authenticate.' },
       { label: 'Rollout', text: 'Rollout in 2 weeks.' },
-      { label: 'Open Questions', text: 'Not documented' },
+      { label: 'Open Questions', text: 'Not specified in transcript' },
     ],
     isClinical: false,
   },
@@ -124,12 +126,12 @@ export const COMPANY_AUDIENCE_SAMPLES = [
     sections: [
       { label: 'To', text: 'All staff' },
       { label: 'From', text: 'Ops' },
-      { label: 'Date', text: 'Not documented' },
+      { label: 'Date', text: 'Not specified in transcript' },
       { label: 'Subject', text: 'Office closed Friday for maintenance' },
       { label: 'Purpose', text: 'Office closed Friday for scheduled maintenance' },
-      { label: 'Background', text: 'Not documented' },
+      { label: 'Background', text: 'Not specified in transcript' },
       { label: 'Recommendation', text: 'Work from home' },
-      { label: 'Next Steps', text: 'Not documented' },
+      { label: 'Next Steps', text: 'Not specified in transcript' },
     ],
     isClinical: false,
   },
@@ -151,39 +153,62 @@ export const COMPANY_AUDIENCE_SAMPLES = [
   },
 ];
 
-// -------------------------------------------------------------
-// Interactive Clinical SOAP Note Demo Presets
-// -------------------------------------------------------------
-const CLINICAL_SOAP_PRESETS = [
+type ClinicalSpecialty = 'Primary Care' | 'Endocrinology' | 'Cardiology' | 'Urgent Care' | 'General';
+
+const CLINICAL_SPECIALTIES: ClinicalSpecialty[] = [
+  'Primary Care',
+  'Endocrinology',
+  'Cardiology',
+  'Urgent Care',
+  'General',
+];
+
+const CLINICAL_SOAP_PRESETS: Array<{
+  title: string;
+  badge: string;
+  specialty: ClinicalSpecialty;
+  transcript: string;
+}> = [
   {
-    title: 'Type 2 Diabetes & Neuropathy',
-    badge: 'Endocrine & Chronic Care',
-    transcript: `Doctor note: 62-year-old female presents for scheduled 6-month diabetic follow-up. States her feet have been burning and 'prickly' at night for 3 months. Fasting blood sugars at home running 160 to 195. She takes Metformin 1000mg twice daily and Glipizide 5mg daily. Vitals: BP 142/88 mmHg, HR 78, Weight 184 lbs, BMI 31.2. Point of care HbA1c is 8.6% today (up from 7.4% 6 months ago). Foot inspection: No open ulcerations or calluses, but bilateral loss of protective sensation to 10g Semmes-Weinstein monofilament on plantar surfaces. DP pulses 2+ palpable bilaterally. Plan discussed: Add SGLT2 inhibitor (Empagliflozin 10mg daily), start Gabapentin 100mg TID for neuropathic burning, order microalbumin and lipid panel, and refer to diabetic educator.`
+    title: 'Primary Care: Hypertension & Annual Follow-Up',
+    badge: 'Primary Care',
+    specialty: 'Primary Care',
+    transcript: `Primary care visit: 54-year-old male presents for 3-month hypertension follow-up and routine preventive review. Reports taking Amlodipine 5mg daily without side effects, occasional mild ankle swelling in the evening. Home BP readings average 134/84. Denies chest pain, dyspnea, headaches, or visual changes. Vitals today: BP 136/86 mmHg, HR 72, BMI 27.8. Exam: Heart regular rate and rhythm without murmurs, lungs clear bilaterally, trace bilateral pedal edema. Labs from last week: Creatinine 0.92, K+ 4.1, LDL 118. Plan: Continue Amlodipine 5mg daily, reinforce DASH diet and 150 min/week brisk walking, order fasting lipid panel and HbA1c screening, return in 3 months.`,
+  },
+  {
+    title: 'Endocrinology: Type 2 Diabetes & Neuropathy',
+    badge: 'Endocrinology',
+    specialty: 'Endocrinology',
+    transcript: `Endocrinology follow-up: 62-year-old female presents for 6-month diabetic evaluation. States her feet have been burning and prickly at night for 3 months. Fasting blood sugars at home running 160 to 195. Takes Metformin 1000mg twice daily and Glipizide 5mg daily. Vitals: BP 142/88 mmHg, HR 78, Weight 184 lbs, BMI 31.2. Point-of-care HbA1c is 8.6% today (up from 7.4% 6 months ago). Foot inspection: No open ulcerations or calluses, bilateral loss of protective sensation to 10g monofilament on plantar surfaces, DP pulses 2+ bilaterally. Plan: Add Empagliflozin 10mg daily, start Gabapentin 100mg TID for neuropathic burning, order urine microalbumin/creatinine ratio and lipid panel, follow up in 6 weeks.`,
   },
   {
     title: 'Urgent Care: Acute Bronchitis',
-    badge: 'Pulmonary & Acute Care',
-    transcript: `Patient is a 34yo non-smoker female with a 5-day history of worsening dry hacking cough, low-grade subjective fever, and anterior chest soreness with coughing. Denies dyspnea at rest, hemoptysis, or calf pain. Vitals: Temp 99.8 F, BP 118/76, HR 82, RR 16, SpO2 99% on room air. Exam: Pharynx clear without exudate. Lungs show diffuse coarse rhonchi bilaterally that clear partially with coughing. No focal wheezes or rales. Heart sounds regular S1/S2. Rapid COVID/Flu PCR swab negative. Assessment: Acute viral bronchitis. Plan: Symptomatic treatment with benzonatate 200mg TID PRN cough, albuterol inhaler 2 puffs Q4-6H PRN wheeze, push oral fluids, avoid antibiotics as etiology is viral. Return precautions given for fever >101 or dyspnea.`
+    badge: 'Urgent Care',
+    specialty: 'Urgent Care',
+    transcript: `Urgent care visit: 34yo non-smoker female with 5-day history of worsening dry hacking cough, low-grade subjective fever, and anterior chest soreness with coughing. Denies dyspnea at rest, hemoptysis, or calf pain. Vitals: Temp 99.8 F, BP 118/76, HR 82, RR 16, SpO2 99% on room air. Exam: Pharynx clear without exudate. Lungs show diffuse coarse rhonchi bilaterally clearing partially with coughing. Rapid COVID/Flu PCR negative. Assessment: Acute viral bronchitis. Plan: Benzonatate 200mg TID PRN cough, albuterol inhaler 2 puffs Q4-6H PRN wheeze, oral fluids, no antibiotics. Return precautions given for fever >101 F or dyspnea.`,
   },
   {
-    title: 'Cardiology: Post-Infarction Follow-up',
-    badge: 'Cardiovascular Care',
-    transcript: `Cardiology follow-up for 67yo male, 8 weeks status-post drug-eluting stent to proximal LAD for STEMI. Patient reports good exercise tolerance; walking 30 minutes daily without angina, palpitations, or orthopnea. Current medications: Aspirin 81mg, Ticagrelor 90mg BID, Atorvastatin 80mg, Metoprolol succinate 50mg, Ramipril 5mg. Vitals: BP 112/68, HR 58 regular, SpO2 98%. Exam: JVP flat. Normal S1/S2 without murmurs or gallops. Lungs clear to auscultation bilaterally. No peripheral lower extremity edema. Echo from last month: LVEF 48%, mild anterior hypokinesis. Assessment: Stable post-PCI on optimal guideline-directed medical therapy (GDMT). Plan: Continue dual antiplatelet therapy for 12 months minimum. Recheck lipid profile and liver enzymes in 4 weeks. Cardiac rehab progression endorsed.`
-  }
+    title: 'Cardiology: Post-PCI Follow-Up',
+    badge: 'Cardiology',
+    specialty: 'Cardiology',
+    transcript: `Cardiology follow-up for 67yo male, 8 weeks status-post drug-eluting stent to proximal LAD for STEMI. Walking 30 minutes daily without angina, palpitations, or orthopnea. Medications: Aspirin 81mg, Ticagrelor 90mg BID, Atorvastatin 80mg, Metoprolol succinate 50mg, Ramipril 5mg. Vitals: BP 112/68, HR 58 regular, SpO2 98%. Exam: JVP flat, normal S1/S2 without murmurs, lungs clear, no peripheral edema. Recent Echo: LVEF 48%, mild anterior hypokinesis. Assessment: Stable post-PCI on optimal GDMT. Plan: Continue DAPT for 12 months minimum, recheck lipid panel and LFTs in 4 weeks, continue cardiac rehab.`,
+  },
 ];
 
 export const MarketingSite: React.FC<MarketingSiteProps> = ({
   onLaunchApp,
   onOpenPricing,
-  usageState,
-  currentUser,
+  onOpenBlog,
+  usageState: _usageState,
+  currentUser: _currentUser,
 }) => {
   // Audience tabs (For Clinics & For Companies)
   const [audienceTab, setAudienceTab] = useState<'clinics' | 'companies'>('clinics');
   const [activeClinicSample, setActiveClinicSample] = useState(0);
   const [activeCompanySample, setActiveCompanySample] = useState(0);
 
-  // SOAP Demo interactive state
+  // Specialty filter + SOAP Demo interactive state
+  const [selectedSpecialty, setSelectedSpecialty] = useState<ClinicalSpecialty>('Primary Care');
   const [activeSoapPreset, setActiveSoapPreset] = useState(0);
   const [soapInputText, setSoapInputText] = useState(CLINICAL_SOAP_PRESETS[0].transcript);
   const [isSoapGenerating, setIsSoapGenerating] = useState(false);
@@ -211,10 +236,24 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
+  // Handle specialty filter change
+  const handleSelectSpecialty = (specialty: ClinicalSpecialty) => {
+    setSelectedSpecialty(specialty);
+    const matchIndex = CLINICAL_SOAP_PRESETS.findIndex((p) => p.specialty === specialty);
+    const nextIndex = matchIndex >= 0 ? matchIndex : 0;
+    setActiveSoapPreset(nextIndex);
+    setSoapInputText(CLINICAL_SOAP_PRESETS[nextIndex].transcript);
+    setSoapLiveOutput(null);
+    setSoapError(null);
+  };
+
   // Handle preset selection in SOAP demo
   const handleSelectSoapPreset = (index: number) => {
     setActiveSoapPreset(index);
+    setSelectedSpecialty(CLINICAL_SOAP_PRESETS[index].specialty);
     setSoapInputText(CLINICAL_SOAP_PRESETS[index].transcript);
+    setSoapLiveOutput(null);
+    setSoapError(null);
   };
 
   // Generate a live Clinical SOAP note from the textarea via the real /api/chat engine
@@ -264,34 +303,141 @@ export const MarketingSite: React.FC<MarketingSiteProps> = ({
   // Structured SOAP Output based on selected preset
   const currentSoapOutput = {
     subjective: [
-      { field: 'Chief Complaint', value: activeSoapPreset === 0 ? 'Bilateral burning foot pain (3 mos); diabetic evaluation' : activeSoapPreset === 1 ? 'Worsening dry hacking cough & chest tightness (5 days)' : 'Routine 8-week post-STEMI / LAD stenting evaluation' },
-      { field: 'History of Present Illness', value: activeSoapPreset === 0 ? '62yo female with T2DM reports progressive nocturnal burning and paresthesias in bilateral lower extremities. Home FSG running 160-195 mg/dL.' : activeSoapPreset === 1 ? '34yo female non-smoker with acute onset dry cough, low-grade fevers, and pleuritic substernal soreness after coughing.' : '67yo male s/p LAD stent 8 weeks ago. Walking 30 min/day with zero angina, dyspnea, or presyncope.' },
-      { field: 'Current Medications', value: activeSoapPreset === 0 ? 'Metformin 1000mg PO BID, Glipizide 5mg PO daily' : activeSoapPreset === 1 ? 'No regular medications. Acetaminophen PRN.' : 'Aspirin 81mg, Ticagrelor 90mg BID, Atorvastatin 80mg, Metoprolol Succinate 50mg, Ramipril 5mg' },
-      { field: 'Allergies', value: 'NKDA (No known drug allergies)' }
+      {
+        field: 'Chief Complaint',
+        value:
+          activeSoapPreset === 0
+            ? '3-month hypertension follow-up and preventive review'
+            : activeSoapPreset === 1
+              ? 'Bilateral burning foot pain (3 mos); diabetic evaluation'
+              : activeSoapPreset === 2
+                ? 'Worsening dry hacking cough & chest tightness (5 days)'
+                : 'Routine 8-week post-STEMI / LAD stenting evaluation',
+      },
+      {
+        field: 'History of Present Illness',
+        value:
+          activeSoapPreset === 0
+            ? '54yo male taking Amlodipine 5mg daily with average home BP 134/84 and mild evening ankle swelling. Denies chest pain, dyspnea, headaches, or visual changes.'
+            : activeSoapPreset === 1
+              ? '62yo female with T2DM reports progressive nocturnal burning and paresthesias in bilateral lower extremities. Home FSG running 160-195 mg/dL.'
+              : activeSoapPreset === 2
+                ? '34yo female non-smoker with acute onset dry cough, low-grade fevers, and anterior chest soreness with coughing.'
+                : '67yo male s/p LAD stent 8 weeks ago. Walking 30 min/day with zero angina, dyspnea, or presyncope.',
+      },
+      {
+        field: 'Current Medications',
+        value:
+          activeSoapPreset === 0
+            ? 'Amlodipine 5mg PO daily'
+            : activeSoapPreset === 1
+              ? 'Metformin 1000mg PO BID, Glipizide 5mg PO daily'
+              : activeSoapPreset === 2
+                ? 'Not specified in transcript'
+                : 'Aspirin 81mg, Ticagrelor 90mg BID, Atorvastatin 80mg, Metoprolol Succinate 50mg, Ramipril 5mg',
+      },
+      { field: 'Allergies', value: 'Not specified in transcript' },
     ],
     objective: [
-      { field: 'Vital Signs', value: activeSoapPreset === 0 ? 'BP: 142/88 mmHg | HR: 78 bpm | Wt: 184 lbs | BMI: 31.2' : activeSoapPreset === 1 ? 'Temp: 99.8°F | BP: 118/76 mmHg | HR: 82 bpm | SpO2: 99% RA' : 'BP: 112/68 mmHg | HR: 58 bpm (GDMT target) | SpO2: 98% RA' },
-      { field: 'Diagnostics / Labs', value: activeSoapPreset === 0 ? 'POC HbA1c: 8.6% (Uncontrolled, target <7.0%)' : activeSoapPreset === 1 ? 'Rapid COVID-19 / Influenza A+B NAAT: Negative' : 'Recent 2D Echo: LVEF 48%, mild anterior hypokinesis' },
-      { field: 'Physical Examination', value: activeSoapPreset === 0 ? 'Bilateral lower extremities: Intact skin, no ulcers. Decreased 10g monofilament sensation over bilateral 1st & 5th metatarsal heads. DP pulses 2+.' : activeSoapPreset === 1 ? 'Lungs: Coarse bilateral rhonchi clearing with cough. No focal consolidation, wheezes, or rales.' : 'Cardiovascular: JVP normal. Regular rate and rhythm, normal S1/S2. No peripheral edema.' }
+      {
+        field: 'Vital Signs',
+        value:
+          activeSoapPreset === 0
+            ? 'BP: 136/86 mmHg | HR: 72 bpm | BMI: 27.8'
+            : activeSoapPreset === 1
+              ? 'BP: 142/88 mmHg | HR: 78 bpm | Wt: 184 lbs | BMI: 31.2'
+              : activeSoapPreset === 2
+                ? 'Temp: 99.8°F | BP: 118/76 mmHg | HR: 82 bpm | SpO2: 99% RA'
+                : 'BP: 112/68 mmHg | HR: 58 bpm | SpO2: 98% RA',
+      },
+      {
+        field: 'Diagnostics / Labs',
+        value:
+          activeSoapPreset === 0
+            ? 'Creatinine: 0.92 | K+: 4.1 | LDL: 118'
+            : activeSoapPreset === 1
+              ? 'POC HbA1c: 8.6% (up from 7.4% 6 months ago)'
+              : activeSoapPreset === 2
+                ? 'Rapid COVID-19 / Influenza PCR: Negative'
+                : 'Recent Echo: LVEF 48%, mild anterior hypokinesis',
+      },
+      {
+        field: 'Physical Examination',
+        value:
+          activeSoapPreset === 0
+            ? 'Heart RRR without murmurs, lungs clear bilaterally, trace bilateral pedal edema.'
+            : activeSoapPreset === 1
+              ? 'Intact skin, no ulcers. Decreased 10g monofilament sensation bilaterally. DP pulses 2+.'
+              : activeSoapPreset === 2
+                ? 'Pharynx clear. Diffuse coarse bilateral rhonchi clearing partially with cough.'
+                : 'JVP flat. Normal S1/S2 without murmurs, lungs clear, no peripheral edema.',
+      },
     ],
     assessment: [
-      { icd: activeSoapPreset === 0 ? 'E11.42' : activeSoapPreset === 1 ? 'J20.9' : 'I25.10', title: activeSoapPreset === 0 ? 'Type 2 Diabetes Mellitus with Diabetic Polyneuropathy' : activeSoapPreset === 1 ? 'Acute Bronchitis, unspecified organism' : 'Atherosclerotic Heart Disease with LAD Stent', notes: activeSoapPreset === 0 ? 'HbA1c elevated at 8.6% with characteristic distal sensory neuropathy.' : activeSoapPreset === 1 ? 'Viral presentation; no evidence of bacterial pneumonia or hypoxemia.' : 'Post-infarction status stable on guideline-directed medical therapy.' }
+      {
+        icd: activeSoapPreset === 0 ? 'I10' : activeSoapPreset === 1 ? 'E11.42' : activeSoapPreset === 2 ? 'J20.9' : 'I25.10',
+        title:
+          activeSoapPreset === 0
+            ? 'Essential (Primary) Hypertension'
+            : activeSoapPreset === 1
+              ? 'Type 2 Diabetes Mellitus with Diabetic Polyneuropathy'
+              : activeSoapPreset === 2
+                ? 'Acute Viral Bronchitis'
+                : 'Atherosclerotic Heart Disease s/p LAD Stent',
+        notes:
+          activeSoapPreset === 0
+            ? 'Mildly elevated office BP (136/86) with home average 134/84 on Amlodipine 5mg.'
+            : activeSoapPreset === 1
+              ? 'HbA1c elevated at 8.6% with characteristic distal sensory neuropathy.'
+              : activeSoapPreset === 2
+                ? 'Viral presentation; rapid COVID/Flu negative.'
+                : 'Post-infarction status stable on guideline-directed medical therapy.',
+      },
     ],
     plan: [
-      { category: 'Pharmacotherapy', details: activeSoapPreset === 0 ? 'Initiate Empagliflozin 10mg daily. Start Gabapentin 100mg PO TID for neuropathic symptoms. Continue Metformin 1000mg BID.' : activeSoapPreset === 1 ? 'Benzonatate 200mg PO TID PRN cough. Albuterol MDI 2 puffs Q4-6H PRN wheezing. Antibiotics not indicated.' : 'Maintain dual antiplatelet therapy (Aspirin + Ticagrelor) for 12 months minimum. Continue high-intensity statin & beta blocker.' },
-      { category: 'Diagnostics Ordered', details: activeSoapPreset === 0 ? 'Spot urine microalbumin/creatinine ratio, comprehensive metabolic panel, repeat HbA1c in 12 weeks.' : activeSoapPreset === 1 ? 'Chest X-ray if symptoms persist past day 14 or if fever escalates.' : 'Fasting lipid panel and comprehensive metabolic panel in 4 weeks.' },
-      { category: 'Patient Education & Safety', details: 'Precautions given for worsening symptoms. Red flags reviewed with patient. Comprehensive documentation filed to electronic chart.' },
-      { category: 'Follow-up Interval', details: activeSoapPreset === 0 ? 'Return encounter in 6 weeks with home blood sugar log.' : activeSoapPreset === 1 ? 'PRN if fever >101°F or dyspnea develops. Otherwise routine.' : 'Return to Cardiology clinic in 3 months.' }
-    ]
+      {
+        category: 'Pharmacotherapy',
+        details:
+          activeSoapPreset === 0
+            ? 'Continue Amlodipine 5mg daily.'
+            : activeSoapPreset === 1
+              ? 'Add Empagliflozin 10mg daily. Start Gabapentin 100mg PO TID for neuropathic symptoms.'
+              : activeSoapPreset === 2
+                ? 'Benzonatate 200mg PO TID PRN cough, albuterol inhaler 2 puffs Q4-6H PRN wheeze. No antibiotics.'
+                : 'Continue DAPT (Aspirin + Ticagrelor) for 12 months minimum.',
+      },
+      {
+        category: 'Diagnostics Ordered',
+        details:
+          activeSoapPreset === 0
+            ? 'Order fasting lipid panel and HbA1c screening.'
+            : activeSoapPreset === 1
+              ? 'Order urine microalbumin/creatinine ratio and lipid panel.'
+              : activeSoapPreset === 2
+                ? 'Not specified in transcript'
+                : 'Recheck lipid panel and LFTs in 4 weeks.',
+      },
+      {
+        category: 'Follow-up Interval',
+        details:
+          activeSoapPreset === 0
+            ? 'Return in 3 months; reinforce DASH diet and 150 min/week brisk walking.'
+            : activeSoapPreset === 1
+              ? 'Follow up in 6 weeks.'
+              : activeSoapPreset === 2
+                ? 'Return precautions for fever >101°F or dyspnea.'
+                : 'Continue cardiac rehab.',
+      },
+    ],
   };
 
   // Full EMR Raw string for copy/export — prefers the live API output
   const rawEmrText = soapLiveOutput
-    ? `=== PULSE NOTE AI CLINICAL SUMMARY ===\nPATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}\nTIMESTAMP: ${new Date().toISOString()}\nCOMPLIANCE: Built on Google Cloud. Do not enter patient-identifying information.\n\n${soapLiveOutput}\n=======================================`
+    ? `=== PULSE NOTE AI CLINICAL SUMMARY ===\nPATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}\nTIMESTAMP: ${new Date().toISOString()}\nNOTICE: AI-assisted draft. Do not enter patient-identifying information.\n\n${soapLiveOutput}\n=======================================`
     : `=== PULSE NOTE AI CLINICAL SUMMARY ===
 PATIENT ENCOUNTER: ${CLINICAL_SOAP_PRESETS[activeSoapPreset].title}
 TIMESTAMP: ${new Date().toISOString()}
-COMPLIANCE: Built on Google Cloud. Do not enter patient-identifying information.
+NOTICE: AI-assisted draft. Do not enter patient-identifying information.
 
 [SUBJECTIVE]
 ${currentSoapOutput.subjective.map(s => `• ${s.field}: ${s.value}`).join('\n')}
@@ -327,7 +473,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
     {
       category: 'clinical',
       question: 'How does Pulse Note AI handle patient data privacy?',
-      answer: 'Your notes stay in your account. You can delete them at any time. All transmission is encrypted via HTTPS/TLS, and data is stored securely on Google Cloud infrastructure. As a best practice, do not enter direct patient-identifying information into dictation fields.'
+      answer: 'Your notes stay in your account and you can delete them at any time. All transmission is encrypted via HTTPS/TLS. As a best practice, do not enter direct patient-identifying information into dictation fields.'
     },
     {
       category: 'clinical',
@@ -383,6 +529,13 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             <a href="#audiences" className="hover:text-white transition-colors">Audiences</a>
             <a href="#soap-demo" className="hover:text-white transition-colors">Clinical SOAP Demo</a>
             <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
+            <button
+              type="button"
+              onClick={() => onOpenBlog?.(null)}
+              className="hover:text-white transition-colors cursor-pointer"
+            >
+              Blog
+            </button>
             <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
             <a href="#about" className="hover:text-white transition-colors">About</a>
           </nav>
@@ -421,10 +574,13 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
           
           {/* Top Kicker Label */}
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#1e1f20] border border-[#3c4043]/50 text-xs text-[#c4c7c5] mb-8">
-            <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse" />
-            <span>Deterministic Documentation Engine</span>
-            <span className="text-[#9aa0a6]">·</span>
-            <span className="text-white font-medium">pulsenoteai.in</span>
+            <span>Deterministic Clinical & Enterprise Documentation</span>
+            {VERIFIED_CLINICS_COUNT !== null && VERIFIED_CLINICS_COUNT > 0 && (
+              <>
+                <span className="text-[#9aa0a6]">·</span>
+                <span className="text-emerald-400 font-medium">Trusted by {VERIFIED_CLINICS_COUNT} clinics</span>
+              </>
+            )}
           </div>
 
           {/* Exact User Headline */}
@@ -618,16 +774,23 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                     </div>
 
                     <div className="space-y-3">
-                      {currentSample.sections.map((sec, sIdx) => (
-                        <div key={sIdx} className="p-3.5 rounded-xl bg-[#1e1f20]/70 border border-[#3c4043]/30 space-y-1">
-                          <div className="text-[11px] font-bold text-[#4e8cff] uppercase tracking-wider">
-                            {sec.label}
+                      {currentSample.sections.map((sec, sIdx) => {
+                        const isNotSpecified = /^(Not specified in transcript\.?|Not documented\.?)$/i.test(sec.text.trim());
+                        return (
+                          <div key={sIdx} className="p-3.5 rounded-xl bg-[#1e1f20]/70 border border-[#3c4043]/30 space-y-1">
+                            <div className="text-[11px] font-bold text-[#4e8cff] uppercase tracking-wider">
+                              {sec.label}
+                            </div>
+                            <div
+                              className={`text-xs sm:text-sm leading-relaxed whitespace-pre-line font-sans ${
+                                isNotSpecified ? 'text-[#9aa0a6] italic' : 'text-[#e3e3e3]'
+                              }`}
+                            >
+                              {isNotSpecified ? 'Not specified in transcript' : sec.text}
+                            </div>
                           </div>
-                          <div className="text-xs sm:text-sm text-[#e3e3e3] leading-relaxed whitespace-pre-line font-sans">
-                            {sec.text}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* Short line under every generated clinical document */}
@@ -667,22 +830,48 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             </p>
           </div>
 
-          {/* Interactive Preset Chips */}
-          <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
-            {CLINICAL_SOAP_PRESETS.map((preset, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSelectSoapPreset(idx)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer ${
-                  activeSoapPreset === idx
-                    ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/40 shadow-sm'
-                    : 'bg-[#1e1f20] text-[#9aa0a6] hover:text-white border border-[#3c4043]/50'
-                }`}
-              >
-                <span>{preset.title}</span>
-                <span className="text-[10px] opacity-75">({preset.badge})</span>
-              </button>
-            ))}
+          {/* Specialty Selector (Built for Primary Care / Endocrinology / Cardiology / Urgent Care / General) */}
+          <div className="flex flex-col items-center gap-3 mb-6">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="text-xs font-semibold text-[#9aa0a6] mr-1">Built for:</span>
+              {CLINICAL_SPECIALTIES.map((specialty) => (
+                <button
+                  key={specialty}
+                  type="button"
+                  onClick={() => handleSelectSpecialty(specialty)}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                    selectedSpecialty === specialty
+                      ? 'bg-[#4e8cff]/20 text-white border-[#4e8cff] shadow-sm'
+                      : 'bg-[#1e1f20] text-[#9aa0a6] hover:text-white border-[#3c4043]/50'
+                  }`}
+                >
+                  {specialty}
+                </button>
+              ))}
+            </div>
+
+            {/* Interactive Preset Chips filtered by specialty (shows all when General is chosen) */}
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              {CLINICAL_SOAP_PRESETS.map((preset, idx) => {
+                if (selectedSpecialty !== 'General' && preset.specialty !== selectedSpecialty) {
+                  return null;
+                }
+                return (
+                  <button
+                    key={preset.title}
+                    type="button"
+                    onClick={() => handleSelectSoapPreset(idx)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                      activeSoapPreset === idx
+                        ? 'bg-[#10b981]/15 text-[#10b981] border border-[#10b981]/40 shadow-sm'
+                        : 'bg-[#1e1f20] text-[#9aa0a6] hover:text-white border border-[#3c4043]/50'
+                    }`}
+                  >
+                    <span>{preset.title}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Interactive Workspace Box */}
@@ -733,7 +922,6 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               {/* Header Controls */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#3c4043]/40 pb-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[#10b981] animate-ping" />
                   <span className="text-xs font-bold text-white tracking-wide">CLINICAL DOCUMENTATION RECORD</span>
                 </div>
 
@@ -892,15 +1080,15 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             {/* Pillar 1 */}
             <div className="p-8 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/50 space-y-4 hover:border-[#4e8cff]/50 transition-colors">
               <div className="w-12 h-12 rounded-xl bg-[#4e8cff]/15 text-[#4e8cff] flex items-center justify-center">
-                <Lock className="w-6 h-6" />
+                <ShieldCheck className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-white">Built on Google Cloud</h3>
+              <h3 className="text-xl font-bold text-white">Fact-Checking Against Input</h3>
               <p className="text-xs sm:text-sm text-[#9aa0a6] leading-relaxed">
-                Built on Google Cloud. Do not enter patient-identifying information. Processed with enterprise-grade infrastructure.
+                Every numeric vital, dosage, and clinical term is cross-checked against your source transcript. Unverified tokens are flagged inline and missing fields display "Not specified in transcript".
               </p>
               <div className="pt-2 text-xs font-medium text-[#4e8cff] flex items-center gap-1.5">
                 <Check className="w-4 h-4" />
-                <span>Google Cloud architecture</span>
+                <span>Source-grounded verification</span>
               </div>
             </div>
 
@@ -911,7 +1099,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               </div>
               <h3 className="text-xl font-bold text-white">Deterministic Clinical Schemas</h3>
               <p className="text-xs sm:text-sm text-[#9aa0a6] leading-relaxed">
-                Unlike open-ended chatbots that hallucinate medical prescriptions, Pulse Note AI enforces rigid JSON schema validation for vital ranges and standard ICD-10 codings.
+                Unlike open-ended chatbots that invent sections or prescriptions, PulseNote AI enforces fixed JSON schemas for SOAP notes, discharge summaries, referrals, memos, and RFCs — plus optional ICD-10-CM suggestions on Pro.
               </p>
               <div className="pt-2 text-xs font-medium text-[#10b981] flex items-center gap-1.5">
                 <Check className="w-4 h-4" />
@@ -924,13 +1112,13 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <div className="w-12 h-12 rounded-xl bg-[#ff5757]/15 text-[#ff5757] flex items-center justify-center">
                 <Zap className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-white">Multi-Engine Redundancy</h3>
+              <h3 className="text-xl font-bold text-white">Single-Provider with Fallback Model</h3>
               <p className="text-xs sm:text-sm text-[#9aa0a6] leading-relaxed">
-                Powered by dual-rail infrastructure combining Google Gemini 2.5 Pro with OpenRouter failover to ensure 99.9% uptime during peak clinical and trading hours.
+                Streamlined single-provider OpenRouter gateway with automatic fallback model routing so your documentation stays fast, consistent, and dependable during busy clinic hours.
               </p>
               <div className="pt-2 text-xs font-medium text-[#ff5757] flex items-center gap-1.5">
                 <Check className="w-4 h-4" />
-                <span>Dual-rail failover active</span>
+                <span>Automatic model fallback</span>
               </div>
             </div>
 
@@ -950,11 +1138,14 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <Zap className="w-4 h-4" />
               <span>Transparent Plans</span>
             </div>
-            <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
+            <h2 className="text-3xl sm:text-4xl font-bold text-white mb-3">
               Predictable Pricing For Clinicians & Enterprises
             </h2>
+            <p className="text-sm sm:text-base font-semibold text-emerald-400 mb-3">
+              Competitors charge $100–300/clinician/month. PulseNote starts free.
+            </p>
             <p className="text-sm sm:text-base text-[#9aa0a6]">
-              Start free with 5 documents a month. Upgrade to Pro or Team for unlimited documents, Word and PDF downloads, version history, and custom clinic letterheads.
+              Start free with 5 documents a month. Upgrade to Pro or Team for unlimited documents, watermark-free PDF and Word exports, ICD-10 code suggestions, version history, and custom clinic letterheads.
             </p>
 
             {/* Currency & Annual Toggle */}
@@ -1018,7 +1209,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   </div>
                   <div className="flex items-start gap-2">
                     <Check className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" />
-                    <span>Copy text only</span>
+                    <span>PDF & Word export (with watermark)</span>
                   </div>
                   <div className="flex items-start gap-2 text-[#9aa0a6]">
                     <span className="text-amber-400 font-bold">•</span>
@@ -1064,11 +1255,11 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   </div>
                   <div className="flex items-start gap-2">
                     <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
-                    <span>PDF and Word (.docx) download</span>
+                    <span>PDF and Word (.docx) download (no watermark)</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
-                    <span>No watermark</span>
+                    <span>ICD-10-CM code suggestions for SOAP notes</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <Check className="w-4 h-4 text-[#4e8cff] shrink-0 mt-0.5" />
@@ -1242,10 +1433,17 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   </tr>
                   <tr>
                     <td className="p-4 font-medium text-white">Export Formats</td>
-                    <td className="p-4">Copy text only</td>
-                    <td className="p-4">PDF & Word (.docx)</td>
+                    <td className="p-4">PDF & Word (with watermark)</td>
+                    <td className="p-4">Clean PDF, Word & FHIR JSON</td>
                     <td className="p-4">PDF & Word with Letterhead</td>
                     <td className="p-4">PDF, Word, EHR API</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-medium text-white">ICD-10-CM Suggestions</td>
+                    <td className="p-4 text-[#9aa0a6]">—</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
+                    <td className="p-4 text-emerald-400 font-semibold">Included</td>
                   </tr>
                   <tr>
                     <td className="p-4 font-medium text-white">Watermark</td>
@@ -1287,59 +1485,34 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             </div>
           </div>
 
-          {/* Testimonials Section (Requirement 7 - clearly marked placeholders) */}
-          <div className="space-y-6 pt-8 border-t border-[#3c4043]/30">
-            <div className="text-center max-w-2xl mx-auto">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-semibold mb-2">
-                <span>Verified Feedback Preview</span>
-              </div>
-              <h3 className="text-2xl font-bold text-white">What Early Teams Are Saying</h3>
-              <p className="text-xs text-[#9aa0a6] mt-1">
-                Clearly marked sample review placeholders until ongoing clinic and enterprise case study interviews conclude.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3 relative">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                  Placeholder — Clinic Case Study
-                </span>
-                <p className="text-xs text-[#c4c7c5] italic leading-relaxed">
-                  "The deterministic output schema changed our workflow. The fact that empty sections explicitly say 'Not documented' instead of fabricating lab results gives our attending physicians complete confidence."
-                </p>
-                <div className="pt-2 border-t border-[#3c4043]/20">
-                  <div className="text-xs font-bold text-white">Dr. A. Mehta, MD</div>
-                  <div className="text-[11px] text-[#9aa0a6]">Medical Director, Cardiology Group</div>
-                </div>
+          {/* Testimonials Section — hidden completely until at least 2 real beta-user quotes exist in src/data/testimonials.ts */}
+          {hasRealTestimonials() && (
+            <div className="space-y-6 pt-8 border-t border-[#3c4043]/30">
+              <div className="text-center max-w-2xl mx-auto">
+                <h3 className="text-2xl font-bold text-white">What Early Teams Are Saying</h3>
               </div>
 
-              <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3 relative">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                  Placeholder — Enterprise Engineering
-                </span>
-                <p className="text-xs text-[#c4c7c5] italic leading-relaxed">
-                  "Our engineers draft architectural RFCs in 3 minutes after standup. The fixed 8-section layout forces clear risk analysis and rollout planning without repetitive formatting."
-                </p>
-                <div className="pt-2 border-t border-[#3c4043]/20">
-                  <div className="text-xs font-bold text-white">R. Sharma</div>
-                  <div className="text-[11px] text-[#9aa0a6]">VP Engineering, Cloud Platform</div>
-                </div>
-              </div>
-
-              <div className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3 relative">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                  Placeholder — Ambulatory Clinic
-                </span>
-                <p className="text-xs text-[#c4c7c5] italic leading-relaxed">
-                  "We process 30 patient visits daily across 4 providers. The team admin dashboard, shared clinic templates, and letterhead exports on PDF save each doctor over 90 minutes of charting every day."
-                </p>
-                <div className="pt-2 border-t border-[#3c4043]/20">
-                  <div className="text-xs font-bold text-white">Dr. K. Swaminathan</div>
-                  <div className="text-[11px] text-[#9aa0a6]">Lead Clinician, Family Health Center</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {TESTIMONIALS.map((item) => (
+                  <div key={item.id} className="p-6 rounded-2xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-3">
+                    {item.specialty && (
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                        {item.specialty}
+                      </span>
+                    )}
+                    <p className="text-xs text-[#c4c7c5] italic leading-relaxed">"{item.quote}"</p>
+                    <div className="pt-2 border-t border-[#3c4043]/20">
+                      <div className="text-xs font-bold text-white">{item.authorName}</div>
+                      <div className="text-[11px] text-[#9aa0a6]">
+                        {item.authorRole}
+                        {item.organization ? `, ${item.organization}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
         </div>
       </section>
@@ -1359,7 +1532,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               Frequently Asked Questions
             </h2>
             <p className="text-sm text-[#9aa0a6]">
-              Everything you need to know about models, privacy guidelines, pricing, and templates. Built on Google Cloud. Do not enter patient-identifying information.
+              Everything you need to know about templates, privacy guidelines, pricing, and exports. Do not enter patient-identifying information.
             </p>
           </div>
 
@@ -1463,19 +1636,45 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               <p className="text-xs sm:text-sm text-[#9aa0a6] leading-relaxed">
                 Whether you are charting an emergency room patient encounter, conducting a real estate foundation walk-through, or summarizing a board decision, our schemas deliver immediate, actionable clarity.
               </p>
-              <div className="pt-2 flex items-center gap-6 text-xs text-white">
+              <div className="pt-2 flex flex-wrap items-center gap-6 text-xs text-white">
                 <div>
-                  <div className="font-bold text-lg text-[#10b981]">100%</div>
-                  <div className="text-[#9aa0a6] text-[11px]">Strict Privacy Guarantees</div>
+                  <div className="font-bold text-lg text-[#10b981]">Fixed</div>
+                  <div className="text-[#9aa0a6] text-[11px]">Deterministic Schemas</div>
                 </div>
                 <div>
-                  <div className="font-bold text-lg text-[#4e8cff]">24/7</div>
-                  <div className="text-[#9aa0a6] text-[11px]">Dual-Engine Uptime</div>
+                  <div className="font-bold text-lg text-[#4e8cff]">Verified</div>
+                  <div className="text-[#9aa0a6] text-[11px]">Fact-Checked Against Input</div>
                 </div>
                 <div>
                   <div className="font-bold text-lg text-[#ff5757]">pulsenoteai.in</div>
                   <div className="text-[#9aa0a6] text-[11px]">Official Domain</div>
                 </div>
+              </div>
+
+              {/* Launch Prep: Product Hunt Badge Placeholder & LinkedIn Share Button */}
+              <div className="pt-4 border-t border-[#3c4043]/40 flex flex-wrap items-center gap-3">
+                <a
+                  href="https://www.producthunt.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2.5 px-4 py-2 rounded-xl bg-[#131314] border border-[#da552f]/40 hover:border-[#da552f] text-xs font-semibold text-white transition-colors"
+                  title="Product Hunt launch badge placeholder — replace href with live launch URL"
+                >
+                  <span className="w-5 h-5 rounded-full bg-[#da552f] text-white font-bold flex items-center justify-center text-[11px]">
+                    P
+                  </span>
+                  <span>Launching Soon on Product Hunt</span>
+                </a>
+
+                <a
+                  href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fpulsenoteai.in"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0a66c2]/15 hover:bg-[#0a66c2]/25 border border-[#0a66c2]/40 text-xs font-semibold text-[#70b5f9] transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Share on LinkedIn</span>
+                </a>
               </div>
             </div>
 
@@ -1529,7 +1728,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
               </blockquote>
 
               <p className="text-[11px] text-[#9aa0a6] leading-relaxed">
-                Full-stack AI architect and engineer pioneering deterministic clinical synthesis and multimodal engines. Leading PulseNote AI to eliminate hours of administrative drag for healthcare providers globally.
+                Full-stack AI architect and engineer building deterministic clinical and enterprise documentation workflows for healthcare providers and technical teams.
               </p>
 
               <div className="pt-2 flex items-center justify-between border-t border-[#3c4043]/30 text-[11px]">
@@ -1551,17 +1750,17 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
           <div className="rounded-2xl p-8 sm:p-12 bg-gradient-to-r from-[#1e1f20] via-[#242528] to-[#1e1f20] border border-[#3c4043]/60 text-center space-y-6 relative overflow-hidden">
             <div className="max-w-2xl mx-auto space-y-3 relative z-10">
               <h3 className="text-2xl sm:text-3xl font-extrabold text-white">
-                Ready to Experience Next-Generation Documentation?
+                Ready to Experience Deterministic Documentation?
               </h3>
               <p className="text-xs sm:text-sm text-[#9aa0a6]">
-                Launch the studio now. 3 free prompt transformations every single day with no credit card required.
+                Start free with 5 structured documents every month — no credit card required.
               </p>
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4">
                 <button
                   onClick={onLaunchApp}
                   className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-[#4e8cff] to-[#ff5757] hover:opacity-95 text-white font-bold text-xs shadow-xl shadow-[#4e8cff]/20 transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  <span>Launch Live AI Studio</span>
+                  <span>Start Free Workspace</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
@@ -1597,7 +1796,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <span className="text-sm font-bold text-white">PulseNote AI</span>
               </div>
               <p className="text-[11px] leading-relaxed">
-                The intelligent documentation and multimodality engine for clinical, enterprise, and technical domains.
+                Deterministic clinical and enterprise documentation engine for SOAP notes, discharge summaries, referrals, memos, and RFCs.
               </p>
               <div className="text-[11px] text-white">
                 Domain: <span className="text-[#4e8cff]">pulsenoteai.in</span>
@@ -1617,9 +1816,10 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
             </div>
 
             <div>
-              <div className="text-white font-semibold mb-3">Product & Pricing</div>
+              <div className="text-white font-semibold mb-3">Product & Resources</div>
               <ul className="space-y-2 text-[11px]">
                 <li><button onClick={onLaunchApp} className="hover:text-white transition-colors text-left cursor-pointer">Start Free (5 Docs/Mo)</button></li>
+                <li><button onClick={() => onOpenBlog?.(null)} className="hover:text-white transition-colors text-left cursor-pointer">Clinical Documentation Blog</button></li>
                 <li><a href="#soap-demo" className="hover:text-white transition-colors">Interactive SOAP Demo</a></li>
                 <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Pro Plan (₹699/mo)</button></li>
                 <li><button onClick={onOpenPricing} className="hover:text-white transition-colors text-left cursor-pointer">Clinic / Team (₹399/seat)</button></li>
@@ -1701,7 +1901,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                     <span>Welcome Message From The CEO</span>
                   </span>
                   <button
-                    onClick={() => handleCopyText('welcome', `Dear Innovator, Physician, and Builder,\n\nWelcome to PulseNote AI (pulsenoteai.in)...\n\nEvery great product starts with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical founders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters.\n\nWe didn't build PulseNote AI to be another conversational novelty. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly. Built on Google Cloud. Do not enter patient-identifying information.\n\nWhether you're charting your 30th patient encounter of the day or documenting a pivotal board decision, PulseNote AI is engineered to give you your time and presence back.\n\nThank you for trusting our platform. Let's build a future where documentation works for you, not against you.\n\nWarmly,\nJayesh Wagh\nFounder & CEO, PulseNote AI\ngithub.com/jayeshwagh`)}
+                    onClick={() => handleCopyText('welcome', `Dear Innovator, Physician, and Builder,\n\nWelcome to PulseNote AI (pulsenoteai.in).\n\nEvery great product starts with a point of friction. For me, that friction was watching clinicians and technical leaders spend hours formatting paperwork instead of doing high-leverage work.\n\nWe built PulseNote AI as a deterministic documentation engine that turns raw transcripts into structured, fact-checked records in seconds.\n\nWarmly,\nJayesh Wagh\nFounder & CEO, PulseNote AI\ngithub.com/jayeshwagh`)}
                     className="text-[11px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     {copiedSection === 'welcome' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1712,7 +1912,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   "Every great product begins with a point of unbearable friction. For me, that friction was watching brilliant clinicians and technical leaders spend half their waking hours trapped in electronic paperwork instead of doing the work that matters."
                 </p>
                 <p className="text-[11px] text-[#9aa0a6]">
-                  "We didn't build PulseNote AI to be another conversational novelty. We built it as an uncompromising, deterministic intelligence rail—one that transforms chaotic voice dictations and high-stakes meetings into rigorous, structured documentation instantly. Built on Google Cloud. Do not enter patient-identifying information. Welcome to next-generation documentation."
+                  "We built PulseNote AI as a deterministic documentation engine—turning raw encounter transcripts and technical notes into structured, fact-checked records in seconds."
                 </p>
                 <div className="text-[11px] text-[#e3e3e3] font-semibold pt-1">
                   — Jayesh Wagh, Founder & CEO
@@ -1727,7 +1927,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-white uppercase tracking-wider">Short Bio (Conferences & X)</span>
                     <button
-                      onClick={() => handleCopyText('shortBio', `Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, secure healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders. Built on Google Cloud. Do not enter patient-identifying information.`)}
+                      onClick={() => handleCopyText('shortBio', `Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), a deterministic clinical and enterprise documentation platform built to help clinicians and teams produce structured SOAP notes, discharge summaries, referrals, memos, and RFCs in seconds.`)}
                       className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
                     >
                       {copiedSection === 'shortBio' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1735,7 +1935,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                     </button>
                   </div>
                   <p className="text-[11px] text-[#9aa0a6]">
-                    Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), an intelligent clinical documentation and multimodal synthesis platform. An engineer and systems architect, Jayesh specializes in deterministic AI pipelines, secure healthcare workflows, and multi-rail LLM infrastructure designed to eliminate administrative fatigue for medical and enterprise leaders. Built on Google Cloud. Do not enter patient-identifying information.
+                    Jayesh Wagh is the Founder & CEO of PulseNote AI (pulsenoteai.in), a deterministic clinical and enterprise documentation platform built to help clinicians and teams produce structured SOAP notes, discharge summaries, referrals, memos, and RFCs in seconds.
                   </p>
                 </div>
 
@@ -1763,7 +1963,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-white uppercase tracking-wider">Full Executive Bio (Press Kit & Media)</span>
                   <button
-                    onClick={() => handleCopyText('longBio', `Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern multimodal AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.\n\nUnder Jayesh's leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from structured SOAP clinical dictation to software RFC generation and commercial property defect grading. Built on Google Cloud. Do not enter patient-identifying information.\n\nAn active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and video generation models like Veo, continuously pushing the boundaries of what assistive generative software can achieve.`)}
+                    onClick={() => handleCopyText('longBio', `Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining full-stack engineering and structured AI pipelines, Jayesh founded PulseNote AI to cut clerical burnout for clinicians and technical teams.\n\nUnder Jayesh's leadership, PulseNote AI built deterministic JSON schemas for SOAP notes, discharge summaries, referrals, engineering RFCs, and decision memos—backed by fact-checking against input transcripts and a single-provider API architecture with fallback model routing.`)}
                     className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
                   >
                     {copiedSection === 'longBio' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1772,13 +1972,10 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 </div>
                 <div className="space-y-2 text-[11px] text-[#9aa0a6] leading-relaxed">
                   <p>
-                    Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining deep technical acumen in full-stack architecture, distributed systems, and modern multimodal AI APIs, Jayesh founded PulseNote AI with a mission to liberate high-consequence practitioners from clerical burnout.
+                    Jayesh Wagh is the Founder and Chief Executive Officer of PulseNote AI (pulsenoteai.in). Combining full-stack engineering and structured AI pipelines, Jayesh founded PulseNote AI to cut clerical burnout for clinicians and technical teams.
                   </p>
                   <p>
-                    Under Jayesh's leadership, PulseNote AI developed a proprietary multi-rail processing architecture integrating Google Gemini reasoning with OpenRouter failover, providing 5 distinct industry modes—ranging from structured SOAP clinical dictation to software RFC generation and commercial property defect grading. Built on Google Cloud. Do not enter patient-identifying information.
-                  </p>
-                  <p>
-                    An active open-source contributor and technical builder (GitHub: @jayeshwagh), Jayesh frequently explores the frontiers of edge AI, real-time audio orchestration, and generative video pipelines, continuously pushing the boundaries of what assistive generative software can achieve.
+                    Under Jayesh's leadership, PulseNote AI built deterministic JSON schemas for SOAP notes, discharge summaries, referrals, engineering RFCs, and decision memos—backed by fact-checking against input transcripts and a single-provider API architecture with fallback model routing.
                   </p>
                 </div>
               </div>
@@ -1788,7 +1985,7 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-white uppercase tracking-wider">Executive Fast Facts & Press Sheet</span>
                   <button
-                    onClick={() => handleCopyText('facts', `Name: Jayesh Wagh\nTitle: Founder & CEO\nCompany: PulseNote AI\nDomain: pulsenoteai.in\nGitHub: https://github.com/jayeshwagh\nContact: contact@pulsenoteai.in\nCore Technology: Dual-rail Google Gemini 2.5 + OpenRouter, Node.js, React SPA, Vite, Tailwind CSS\nKey Products: PulseNote Clinical SOAP Studio, Veo AI Video Engine, OpenRouter Chat Portal\nPrivacy Standard: Built on Google Cloud. Do not enter patient-identifying information.\nTarget Industries: Healthcare, Executive Leadership, Software Engineering, Commercial Real Estate`)}
+                    onClick={() => handleCopyText('facts', `Name: Jayesh Wagh\nTitle: Founder & CEO\nCompany: PulseNote AI\nDomain: pulsenoteai.in\nGitHub: https://github.com/jayeshwagh\nContact: contact@pulsenoteai.in\nCore Technology: Single-provider OpenRouter gateway with fallback model, Node.js, React SPA, Vite, Tailwind CSS\nKey Products: Clinical SOAP Notes, Discharge Summaries, Referral Letters, Engineering RFCs, Executive Memos\nData Practice: Do not enter patient-identifying information.`)}
                     className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
                   >
                     {copiedSection === 'facts' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
@@ -1816,36 +2013,13 @@ ${currentSoapOutput.plan.map(p => `• ${p.category}: ${p.details}`).join('\n')}
                   </div>
                   <div className="p-2.5 rounded-lg bg-[#1e1f20] border border-[#3c4043]/30">
                     <span className="text-[#9aa0a6] block text-[10px]">Core Architecture</span>
-                    <span className="font-semibold text-white">Dual-Rail Gemini + OpenRouter</span>
+                    <span className="font-semibold text-white">Single-Provider + Fallback</span>
                   </div>
                   <div className="p-2.5 rounded-lg bg-[#1e1f20] border border-[#3c4043]/30">
-                    <span className="text-[#9aa0a6] block text-[10px]">Compliance</span>
-                    <span className="font-semibold text-[#10b981]">Built on Google Cloud</span>
+                    <span className="text-[#9aa0a6] block text-[10px]">Verification</span>
+                    <span className="font-semibold text-[#10b981]">Fact-Checked Schemas</span>
                   </div>
                 </div>
-              </div>
-
-              {/* Headshot Image Prompt */}
-              <div className="p-5 rounded-xl bg-[#1e1f20] border border-[#3c4043]/40 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                    <Award className="w-3.5 h-3.5 text-[#ff5757]" />
-                    <span>Executive Headshot Generation Prompt</span>
-                  </span>
-                  <button
-                    onClick={() => handleCopyText('headshotPrompt', `Editorial executive studio headshot of Jayesh Wagh, Founder and CEO of PulseNote AI. Confident, charismatic, and visionary Indian tech entrepreneur in his early 30s. Warm, intelligent, focused eye contact with the camera, soft natural smile. Wearing a tailored midnight-navy blazer over a minimal dark charcoal crewneck. Modern high-tech executive office backdrop with soft bokeh, subtle slate-gray ambient lighting and subtle neon cyan and crimson rim light accents reflecting the #4e8cff and #ff5757 brand tones. Shot on Hasselblad H6D-100c with 85mm f/1.4 lens, natural cinematic rim lighting, ultra-sharp skin textures, magazine cover editorial photography for Forbes 30 Under 30 or Bloomberg Businessweek, photorealistic 8k resolution, perfectly color-graded --ar 1:1 --v 6.0`)}
-                    className="text-[10px] text-[#9aa0a6] hover:text-white flex items-center gap-1 cursor-pointer"
-                  >
-                    {copiedSection === 'headshotPrompt' ? <Check className="w-3 h-3 text-[#10b981]" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedSection === 'headshotPrompt' ? 'Copied' : 'Copy Prompt'}</span>
-                  </button>
-                </div>
-                <div className="p-3 rounded-lg bg-[#131314] font-mono text-[11px] text-[#c4c7c5] border border-[#3c4043]/30 leading-relaxed select-all">
-                  Editorial executive studio headshot of Jayesh Wagh, Founder and CEO of PulseNote AI. Confident, charismatic, and visionary Indian tech entrepreneur in his early 30s. Warm, intelligent, focused eye contact with the camera, soft natural smile. Wearing a tailored midnight-navy blazer over a minimal dark charcoal crewneck. Modern high-tech executive office backdrop with soft bokeh, subtle slate-gray ambient lighting and subtle neon cyan and crimson rim light accents reflecting the #4e8cff and #ff5757 brand tones. Shot on Hasselblad H6D-100c with 85mm f/1.4 lens, natural cinematic rim lighting, ultra-sharp skin textures, magazine cover editorial photography for Forbes or Bloomberg Businessweek, photorealistic 8k resolution, perfectly color-graded --ar 1:1
-                </div>
-                <p className="text-[10px] text-[#9aa0a6]">
-                  Optimized for Midjourney v6, FLUX.1 Pro, DALL-E 3, and Google Imagen 3.
-                </p>
               </div>
 
             </div>

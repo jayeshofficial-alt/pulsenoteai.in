@@ -41,7 +41,7 @@ export function TemplateBuilderModal({
   >('Clinical');
   const [sections, setSections] = useState<CustomTemplateSection[]>([
     { id: '1', title: 'Subjective / Chief Complaint', instructions: 'Document patient reported history and symptoms only.' },
-    { id: '2', title: 'Objective Physical Exam', instructions: 'Document examined signs, vitals, or state Not documented.' },
+    { id: '2', title: 'Objective Physical Exam', instructions: 'Document examined signs, vitals, or state Not specified in transcript.' },
     { id: '3', title: 'Clinical Assessment', instructions: 'Document diagnoses or clinical rationale without inventing facts.' },
     { id: '4', title: 'Plan & Disposition', instructions: 'Document recommended therapies, referrals, and follow up.' },
   ]);
@@ -301,7 +301,7 @@ export function TemplateBuilderModal({
                         prev.map((s) => (s.id === sec.id ? { ...s, instructions: val } : s))
                       );
                     }}
-                    placeholder="Instructions for Gemini formatting in this section..."
+                    placeholder="Instructions for AI formatting in this section..."
                     className="w-full bg-[#1e1f20] border border-[#2d2e30] rounded-lg p-2 text-[11px] text-[#c4c7c5] outline-none resize-none"
                   />
                 </div>
