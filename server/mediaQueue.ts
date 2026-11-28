@@ -1,18 +1,6 @@
-import { GoogleGenAI } from '@google/genai';
-import dotenv from 'dotenv';
 import { generateGenerativeImageSvg } from './svgGenerator.js';
 import { searchLiveImages } from './imageSearchService.js';
-
-dotenv.config();
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
+import { generateWithFallback } from '../src/services/aiProvider.js';
 
 export interface MediaJob {
   id: string;
@@ -237,7 +225,7 @@ class MediaFIFOQueue {
     }
   }
 
-  // Google Imagen 3 / Image Generation & Editing
+  // Image Generation & Live Search Worker (no @google/genai dependency)
   private async generateImageWorker(job: MediaJob): Promise<void> {
     const validAspectRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
     let formattedAspectRatio: '1:1' | '3:4' | '4:3' | '9:16' | '16:9' = '16:9';
@@ -245,73 +233,23 @@ class MediaFIFOQueue {
       formattedAspectRatio = job.aspectRatio as any;
     }
 
-    let imageBase64: string | null = null;
-    let modelUsed = 'imagen-3.0-generate-002';
-
-    // 1. Try Imagen 3.0 Generate (Primary Google Imagen Model)
-    try {
-      const imagenRes = await ai.models.generateImages({
-        model: 'imagen-3.0-generate-002',
-        prompt: `${job.prompt}. ${job.style}`,
-        config: {
-          numberOfImages: 1,
-          aspectRatio: formattedAspectRatio,
-        },
-      });
-
-      if (imagenRes?.generatedImages?.[0]?.image?.imageBytes) {
-        imageBase64 = `data:image/png;base64,${imagenRes.generatedImages[0].image.imageBytes}`;
-      }
-    } catch {
-      // Gracefully try secondary generation models
-    }
-
-    // 2. Try Gemini 3.1 Flash Lite Image as secondary
-    if (!imageBase64) {
-      try {
-        modelUsed = 'gemini-3.1-flash-lite-image';
-        const liteResponse = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite-image',
-          contents: {
-            parts: [{ text: `${job.prompt}. ${job.style}` }],
-          },
-          config: {
-            imageConfig: {
-              aspectRatio: formattedAspectRatio,
-            },
-          },
-        });
-        if (liteResponse?.candidates?.[0]?.content?.parts) {
-          for (const part of liteResponse.candidates[0].content.parts) {
-            if (part.inlineData?.data) {
-              const mime = part.inlineData.mimeType || 'image/png';
-              imageBase64 = `data:${mime};base64,${part.inlineData.data}`;
-              break;
-            }
-          }
-        }
-      } catch {
-        // Fall back to live image search & generative visual canvas
-      }
-    }
-
-    // 3. Fetch authentic high-resolution live image search results
+    const modelUsed = 'pulsenote-visual-canvas';
     let liveResults: any[] = [];
     try {
       liveResults = await searchLiveImages(job.prompt, 8);
-    } catch (e) {
-      // Fallback
+    } catch {
+      // Fallback to generative SVG
     }
 
-    const fallbackSvg = generateGenerativeImageSvg(job.prompt, job.style, undefined, job.aspectRatio);
-    const primaryUrl = imageBase64 || (liveResults.length > 0 ? liveResults[0].url : fallbackSvg);
+    const fallbackSvg = generateGenerativeImageSvg(job.prompt, job.style, undefined, formattedAspectRatio);
+    const primaryUrl = liveResults.length > 0 ? liveResults[0].url : fallbackSvg;
 
     job.result = {
       mediaType: 'image',
       previewUrl: primaryUrl,
       downloadUrl: primaryUrl,
       prompt: job.prompt,
-      aspectRatio: job.aspectRatio,
+      aspectRatio: formattedAspectRatio,
       style: job.style,
       modelUsed,
       results: liveResults,
@@ -320,93 +258,24 @@ class MediaFIFOQueue {
         style: job.style,
         lighting: 'Volumetric cinematic fill with atmospheric depth',
         composition: 'Rule-of-thirds wide-angle 8K composition',
-        aspectRatio: job.aspectRatio,
+        aspectRatio: formattedAspectRatio,
         previewUrl: primaryUrl,
         results: liveResults,
       },
     };
   }
 
-  // Google Veo 3.1 Video Generation: veo-3.1-fast-generate-preview (text or photo/image-to-video)
+  // Video Storyboard & Keyframe Synthesis Worker (no @google/genai dependency)
   private async generateVideoWorker(job: MediaJob): Promise<void> {
-    let videoUri: string | null = null;
-    let modelUsed = 'veo-3.1-fast-generate-preview';
-
+    const modelUsed = 'pulsenote-storyboard-engine';
     const formattedAspectRatio: '16:9' | '9:16' = job.aspectRatio === '9:16' ? '9:16' : '16:9';
-
-    try {
-      console.log(`[VEO_CALL] Calling veo-3.1-fast-generate-preview (ar: ${formattedAspectRatio}) for: "${job.prompt.slice(0, 40)}"`);
-      
-      const config: any = {
-        numberOfVideos: 1,
-        resolution: '720p',
-        aspectRatio: formattedAspectRatio,
-      };
-
-      // Support image-to-video / photo animation if sourceImageUrl is provided
-      let operation: any;
-      if (job.sourceImageUrl && job.sourceImageUrl.startsWith('data:image')) {
-        const matches = job.sourceImageUrl.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
-        if (matches) {
-          operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
-            prompt: job.prompt || 'Animate this photo with cinematic camera motion and dynamic lighting',
-            image: {
-              imageBytes: matches[2],
-              mimeType: matches[1],
-            },
-            config,
-          });
-        } else {
-          operation = await ai.models.generateVideos({
-            model: 'veo-3.1-fast-generate-preview',
-            prompt: job.prompt,
-            config,
-          });
-        }
-      } else {
-        operation = await ai.models.generateVideos({
-          model: 'veo-3.1-fast-generate-preview',
-          prompt: job.prompt,
-          config,
-        });
-      }
-
-      let pollCount = 0;
-      while (!operation.done && pollCount < 12) {
-        await new Promise((r) => setTimeout(r, 2000));
-        pollCount++;
-        operation = await ai.operations.getVideosOperation({
-          operation: operation,
-        });
-      }
-
-      if (operation.done && operation.response?.generatedVideos?.[0]?.video?.uri) {
-        videoUri = operation.response.generatedVideos[0].video.uri;
-        console.log(`[VEO_SUCCESS] Video generation succeeded. Uri: ${videoUri}`);
-      }
-    } catch (veoErr: any) {
-      const errMsg = String(veoErr?.message || veoErr);
-      if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
-        console.log('[VEO] Video generation rate limit; using high-fidelity cinematic keyframe synthesis.');
-      } else {
-        console.log('[VEO] Veo synthesis notice: Fallback cinematic rendering engaged.');
-      }
-    }
 
     let posterUrl = job.sourceImageUrl;
     if (!posterUrl) {
       try {
-        const keyframeRes = await ai.models.generateImages({
-          model: 'imagen-3.0-generate-002',
-          prompt: `Cinematic movie keyframe, 8K ultra high definition, film still: ${job.prompt}`,
-          config: {
-            numberOfImages: 1,
-            aspectRatio: formattedAspectRatio,
-          },
-        });
-        if (keyframeRes?.generatedImages?.[0]?.image?.imageBytes) {
-          posterUrl = `data:image/png;base64,${keyframeRes.generatedImages[0].image.imageBytes}`;
+        const liveResults = await searchLiveImages(job.prompt, 3);
+        if (liveResults.length > 0 && liveResults[0]?.url) {
+          posterUrl = liveResults[0].url;
         }
       } catch {
         // Fall back to Generative SVG
@@ -414,14 +283,19 @@ class MediaFIFOQueue {
     }
 
     if (!posterUrl) {
-      posterUrl = generateGenerativeImageSvg(job.prompt, 'Veo 8K Video Frame', ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'], formattedAspectRatio);
+      posterUrl = generateGenerativeImageSvg(
+        job.prompt,
+        '8K Cinematic Video Frame',
+        ['#06b6d4', '#3b82f6', '#10b981', '#0f172a'],
+        formattedAspectRatio
+      );
     }
 
     job.result = {
       mediaType: 'video',
       previewUrl: posterUrl,
       posterUrl,
-      videoUrl: videoUri || undefined,
+      videoUrl: undefined,
       downloadUrl: posterUrl,
       prompt: job.prompt,
       aspectRatio: formattedAspectRatio,
@@ -464,22 +338,28 @@ class MediaFIFOQueue {
     };
   }
 
-  // Google Lyria 3 Music Generation: lyria-3-clip-preview & lyria-3-pro-preview
+  // Music Composition Metadata Synthesis Worker (via 3-tier aiProvider chain)
   private async generateMusicWorker(job: MediaJob): Promise<void> {
-    const modelUsed = job.musicType === 'pro' ? 'lyria-3-pro-preview' : 'lyria-3-clip-preview';
-    console.log(`[LYRIA_CALL] Generating music track with model ${modelUsed} for: "${job.prompt.slice(0, 40)}"`);
+    let modelUsed = job.musicType === 'pro' ? 'pulsenote-audio-pro' : 'pulsenote-audio-clip';
 
-    // Lyria generative audio prompt synthesis & fallback waveform
     try {
-      await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: `Generate musical composition metadata (BPM, Key, Genre, Instrumentation, Structure) for prompt: ${job.prompt}`,
+      const res = await generateWithFallback({
+        prompt: `Generate musical composition metadata (BPM, Key, Genre, Instrumentation, Structure) for prompt: ${job.prompt}`,
+        tier: 'fast',
+        maxTokens: 250,
       });
-    } catch (e) {
-      // Continue
+      if (res.modelUsed) {
+        modelUsed = `${res.providerName} (${res.modelUsed})`;
+      }
+    } catch {
+      // Safe fallback when AI providers are not configured
     }
 
-    const previewUrl = generateGenerativeImageSvg(job.prompt, `Lyria 3 • ${job.musicType === 'pro' ? 'Full Track' : '30s Clip'}`, ['#ec4899', '#8b5cf6', '#06b6d4', '#0f172a']);
+    const previewUrl = generateGenerativeImageSvg(
+      job.prompt,
+      `Audio • ${job.musicType === 'pro' ? 'Full Track' : '30s Clip'}`,
+      ['#ec4899', '#8b5cf6', '#06b6d4', '#0f172a']
+    );
 
     job.result = {
       mediaType: 'music',

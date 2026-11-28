@@ -158,3 +158,30 @@ export function getSystemPromptForMode(mode?: string): string {
   }
   return MODE_SYSTEM_PROMPTS.general;
 }
+
+export function formatOutputLengthInstruction(outputLength?: string): string {
+  const normalized = (outputLength || '').toLowerCase().trim();
+  if (normalized === 'concise' || normalized === 'short' || normalized === 'brief') {
+    return '\n\n[Output Length Preference]: Keep the document crisp, concise, and scannable with minimal filler.';
+  }
+  if (normalized === 'detailed' || normalized === 'comprehensive' || normalized === 'long') {
+    return '\n\n[Output Length Preference]: Provide thorough, comprehensive detail across every section while keeping clear structure.';
+  }
+  if (normalized === 'standard' || normalized === 'balanced') {
+    return '\n\n[Output Length Preference]: Provide balanced, well-structured detail suitable for immediate review.';
+  }
+  return '';
+}
+
+export function formatDictionaryInstruction(customDictionary?: string[] | string): string {
+  if (!customDictionary) return '';
+  const terms = Array.isArray(customDictionary)
+    ? customDictionary.map((t) => String(t).trim()).filter(Boolean)
+    : String(customDictionary)
+        .split(/[,\n]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+  if (terms.length === 0) return '';
+  return `\n\n[Custom Terminology / Spelling Dictionary]: Preserve exact spelling and capitalization for these terms when referenced: ${terms.slice(0, 60).join(', ')}.`;
+}
+

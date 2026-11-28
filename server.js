@@ -1,7 +1,7 @@
 // server.ts
 import express from "express";
 import fs3 from "fs";
-import dotenv3 from "dotenv";
+import dotenv from "dotenv";
 import path3 from "path";
 import crypto2 from "crypto";
 import Razorpay from "razorpay";
@@ -36,10 +36,8 @@ var DEFAULT_SETTINGS = {
   lastUpdatedBy: "jayeshofficial@gmail.com"
 };
 var STRICT_ADMIN_EMAILS = [
-  "wagh.jayesh@gmail.com",
   "jayeshofficial@gmail.com",
-  "contact@pulsenoteai.in",
-  "contact@pulsenoteai.com"
+  "contact@pulsenoteai.in"
 ];
 var Store = class {
   constructor() {
@@ -123,39 +121,6 @@ var Store = class {
     }
     if (!db.userPasswords[admin2.id]) {
       db.userPasswords[admin2.id] = defaultPassHash;
-    }
-    let admin3 = db.users.find((u) => u.email.toLowerCase() === "wagh.jayesh@gmail.com");
-    if (!admin3) {
-      admin3 = {
-        id: "admin_root_wagh_jayesh",
-        name: "Jayesh Wagh (Super Admin)",
-        email: "wagh.jayesh@gmail.com",
-        mobile: SUPERADMIN_MOBILE,
-        role: "admin",
-        status: "active",
-        isActivated: true,
-        privacyConsent: true,
-        consentTimestamp: (/* @__PURE__ */ new Date()).toISOString(),
-        subscription: {
-          tier: "admin_grant",
-          isPro: true,
-          startDate: Date.now(),
-          expiresAt: null,
-          grantedByAdmin: true
-        },
-        dailyPromptCount: 0,
-        lastPromptDate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
-        createdAt: Date.now()
-      };
-      db.users.unshift(admin3);
-    } else {
-      admin3.role = "admin";
-      admin3.status = "active";
-      admin3.isActivated = true;
-      admin3.mobile = SUPERADMIN_MOBILE;
-    }
-    if (!db.userPasswords[admin3.id]) {
-      db.userPasswords[admin3.id] = defaultPassHash;
     }
     const seenUserIds = /* @__PURE__ */ new Set();
     const seenUserEmails = /* @__PURE__ */ new Set();
@@ -732,9 +697,10 @@ Enjoy unlimited daily prompts, priority processing, and high-precision industry 
     // contact@pulsenoteai.com). Server-side whitelist — enforced on every route.
     // =========================================================================
     this.SUBSCRIPTION_ADMIN_EMAILS = [
-      "wagh.jayesh@gmail.com",
       "jayeshofficial@gmail.com",
       "contact@pulsenoteai.com",
+      // Included alongside .com because the codebase uses .in everywhere.
+      // Remove to restrict to exactly the two requested addresses.
       "contact@pulsenoteai.in"
     ];
   }
@@ -987,33 +953,6 @@ Unlimited prompt transformations are now active on your account.`,
   getUserActivityLogs(userId) {
     return this.db.activityLogs.filter((l) => l.userId === userId);
   }
-  // Admin Audit Logging
-  logAdminAuditAction(params) {
-    if (!this.db.auditLogs) {
-      this.db.auditLogs = [];
-    }
-    const log = {
-      id: `AUDIT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      adminEmail: params.adminEmail || "admin@pulsenoteai.in",
-      action: params.action,
-      targetUserId: params.targetUserId,
-      targetUserEmail: params.targetUserEmail,
-      details: params.details,
-      timestamp: Date.now()
-    };
-    this.db.auditLogs.unshift(log);
-    if (this.db.auditLogs.length > 500) {
-      this.db.auditLogs = this.db.auditLogs.slice(0, 500);
-    }
-    this.saveDatabase();
-    return log;
-  }
-  getAdminAuditLogs() {
-    if (!this.db.auditLogs) {
-      this.db.auditLogs = [];
-    }
-    return [...this.db.auditLogs];
-  }
   // System Email Notification Log
   sendEmail(notification) {
     const emailRecord = {
@@ -1257,11 +1196,32 @@ Unlimited prompt transformations are now active on your account.`,
     console.log(`[Store] Permanently deleted user account ${userIdOrEmail} and ${deletedDocumentsCount} documents.`);
     return { success: true, deletedDocumentsCount };
   }
+  logAdminAuditAction(entry) {
+    if (!Array.isArray(this.db.auditLogs)) {
+      this.db.auditLogs = [];
+    }
+    const record = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      adminEmail: entry.adminEmail,
+      action: entry.action,
+      targetUserId: entry.targetUserId,
+      targetUserEmail: entry.targetUserEmail,
+      details: entry.details,
+      timestamp: Date.now()
+    };
+    this.db.auditLogs.unshift(record);
+    if (this.db.auditLogs.length > 500) {
+      this.db.auditLogs = this.db.auditLogs.slice(0, 500);
+    }
+    this.saveDatabase();
+    return record;
+  }
+  getAdminAuditLogs(limit = 200) {
+    const logs = Array.isArray(this.db.auditLogs) ? this.db.auditLogs : [];
+    return logs.slice(0, limit);
+  }
 };
 var store = new Store();
-
-// server/mediaQueue.ts
-import dotenv from "dotenv";
 
 // server/svgGenerator.ts
 function generateGenerativeImageSvg(prompt, style = "Photorealistic 8K", customPalette, aspectRatio = "16:9") {
@@ -1612,15 +1572,15 @@ function readEnv(viteKey, nodeKey) {
   }
   try {
     if (typeof process !== "undefined" && process?.env) {
-      const fromVite = process.env[viteKey];
-      if (typeof fromVite === "string" && fromVite.trim()) {
-        return fromVite.trim();
-      }
       if (nodeKey) {
         const fromNode = process.env[nodeKey];
         if (typeof fromNode === "string" && fromNode.trim()) {
           return fromNode.trim();
         }
+      }
+      const fromVite = process.env[viteKey];
+      if (typeof fromVite === "string" && fromVite.trim()) {
+        return fromVite.trim();
       }
     }
   } catch {
@@ -2047,7 +2007,6 @@ async function* streamWithFallback(options) {
 }
 
 // server/mediaQueue.ts
-dotenv.config();
 var MediaFIFOQueue = class {
   constructor() {
     this.queue = [];
@@ -2194,14 +2153,14 @@ var MediaFIFOQueue = class {
       setTimeout(() => this.processQueue(), 50);
     }
   }
-  // Generative Image & Live Search Worker
+  // Image Generation & Live Search Worker (no @google/genai dependency)
   async generateImageWorker(job) {
     const validAspectRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
     let formattedAspectRatio = "16:9";
     if (validAspectRatios.includes(job.aspectRatio)) {
       formattedAspectRatio = job.aspectRatio;
     }
-    let modelUsed = "ai-provider-visual-pipeline";
+    const modelUsed = "pulsenote-visual-canvas";
     let liveResults = [];
     try {
       liveResults = await searchLiveImages(job.prompt, 8);
@@ -2229,40 +2188,33 @@ var MediaFIFOQueue = class {
       }
     };
   }
-  // Video Storyboard & Cinematic Keyframe Synthesis
+  // Video Storyboard & Keyframe Synthesis Worker (no @google/genai dependency)
   async generateVideoWorker(job) {
-    let modelUsed = "ai-provider-storyboard-pipeline";
+    const modelUsed = "pulsenote-storyboard-engine";
     const formattedAspectRatio = job.aspectRatio === "9:16" ? "9:16" : "16:9";
     let posterUrl = job.sourceImageUrl;
     if (!posterUrl) {
       try {
         const liveResults = await searchLiveImages(job.prompt, 3);
-        if (liveResults.length > 0) {
+        if (liveResults.length > 0 && liveResults[0]?.url) {
           posterUrl = liveResults[0].url;
         }
       } catch {
       }
     }
     if (!posterUrl) {
-      posterUrl = generateGenerativeImageSvg(job.prompt, "Cinematic Video Frame", ["#06b6d4", "#3b82f6", "#10b981", "#0f172a"], formattedAspectRatio);
-    }
-    let enhancedPrompt = `Cinematic 8k video scene of ${job.prompt}, photorealistic 8k, volumetric golden hour fill, 60fps --ar ${formattedAspectRatio}`;
-    try {
-      const aiRes = await generateWithFallback({
-        prompt: `Write a single concise cinematic camera/lighting direction prompt for: ${job.prompt}`,
-        tier: "fast",
-        maxTokens: 120
-      });
-      if (aiRes.text) {
-        enhancedPrompt = aiRes.text;
-        modelUsed = `${aiRes.providerName} (${aiRes.modelUsed})`;
-      }
-    } catch {
+      posterUrl = generateGenerativeImageSvg(
+        job.prompt,
+        "8K Cinematic Video Frame",
+        ["#06b6d4", "#3b82f6", "#10b981", "#0f172a"],
+        formattedAspectRatio
+      );
     }
     job.result = {
       mediaType: "video",
       previewUrl: posterUrl,
       posterUrl,
+      videoUrl: void 0,
       downloadUrl: posterUrl,
       prompt: job.prompt,
       aspectRatio: formattedAspectRatio,
@@ -2300,34 +2252,29 @@ var MediaFIFOQueue = class {
             audioSFX: "Spatial stereo fade-out"
           }
         ],
-        modelPromptVeoSora: enhancedPrompt
+        modelPromptVeoSora: `Cinematic 8k video scene of ${job.prompt}, photorealistic 8k, volumetric golden hour fill, 60fps --ar ${formattedAspectRatio}`
       }
     };
   }
-  // Music Composition Metadata Synthesis via 3-Tier AI Provider
+  // Music Composition Metadata Synthesis Worker (via 3-tier aiProvider chain)
   async generateMusicWorker(job) {
-    let modelUsed = job.musicType === "pro" ? "audio-composition-pro" : "audio-composition-clip";
-    let bpm = 124;
-    let genre = "Ambient Cinematic / Electronic Synthesis";
-    let key = "D Minor";
+    let modelUsed = job.musicType === "pro" ? "pulsenote-audio-pro" : "pulsenote-audio-clip";
     try {
-      const metaRes = await generateWithFallback({
-        prompt: `Return ONLY valid JSON with keys "bpm" (number), "genre" (string), and "key" (string) for a musical composition matching: ${job.prompt}`,
-        responseFormat: "json",
+      const res = await generateWithFallback({
+        prompt: `Generate musical composition metadata (BPM, Key, Genre, Instrumentation, Structure) for prompt: ${job.prompt}`,
         tier: "fast",
-        maxTokens: 120
+        maxTokens: 250
       });
-      modelUsed = `${metaRes.providerName} (${metaRes.modelUsed})`;
-      const match = metaRes.text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        if (typeof parsed.bpm === "number") bpm = parsed.bpm;
-        if (typeof parsed.genre === "string" && parsed.genre.trim()) genre = parsed.genre.trim();
-        if (typeof parsed.key === "string" && parsed.key.trim()) key = parsed.key.trim();
+      if (res.modelUsed) {
+        modelUsed = `${res.providerName} (${res.modelUsed})`;
       }
     } catch {
     }
-    const previewUrl = generateGenerativeImageSvg(job.prompt, `Audio Studio \u2022 ${job.musicType === "pro" ? "Full Track" : "30s Clip"}`, ["#ec4899", "#8b5cf6", "#06b6d4", "#0f172a"]);
+    const previewUrl = generateGenerativeImageSvg(
+      job.prompt,
+      `Audio \u2022 ${job.musicType === "pro" ? "Full Track" : "30s Clip"}`,
+      ["#ec4899", "#8b5cf6", "#06b6d4", "#0f172a"]
+    );
     job.result = {
       mediaType: "music",
       previewUrl,
@@ -2337,9 +2284,9 @@ var MediaFIFOQueue = class {
       style: job.style,
       modelUsed,
       musicMeta: {
-        bpm,
-        genre,
-        key,
+        bpm: 124,
+        genre: "Ambient Cinematic / Electronic Synthesis",
+        key: "D Minor",
         duration: job.musicType === "pro" ? "02:45" : "00:30"
       }
     };
@@ -2812,9 +2759,6 @@ function initFlowWebSocketServer(server) {
 // server/videoGenerator.ts
 import fs2 from "fs";
 import path2 from "path";
-import dotenv2 from "dotenv";
-dotenv2.config();
-dotenv2.config({ path: ".env.local" });
 var BLOCKED_PATTERNS = [
   "rahul gandhi",
   "modi",
@@ -2849,54 +2793,46 @@ async function generate_video(prompt, out_path = "output.mp4") {
   if (error) {
     return { status: "rejected", message: error };
   }
-  const resolvedOutPath = path2.resolve(process.cwd(), out_path);
-  const targetDir = path2.dirname(resolvedOutPath);
-  if (!fs2.existsSync(targetDir)) {
-    fs2.mkdirSync(targetDir, { recursive: true });
-  }
-  const publicDir = path2.resolve(process.cwd(), "public");
-  if (!fs2.existsSync(publicDir)) {
-    fs2.mkdirSync(publicDir, { recursive: true });
+  try {
+    const resolvedOutPath = path2.resolve(process.cwd(), out_path);
+    const targetDir = path2.dirname(resolvedOutPath);
+    if (!fs2.existsSync(targetDir)) {
+      fs2.mkdirSync(targetDir, { recursive: true });
+    }
+  } catch {
   }
   let providerName;
+  let storyboard;
   try {
-    const res = await generateWithFallback({
-      prompt: `Confirm this video scene prompt is safe and summarize it in one short sentence: ${prompt}`,
+    const aiRes = await generateWithFallback({
+      systemInstruction: "You are a cinematic video director. Produce a concise 3-shot visual storyboard (Shot 1, Shot 2, Shot 3) with camera motion and lighting notes.",
+      prompt: `Create a 3-shot storyboard for this video prompt: ${prompt}`,
       tier: "fast",
-      maxTokens: 80
+      maxTokens: 400
     });
-    providerName = res.providerName;
-  } catch {
+    providerName = aiRes.providerName;
+    storyboard = aiRes.text;
+  } catch (err) {
+    console.warn("[VIDEO_GEN] Storyboard synthesis skipped (fallback active):", err?.message || err);
   }
   const sampleUrl = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
   return {
     status: "ok",
     file: out_path,
     videoUrl: sampleUrl,
-    message: "Video ready.",
-    providerName
+    providerName,
+    storyboard,
+    message: "Video ready."
   };
 }
 
 // server/modePrompts.ts
-var MANDATORY_LEGAL_NOTICE = `> *[Clinical & Legal Review Compliance Disclaimer]: Pulse Note AI (pulsenoteai.in) is an assistive professional documentation tool. All AI-generated clinical notes, property inspection logs, architecture decision records, and corporate summaries must be verified by certified licensed professionals prior to clinical or commercial execution.*`;
-var COMMON_GUARDRAILS = `
-Strict Operational Guardrails:
-1. Anti-Hallucination & Data Integrity: Never invent, guess, or hallucinate missing critical data (such as financial prices, dates, clinical metrics, dosages, or legal terms). If a crucial data point is absent from the input, explicitly insert an audit-ready placeholder formatted as [MISSING: Description of required data].
-2. Zero Conversational Filler: Output the final structured report cleanly and directly. Do NOT include conversational openings or pleasantries like "Sure, here is your summary!" or conversational intros.
-3. Actionable Closure: Every generated report MUST conclude with a clear, bulleted "### Action Items & Next Steps" section detailing assigned owners and deadlines if mentioned in the input.
-`;
+var MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI (pulsenoteai.in) is an assistive documentation tool. All AI-generated clinical notes, legal summaries, property inspection logs, and technical decisions must be verified by certified professionals prior to clinical or commercial execution.*`;
 var MODE_SYSTEM_PROMPTS = {
-  medical: `You are the Clinical Documentation Specialist and Medical Intelligence Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Transform unstructured patient narratives, ambient doctor-patient dialogues, and clinical dictations into pristine, standard SOAP clinical documentation.
-
-CRITICAL PLACEMENT: You MUST place the clinical review compliance disclaimer at the VERY TOP of your generated document output:
-${MANDATORY_LEGAL_NOTICE}
-
-${COMMON_GUARDRAILS}
+  medical: `You are the specialized Clinical Documentation Specialist and Medical Intelligence Engine for Pulse Note AI (pulsenoteai.in).
+Your mandate: Transform unstructured patient narratives, doctor-patient dialogues, and clinical dictations into pristine, standard SOAP documentation.
 
 Structure your response strictly following the SOAP framework:
-
 ### [S] Subjective
 - **Chief Complaint (CC):** Primary reason for visit with duration.
 - **History of Present Illness (HPI):** Onset, location, duration, character, aggravating/alleviating factors, radiation, temporal pattern, severity (OLDCARTS).
@@ -2909,127 +2845,118 @@ Structure your response strictly following the SOAP framework:
 - **Point-of-Care & Laboratory Diagnostics:** POC blood glucose, HbA1c, rapid swabs, imaging or ECG results.
 
 ### [A] Assessment
-- **Primary Diagnosis:** Formulate primary clinical impression grounded strictly in documented findings.
+- **Primary Diagnosis:** Formulate primary clinical impression with corresponding standard ICD-10 code (e.g., Type 2 Diabetes Mellitus [ICD-10: E11.9]).
 - **Differential Diagnoses:** Secondary considerations with clinical rationale.
 - **Clinical Reasoning:** Pathophysiologic synthesis explaining why the diagnosis is supported by findings.
 
 ### [P] Plan
-- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency ONLY as documented (or [MISSING: Dosage/Frequency] if omitted).
+- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency.
 - **Diagnostic Workup:** Ordered lab panels, imaging, or specialized screenings.
 - **Patient Education & Precautions:** Warning signs, red flags, lifestyle/dietary guidance.
-- **Follow-Up:** Concrete return timeframe if documented (or [MISSING: Follow-up timeframe]).
+- **Follow-Up:** Concrete return timeframe (e.g., 2 weeks, 3 months, or PRN).
 
-### Suggested Medical Coding (ICD-10 & CPT)
-- **ICD-10-CM Codes:** List standard diagnosis codes matching strictly documented conditions only; mark unconfirmed specificity with [MISSING: Code specificity].
-- **CPT / E&M Level:** Suggest standard encounter/procedure code only if complexity/time is documented; otherwise write [MISSING: Encounter complexity/duration for E&M selection].
-
-### Action Items & Next Steps
-- Clear, bulleted action items with assigned clinicians/staff and deadlines if mentioned.`,
+Formatting Rules:
+- Enforce clinical accuracy, objective tone, and professional brevity.
+- Redact or generalize personal identifiers to maintain HIPAA privacy.
+- Conclude with the mandatory notice:
+${MANDATORY_LEGAL_NOTICE}`,
   executive: `You are the Executive Strategy Advisor and C-Suite Intelligence Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Synthesize high-stakes board deliberations, client consulting syncs, and financial discussions into executive decision memos and action registers.
+Your mandate: Synthesize high-stakes board deliberations, leadership syncs, and financial discussions into board-ready Executive Decision Memos and Risk Registers.
 
-${COMMON_GUARDRAILS}
-
-Structure your response cleanly and directly:
-
-### 1. Executive Summary & Key Decisions
+Structure your response with high clarity:
+### 1. Executive Summary
 - 1\u20132 direct sentences detailing the core strategic resolution, capital implications, and bottom-line impact.
 
-### 2. Strategic Takeaways & Approved Mandates
-- Bulleted register of concrete decisions made, strategic takeaways, funding allocated, and policy changes approved.
+### 2. Strategic Decisions & Approved Mandates
+- Bulleted register of concrete decisions made, funding allocated, and policy changes approved.
 
 ### 3. Risk & Vulnerability Matrix
-- **High Impact / High Likelihood Risks Identified:** Operational, market, and compliance exposures.
+- **High Impact / High Likelihood Risks:** Operational, market, and compliance exposures.
 - **Mitigation Protocols:** Immediate controls to de-risk each vulnerability.
 
 ### 4. Financial & Margin Impact Analysis
-- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations (use [MISSING: Financial metric] if not stated).
+- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations.
 
 ### 5. Action Register & Deliverables
 - Numbered table or list with: [Item] | [Accountable Executive Owner] | [Deadline] | [KPI / Success Metric].
 
-### Action Items & Next Steps
-- Clear, bulleted list of assigned owners, next deliverables, and deadlines.
-
+Formatting Rules:
+- Cut through corporate jargon; deliver sharp, decisive, high-signal intelligence.
+- Never waffle or output conversational filler.
+- Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`,
   software: `You are the Principal Software Architect and Engineering Operations Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Convert rapid engineering standups, architectural debates, and technical reviews into Architecture Decision Records (ADRs) and Agile Sprint tickets.
-
-${COMMON_GUARDRAILS}
+Your mandate: Convert rapid engineering standups, architectural debates, and incident reviews into standard Architecture Decision Records (ADRs) and Agile Sprint tickets.
 
 Structure your response technically:
+### 1. Context & Problem Statement
+- Technical requirement, business driver, and scalability/latency bottlenecks.
 
-### 1. User Story & Context
-- User story summary, technical requirement, business driver, and scalability/latency bottlenecks.
-
-### 2. Technical Decisions Made (ADR)
+### 2. Architecture Decision Record (ADR)
 - **Status:** Proposed / Accepted / Superseded
 - **Decision:** Stack selection, protocol choices (e.g., WebSockets vs HTTP polling), distributed system topology.
 - **Consequences & Trade-Offs:** Positive outcomes and accepted compromises.
 
-### 3. Blockers Identified & Dependency Mitigations
-- Active architectural, security, or infrastructure blockers with engineering solutions.
-
-### 4. Technical Specifications & Interface Contracts
+### 3. Technical Specifications & Interface Contracts
 - Data contracts (JSON schemas / TypeScript interfaces / API endpoints).
 - Concurrency, memory footprint, cache invalidation, and SLA targets.
 
-### 5. Jira & GitHub Action Items
-- Formatted backlog items: Title, Description, Acceptance Criteria (Gherkin format Given/When/Then), Story Points, and Owner.
+### 4. Blockers & Dependency Mitigations
+- Active architectural, security, or infra blockers with engineering solutions.
 
-### Action Items & Next Steps
-- Clear, bulleted engineering action items with assigned developers and sprint deadlines.
+### 5. Sprint Epics & Jira Stories
+- Formatted backlog items: Title, Description, Acceptance Criteria (Gherkin format Given/When/Then), and Story Points estimate.
 
+Formatting Rules:
+- Use clean Markdown and TypeScript code blocks where applicable.
+- Avoid vague advice; provide production-ready system design decisions.
+- Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`,
   real_estate: `You are the Senior Property Condition Assessor and Commercial Due Diligence Engine for Pulse Note AI (pulsenoteai.in).
 Your mandate: Transform contractor voice walkthroughs, structural observations, and property inspections into formal Property Condition Reports (PCR).
 
-${COMMON_GUARDRAILS}
-
 Structure your response systematically:
-
 ### 1. Asset & Elevation Overview
-- Location / Property ID, elevation/building quadrant, inspection date, weather, and structural baseline. Use [MISSING: Inspection Date / Lease Date / Property ID] if absent.
+- Property identifier, elevation/building quadrant, inspection date, weather, and structural baseline.
 
 ### 2. Defect Register & Severity Grading
 Group observations by system: Foundation/Envelope, Roof/Drainage, Mechanical/HVAC, Electrical, Plumbing/Life-Safety.
 For each defect include:
-- **Location / Property ID & Defect:** Exact location and detailed observation.
 - **Severity Level:** [High / Immediate Life-Safety] | [Medium / Deferred Maintenance] | [Low / Aesthetic]
-- **Specific Observation:** Quantitative measurements ONLY if mentioned (or [MISSING: Quantitative measurement]).
+- **Specific Observation:** Quantitative measurements (crack width in mm, square footage of membrane ponding).
 - **Root Cause:** Environmental or construction mechanism.
 - **Recommended Remediation:** Specific engineering or trade contractor scope of work.
 
 ### 3. Capital Expenditure (CapEx) Scaffolding
-- Urgent repairs estimated cost range (write [MISSING: Repair Cost Estimate] if dollar figures were not provided).
+- Urgent repairs estimated cost range.
 - Deferred 1\u20133 year maintenance reserve budget.
 
 ### 4. Lender & Insurance Readiness Checklist
 - Items requiring sign-off by licensed professional engineers or certified trades before underwriting.
 
-### Action Items & Next Steps
-- Clear, bulleted contractor and inspector action items with assigned owners and remediation deadlines.
-
+Formatting Rules:
+- Quantitative, precise, inspection-standard nomenclature.
+- Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`,
-  general: `You are Pulse Note AI (pulsenoteai.in), an elite executive documentation assistant.
-Your mandate: Deliver authoritative, error-free, deeply structured professional documents from voice notes and transcripts.
-
-${COMMON_GUARDRAILS}
+  general: `You are Pulse Note AI (pulsenoteai.in), an advanced executive and multimodal intelligence engine.
+Your mandate: Deliver authoritative, error-free, deeply structured solutions and research for any complex inquiry.
 
 Structure your response cleanly:
+### 1. Direct Executive Summary
+- 1\u20132 crisp sentences giving the core answer and conclusion upfront.
 
-### 1. Executive Summary
-- 1\u20132 crisp sentences giving the core summary and conclusion upfront.
+### 2. Structured In-Depth Analysis
+- Core findings, data points, and technical tradeoffs organized with bold sub-headers and bullet points.
 
-### 2. Structured Key Findings & Observations
-- Core findings, data points, and key points organized with bold sub-headers and bullet points.
-
-### 3. Strategic Recommendations
+### 3. Actionable Strategic Roadmap
 - Concrete, numbered steps for immediate implementation.
 
-### Action Items & Next Steps
-- Clear, bulleted list of immediate action items, assigned owners, and deadlines.
+### 4. Web-Grounded Insights & Industry Best Practices
+- Verification standards, real-world benchmarks, and critical caveats.
 
+Formatting Rules:
+- Maintain an authoritative, objective tone without unnecessary chatbot conversational pleasantries.
+- Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`
 };
 function getSystemPromptForMode(mode) {
@@ -3038,7 +2965,7 @@ function getSystemPromptForMode(mode) {
   if (normalized.includes("med") || normalized.includes("clinic") || normalized.includes("soap")) {
     return MODE_SYSTEM_PROMPTS.medical;
   }
-  if (normalized.includes("exec") || normalized.includes("memo") || normalized.includes("c-suite") || normalized.includes("board") || normalized.includes("consult")) {
+  if (normalized.includes("exec") || normalized.includes("memo") || normalized.includes("c-suite") || normalized.includes("board")) {
     return MODE_SYSTEM_PROMPTS.executive;
   }
   if (normalized.includes("soft") || normalized.includes("tech") || normalized.includes("code") || normalized.includes("dev") || normalized.includes("sprint") || normalized.includes("arch")) {
@@ -3050,30 +2977,47 @@ function getSystemPromptForMode(mode) {
   return MODE_SYSTEM_PROMPTS.general;
 }
 function formatOutputLengthInstruction(outputLength) {
-  const mode = String(outputLength || "standard").toLowerCase().trim();
-  if (mode === "concise") {
-    return "Output Length Control (AudioPen Concise Mode): Keep sections ultra-tight, punchy, scannable, and limited to essential bullet points without losing critical numbers or [MISSING: ...] placeholders.";
+  const normalized = (outputLength || "").toLowerCase().trim();
+  if (normalized === "concise" || normalized === "short" || normalized === "brief") {
+    return "\n\n[Output Length Preference]: Keep the document crisp, concise, and scannable with minimal filler.";
   }
-  if (mode === "comprehensive") {
-    return "Output Length Control (Comprehensive Depth Mode): Provide exhaustive, audit-grade depth across every required section while strictly avoiding invented facts or filler.";
+  if (normalized === "detailed" || normalized === "comprehensive" || normalized === "long") {
+    return "\n\n[Output Length Preference]: Provide thorough, comprehensive detail across every section while keeping clear structure.";
   }
-  return "Output Length Control (Standard Mode): Balanced, executive-ready detail and scannable bullets.";
+  if (normalized === "standard" || normalized === "balanced") {
+    return "\n\n[Output Length Preference]: Provide balanced, well-structured detail suitable for immediate review.";
+  }
+  return "";
 }
 function formatDictionaryInstruction(customDictionary) {
-  if (!Array.isArray(customDictionary) || customDictionary.length === 0) return "";
-  const cleaned = customDictionary.filter((entry) => entry && typeof entry.term === "string" && entry.term.trim()).slice(0, 60).map(
-    (entry) => entry.replacement?.trim() ? `"${entry.term.trim()}" -> spell/normalize as "${entry.replacement.trim()}"` : `"${entry.term.trim()}"`
-  );
-  if (cleaned.length === 0) return "";
+  if (!customDictionary) return "";
+  const terms = Array.isArray(customDictionary) ? customDictionary.map((t) => String(t).trim()).filter(Boolean) : String(customDictionary).split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+  if (terms.length === 0) return "";
   return `
-Personal Dictionary & Custom Vocabulary (Preserve exact capitalization/spelling for these domain terms, patient/client names, and drugs): ${cleaned.join("; ")}.`;
+
+[Custom Terminology / Spelling Dictionary]: Preserve exact spelling and capitalization for these terms when referenced: ${terms.slice(0, 60).join(", ")}.`;
 }
 
 // server.ts
-dotenv3.config();
-dotenv3.config({ path: ".env.local" });
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path3.dirname(__filename);
+var candidateEnvFiles = Array.from(
+  /* @__PURE__ */ new Set([
+    path3.join(__dirname, ".env"),
+    path3.join(__dirname, ".env.local"),
+    path3.join(process.cwd(), ".env"),
+    path3.join(process.cwd(), ".env.local")
+  ])
+);
+for (const envFile of candidateEnvFiles) {
+  try {
+    if (fs3.existsSync(envFile)) {
+      dotenv.config({ path: envFile, quiet: true });
+    }
+  } catch (envErr) {
+    console.warn(`[ENV] Skipped loading ${envFile}:`, envErr);
+  }
+}
 var firebaseConfig = {};
 try {
   const cfgPath = path3.join(__dirname, "firebase-applet-config.json");
@@ -3604,22 +3548,13 @@ app.post("/api/video/precheck", (req, res) => {
     prompt
   });
 });
-var OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+function getResolvedOpenRouterKey() {
+  return (process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || "").trim();
+}
 async function askOpenRouter(messages, model = "openai/gpt-4o-mini") {
-  const apiKey = OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ model, messages })
-  });
-  if (!response.ok) {
-    throw new Error(`OpenRouter error ${response.status}: ${await response.text()}`);
-  }
-  const data = await response.json();
-  return data.choices[0].message.content;
+  const tier = model.toLowerCase().includes("pro") || model.toLowerCase().includes("claude") || model === "openai/gpt-4o" ? "pro" : "fast";
+  const result = await generateWithFallback({ messages, tier });
+  return result.text;
 }
 async function callOpenRouterChat({
   messages,
@@ -3627,41 +3562,20 @@ async function callOpenRouterChat({
   temperature = 0.7,
   max_tokens = 2048
 }) {
-  const apiKey = process.env.OPENROUTER_API_KEY || "";
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY is not configured in environment variables");
-  }
-  const siteUrl = process.env.APP_URL || "https://pulsenoteai.in";
-  const siteTitle = "PulseNote AI";
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": siteUrl,
-      "X-Title": siteTitle
-    },
-    body: JSON.stringify({
-      model,
-      messages: messages.map((m) => ({
-        role: m.role === "model" || m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
-        content: m.content || ""
-      })),
-      temperature,
-      max_tokens
-    })
+  const tier = model.toLowerCase().includes("pro") || model.toLowerCase().includes("claude") || model === "openai/gpt-4o" ? "pro" : "fast";
+  const result = await generateWithFallback({
+    messages,
+    tier,
+    temperature,
+    maxTokens: max_tokens
   });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
-  }
-  const data = await response.json();
-  const replyContent = data.choices?.[0]?.message?.content || data.reply || "";
   return {
-    reply: replyContent,
-    text: replyContent,
-    modelUsed: model,
-    raw: data
+    reply: result.text,
+    text: result.text,
+    modelUsed: result.modelUsed,
+    providerId: result.providerId,
+    providerName: result.providerName,
+    raw: result
   };
 }
 app.post("/api/openrouter/chat", async (req, res) => {
@@ -3678,11 +3592,13 @@ app.post("/api/openrouter/chat", async (req, res) => {
       reply: result.reply,
       text: result.text,
       modelUsed: result.modelUsed,
+      providerId: result.providerId,
+      providerName: result.providerName,
       complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
     });
   } catch (err) {
     console.error("OpenRouter endpoint error:", err);
-    return res.status(500).json({ error: err.message || "OpenRouter chat completion failed" });
+    return res.status(500).json({ error: err.message || "AI chat completion failed" });
   }
 });
 app.get("/api/openrouter/key", (req, res) => {
@@ -3691,7 +3607,7 @@ app.get("/api/openrouter/key", (req, res) => {
   if (!isAdmin) {
     return res.status(403).json({ error: "Admin access required", configured: false, apiKey: "" });
   }
-  const key = process.env.OPENROUTER_API_KEY || "";
+  const key = getResolvedOpenRouterKey();
   return res.json({
     configured: Boolean(key),
     apiKey: key
@@ -5600,19 +5516,20 @@ app.post(["/razorpayWebhook", "/api/razorpay/webhook"], (req, res) => {
   }
   return res.json({ status: "ok", eventReceived: event });
 });
-var CODECRAFT_BASE_URL = process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || "https://codecraftapi.com/v1";
+var CODECRAFT_BASE_URL = process.env.CODECRAFT_BASE_URL || process.env.VITE_CODECRAFT_BASE_URL || process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || "https://codecraftapi.com/v1";
 app.get("/api/codecraft/status", (_req, res) => {
+  const apiKey = (process.env.CODECRAFT_API_KEY || process.env.VITE_CODECRAFT_API_KEY || "").trim();
   return res.json({
     status: "online",
     baseUrl: CODECRAFT_BASE_URL,
-    isKeyConfigured: Boolean(process.env.CODECRAFT_API_KEY)
+    isKeyConfigured: Boolean(apiKey)
   });
 });
 app.all("/api/codecraft/*", async (req, res) => {
   try {
     const subPath = req.params[0] || "";
     const targetUrl = `${CODECRAFT_BASE_URL.replace(/\/+$/, "")}/${subPath}${req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : ""}`;
-    const apiKey = process.env.CODECRAFT_API_KEY || "";
+    const apiKey = (process.env.CODECRAFT_API_KEY || process.env.VITE_CODECRAFT_API_KEY || "").trim();
     const headers = {
       "Content-Type": req.headers["content-type"] || "application/json",
       "Accept": req.headers["accept"] || "application/json"

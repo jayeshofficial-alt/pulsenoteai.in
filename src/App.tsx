@@ -1581,15 +1581,6 @@ export function App() {
             onBack={() => setActiveView('chat')}
             onShowToast={addToast}
           />
-        ) : activeView === 'marketing' ? (
-          <div className="flex-1 overflow-y-auto scrollbar-thin">
-            <MarketingSite
-              onLaunchApp={() => setActiveView('chat')}
-              onOpenPricing={() => setIsPricingModalOpen(true)}
-              usageState={usageState}
-              currentUser={currentUser}
-            />
-          </div>
         ) : activeView === 'image' ? (
           features.imageGenerationEnabled ? (
             <ImageStudio onShowToast={addToast} />

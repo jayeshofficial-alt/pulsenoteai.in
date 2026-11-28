@@ -4,45 +4,25 @@
  * using import.meta.env.VITE_OPENROUTER_API_KEY
  */
 
+import {
+  generateWithFallback,
+  streamWithFallback,
+  getProviderChain,
+} from './aiProvider';
+
 export const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 export const API_KEY = (import.meta as any).env?.VITE_OPENROUTER_API_KEY || "";
 
-// Variable named OPENROUTER_API_KEY as requested
 export const OPENROUTER_API_KEY =
   (typeof process !== 'undefined' && (process as any)?.env?.OPENROUTER_API_KEY) ||
   ((import.meta as any).env?.VITE_OPENROUTER_API_KEY) ||
   '';
 
-/**
- * Core function matching user specification:
- * const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
- * async function askOpenRouter(messages, model = "openai/gpt-4o-mini")
- */
 export async function askOpenRouter(
   messages: Array<{ role: string; content: string }>,
   model: string = "openai/gpt-4o-mini"
 ): Promise<string> {
-  const apiKey =
-    OPENROUTER_API_KEY ||
-    getOpenRouterApiKey() ||
-    ((import.meta as any).env?.VITE_OPENROUTER_API_KEY) ||
-    '';
-
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ model, messages })
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter error ${response.status}: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
+  return await chatCompletion(messages, model);
 }
 
 export type ChatMessage = {
@@ -173,69 +153,31 @@ export async function chatCompletion(
     signal?: AbortSignal;
   }
 ): Promise<string> {
-  // Resolve key: client-side first, then bridge from server env
-  let key = getOpenRouterApiKey();
-  if (!key) {
-    key = await getServerOpenRouterKey();
-  }
-
-  // Normalize message roles (e.g. Gemini 'model' -> 'assistant')
   const normalizedMessages = messages.map((m) => ({
     role: m.role === 'model' || m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
     content: m.content,
   }));
 
-  // No key at all — fail fast with a clear, actionable message
-  if (!key) {
-    throw new Error('No AI API key configured. Add OPENROUTER_API_KEY in your deployment secrets, or click "API Key" in the header to enter it.');
-  }
+  const tier =
+    model.toLowerCase().includes('pro') ||
+    model.toLowerCase().includes('claude') ||
+    model === 'openai/gpt-4o'
+      ? 'pro'
+      : 'fast';
 
-  // Direct client-side call if key is available
-  if (key) {
-    const referer = typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'https://pulsenoteai.in';
-
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': referer,
-        'X-Title': APP_NAME,
-      },
-      body: JSON.stringify({
-        model,
-        messages: normalizedMessages,
-        temperature: options?.temperature ?? 0.7,
-        max_tokens: options?.max_tokens ?? 2048,
-      }),
+  const hasClientKey = getProviderChain().some((p) => Boolean(p.apiKey && p.apiKey.trim()));
+  if (hasClientKey) {
+    const result = await generateWithFallback({
+      messages: normalizedMessages,
+      tier,
+      temperature: options?.temperature ?? 0.7,
+      maxTokens: options?.max_tokens ?? 2048,
       signal: options?.signal,
     });
-
-    if (!res.ok) {
-      let errDetail = '';
-      try {
-        const errText = await res.text();
-        try {
-          const errJson = JSON.parse(errText);
-          errDetail = errJson.error?.message || errJson.message || errText;
-        } catch {
-          errDetail = errText;
-        }
-      } catch {}
-      throw new Error(`OpenRouter API error (${res.status}): ${errDetail}`);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') {
-      throw new Error('OpenRouter response contained no choices or empty message content.');
-    }
-    return content;
+    return result.text;
   }
 
-  // Fallback to server-side proxy endpoint (/api/openrouter/chat) when running in AI Studio backend
+  // Fallback to server-side 3-tier AI endpoint when API keys are configured server-side
   const proxyRes = await fetch('/api/openrouter/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -260,103 +202,54 @@ export async function chatCompletion(
       }
     } catch {}
     throw new Error(
-      `OpenRouter error (${proxyRes.status}): ${errDetail || 'Please configure VITE_OPENROUTER_API_KEY'}`
+      errDetail || `AI service error (${proxyRes.status}). Configure provider keys in deployment secrets or AI Provider Settings.`
     );
   }
 
   const proxyData = await proxyRes.json();
   const reply = proxyData.reply || proxyData.text || proxyData.choices?.[0]?.message?.content;
   if (!reply) {
-    throw new Error('OpenRouter returned an empty response. Check API key balance.');
+    throw new Error('AI provider returned an empty response.');
   }
   return reply;
 }
 
 /**
- * Streaming chat completion from OpenRouter using Server-Sent Events (SSE)
+ * Streaming chat completion routed through the 3-tier AI provider chain,
+ * automatically falling back to the server endpoint if keys are server-only.
  */
 export async function* streamChatCompletion(
   messages: Array<OpenRouterMessage | { role: string; content: any }>,
   model: string = 'openai/gpt-4o-mini',
   signal?: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
-  let key = getOpenRouterApiKey();
-  if (!key) {
-    key = await getServerOpenRouterKey();
-  }
-
   const normalizedMessages = messages.map((m) => ({
     role: m.role === 'model' || m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
     content: m.content,
   }));
 
-  if (key) {
-    const referer = typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'https://pulsenoteai.in';
+  const tier =
+    model.toLowerCase().includes('pro') ||
+    model.toLowerCase().includes('claude') ||
+    model === 'openai/gpt-4o'
+      ? 'pro'
+      : 'fast';
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': referer,
-        'X-Title': APP_NAME,
-      },
-      body: JSON.stringify({
-        model,
-        messages: normalizedMessages,
-        stream: true,
-      }),
+  const hasClientKey = getProviderChain().some((p) => Boolean(p.apiKey && p.apiKey.trim()));
+  if (hasClientKey) {
+    for await (const part of streamWithFallback({
+      messages: normalizedMessages,
+      tier,
       signal,
-    });
-
-  if (!res.ok) {
-    let errDetail = '';
-    try {
-      const errText = await res.text();
-      try {
-        const errJson = JSON.parse(errText);
-        errDetail = errJson.error?.message || errJson.message || errText;
-      } catch {
-        errDetail = errText;
-      }
-    } catch {}
-    throw new Error(`OpenRouter streaming error (${res.status}): ${errDetail}`);
-  }
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('ReadableStream not supported.');
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      if (signal?.aborted) {
-        reader.cancel();
-        throw new DOMException('Chat stream aborted by user', 'AbortError');
-      }
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const raw = trimmed.slice(5).trim();
-        if (!raw || raw === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(raw);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) yield delta;
-        } catch {}
+    })) {
+      if (part.chunk) {
+        yield part.chunk;
       }
     }
     return;
   }
 
-  // Non-streaming fallback if key is not directly in client
+  // Server-side 3-tier fallback when API keys live only in server env vars
   const fullText = await chatCompletion(normalizedMessages, model, { signal });
   yield fullText;
 }

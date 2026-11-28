@@ -1470,6 +1470,38 @@ class Store {
     console.log(`[Store] Permanently deleted user account ${userIdOrEmail} and ${deletedDocumentsCount} documents.`);
     return { success: true, deletedDocumentsCount };
   }
+
+  public logAdminAuditAction(entry: {
+    adminEmail: string;
+    action: string;
+    targetUserId?: string;
+    targetUserEmail?: string;
+    details: string;
+  }) {
+    if (!Array.isArray((this.db as any).auditLogs)) {
+      (this.db as any).auditLogs = [];
+    }
+    const record = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      adminEmail: entry.adminEmail,
+      action: entry.action,
+      targetUserId: entry.targetUserId,
+      targetUserEmail: entry.targetUserEmail,
+      details: entry.details,
+      timestamp: Date.now(),
+    };
+    (this.db as any).auditLogs.unshift(record);
+    if ((this.db as any).auditLogs.length > 500) {
+      (this.db as any).auditLogs = (this.db as any).auditLogs.slice(0, 500);
+    }
+    this.saveDatabase();
+    return record;
+  }
+
+  public getAdminAuditLogs(limit: number = 200) {
+    const logs = Array.isArray((this.db as any).auditLogs) ? (this.db as any).auditLogs : [];
+    return logs.slice(0, limit);
+  }
 }
 
 export const store = new Store();

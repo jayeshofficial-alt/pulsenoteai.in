@@ -21,11 +21,28 @@ import {
 
 export { BLOCKED_PATTERNS, precheck_prompt, generate_video };
 
-dotenv.config();
-dotenv.config({ path: '.env.local' });
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load environment files from both the server directory (__dirname) and process.cwd()
+// so production hosts launching `node /path/to/server.js` from another cwd still inject secrets.
+const candidateEnvFiles = Array.from(
+  new Set([
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '.env.local'),
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '.env.local'),
+  ])
+);
+for (const envFile of candidateEnvFiles) {
+  try {
+    if (fs.existsSync(envFile)) {
+      dotenv.config({ path: envFile, quiet: true } as any);
+    }
+  } catch (envErr) {
+    console.warn(`[ENV] Skipped loading ${envFile}:`, envErr);
+  }
+}
 
 // Firebase Configuration for Server-Side ID Token Verification
 let firebaseConfig: any = {};
@@ -688,25 +705,19 @@ app.post('/api/video/precheck', (req, res) => {
 // ==========================================
 // OPENROUTER API INTEGRATION (https://openrouter.ai/api/v1)
 // ==========================================
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY; // set as a secret, never hardcoded
+function getResolvedOpenRouterKey(): string {
+  return (process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '').trim();
+}
 
 export async function askOpenRouter(messages: any[], model = "openai/gpt-4o-mini") {
-  const apiKey = OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ model, messages })
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter error ${response.status}: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
+  const tier =
+    model.toLowerCase().includes('pro') ||
+    model.toLowerCase().includes('claude') ||
+    model === 'openai/gpt-4o'
+      ? 'pro'
+      : 'fast';
+  const result = await generateWithFallback({ messages, tier });
+  return result.text;
 }
 
 export async function callOpenRouterChat({
@@ -720,45 +731,27 @@ export async function callOpenRouterChat({
   temperature?: number;
   max_tokens?: number;
 }) {
-  const apiKey = process.env.OPENROUTER_API_KEY || '';
-  if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY is not configured in environment variables');
-  }
+  const tier =
+    model.toLowerCase().includes('pro') ||
+    model.toLowerCase().includes('claude') ||
+    model === 'openai/gpt-4o'
+      ? 'pro'
+      : 'fast';
 
-  const siteUrl = process.env.APP_URL || 'https://pulsenoteai.in';
-  const siteTitle = 'PulseNote AI';
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': siteUrl,
-      'X-Title': siteTitle,
-    },
-    body: JSON.stringify({
-      model,
-      messages: messages.map((m) => ({
-        role: m.role === 'model' || m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
-        content: m.content || '',
-      })),
-      temperature,
-      max_tokens,
-    }),
+  const result = await generateWithFallback({
+    messages,
+    tier,
+    temperature,
+    maxTokens: max_tokens,
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
-  }
-
-  const data = await response.json();
-  const replyContent = data.choices?.[0]?.message?.content || data.reply || '';
   return {
-    reply: replyContent,
-    text: replyContent,
-    modelUsed: model,
-    raw: data,
+    reply: result.text,
+    text: result.text,
+    modelUsed: result.modelUsed,
+    providerId: result.providerId,
+    providerName: result.providerName,
+    raw: result,
   };
 }
 
@@ -778,11 +771,13 @@ app.post('/api/openrouter/chat', async (req, res) => {
       reply: result.reply,
       text: result.text,
       modelUsed: result.modelUsed,
+      providerId: result.providerId,
+      providerName: result.providerName,
       complianceDisclaimer: MANDATORY_LEGAL_NOTICE,
     });
   } catch (err: any) {
     console.error('OpenRouter endpoint error:', err);
-    return res.status(500).json({ error: err.message || 'OpenRouter chat completion failed' });
+    return res.status(500).json({ error: err.message || 'AI chat completion failed' });
   }
 });
 
@@ -793,7 +788,7 @@ app.get('/api/openrouter/key', (req, res) => {
   if (!isAdmin) {
     return res.status(403).json({ error: 'Admin access required', configured: false, apiKey: '' });
   }
-  const key = process.env.OPENROUTER_API_KEY || '';
+  const key = getResolvedOpenRouterKey();
   return res.json({
     configured: Boolean(key),
     apiKey: key,
@@ -3203,13 +3198,19 @@ app.post(['/razorpayWebhook', '/api/razorpay/webhook'], (req, res) => {
 // ==========================================
 // CODECRAFT API INTEGRATION (https://codecraftapi.com/v1)
 // ==========================================
-const CODECRAFT_BASE_URL = process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || 'https://codecraftapi.com/v1';
+const CODECRAFT_BASE_URL =
+  process.env.CODECRAFT_BASE_URL ||
+  process.env.VITE_CODECRAFT_BASE_URL ||
+  process.env.CODECRAFT_API_URL ||
+  process.env.CODECRAFT_API_BASE_URL ||
+  'https://codecraftapi.com/v1';
 
 app.get('/api/codecraft/status', (_req, res) => {
+  const apiKey = (process.env.CODECRAFT_API_KEY || process.env.VITE_CODECRAFT_API_KEY || '').trim();
   return res.json({
     status: 'online',
     baseUrl: CODECRAFT_BASE_URL,
-    isKeyConfigured: Boolean(process.env.CODECRAFT_API_KEY),
+    isKeyConfigured: Boolean(apiKey),
   });
 });
 
@@ -3217,7 +3218,7 @@ app.all('/api/codecraft/*', async (req, res) => {
   try {
     const subPath = (req.params as any)[0] || '';
     const targetUrl = `${CODECRAFT_BASE_URL.replace(/\/+$/, '')}/${subPath}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
-    const apiKey = process.env.CODECRAFT_API_KEY || '';
+    const apiKey = (process.env.CODECRAFT_API_KEY || process.env.VITE_CODECRAFT_API_KEY || '').trim();
 
     const headers: Record<string, string> = {
       'Content-Type': req.headers['content-type'] || 'application/json',
