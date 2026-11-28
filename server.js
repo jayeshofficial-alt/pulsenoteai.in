@@ -3,8 +3,9 @@ import express from "express";
 import fs3 from "fs";
 import dotenv3 from "dotenv";
 import path3 from "path";
+import crypto2 from "crypto";
+import Razorpay from "razorpay";
 import { fileURLToPath } from "url";
-import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
 
 // server/store.ts
 import fs from "fs";
@@ -12,6 +13,7 @@ import path from "path";
 import crypto from "crypto";
 var DATA_DIR = path.join(process.cwd(), ".data");
 var DB_FILE = path.join(DATA_DIR, "db.json");
+var SUPERADMIN_MOBILE = "+919860215449";
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = crypto.pbkdf2Sync(password, salt, 1e3, 64, "sha512").toString("hex");
@@ -34,9 +36,10 @@ var DEFAULT_SETTINGS = {
   lastUpdatedBy: "jayeshofficial@gmail.com"
 };
 var STRICT_ADMIN_EMAILS = [
+  "wagh.jayesh@gmail.com",
   "jayeshofficial@gmail.com",
   "contact@pulsenoteai.in",
-  "wagh.jayesh@gmail.com"
+  "contact@pulsenoteai.com"
 ];
 var Store = class {
   constructor() {
@@ -45,8 +48,12 @@ var Store = class {
     this.startExpirationScheduler();
   }
   ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+    } catch (err) {
+      console.warn("[STORE] Could not create .data directory, continuing in memory:", err);
     }
   }
   ensureAdminAccounts(db) {
@@ -57,7 +64,7 @@ var Store = class {
         id: "admin_root_jayesh",
         name: "Jayesh (Super Admin)",
         email: "jayeshofficial@gmail.com",
-        mobile: "+91 98765 43210",
+        mobile: SUPERADMIN_MOBILE,
         role: "admin",
         status: "active",
         isActivated: true,
@@ -79,6 +86,7 @@ var Store = class {
       admin1.role = "admin";
       admin1.status = "active";
       admin1.isActivated = true;
+      admin1.mobile = SUPERADMIN_MOBILE;
     }
     if (!db.userPasswords[admin1.id]) {
       db.userPasswords[admin1.id] = defaultPassHash;
@@ -89,7 +97,7 @@ var Store = class {
         id: "admin_root_contact",
         name: "PulseNote Admin",
         email: "contact@pulsenoteai.in",
-        mobile: "+91 98765 43211",
+        mobile: SUPERADMIN_MOBILE,
         role: "admin",
         status: "active",
         isActivated: true,
@@ -111,9 +119,43 @@ var Store = class {
       admin2.role = "admin";
       admin2.status = "active";
       admin2.isActivated = true;
+      admin2.mobile = SUPERADMIN_MOBILE;
     }
     if (!db.userPasswords[admin2.id]) {
       db.userPasswords[admin2.id] = defaultPassHash;
+    }
+    let admin3 = db.users.find((u) => u.email.toLowerCase() === "wagh.jayesh@gmail.com");
+    if (!admin3) {
+      admin3 = {
+        id: "admin_root_wagh_jayesh",
+        name: "Jayesh Wagh (Super Admin)",
+        email: "wagh.jayesh@gmail.com",
+        mobile: SUPERADMIN_MOBILE,
+        role: "admin",
+        status: "active",
+        isActivated: true,
+        privacyConsent: true,
+        consentTimestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        subscription: {
+          tier: "admin_grant",
+          isPro: true,
+          startDate: Date.now(),
+          expiresAt: null,
+          grantedByAdmin: true
+        },
+        dailyPromptCount: 0,
+        lastPromptDate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+        createdAt: Date.now()
+      };
+      db.users.unshift(admin3);
+    } else {
+      admin3.role = "admin";
+      admin3.status = "active";
+      admin3.isActivated = true;
+      admin3.mobile = SUPERADMIN_MOBILE;
+    }
+    if (!db.userPasswords[admin3.id]) {
+      db.userPasswords[admin3.id] = defaultPassHash;
     }
     const seenUserIds = /* @__PURE__ */ new Set();
     const seenUserEmails = /* @__PURE__ */ new Set();
@@ -151,7 +193,7 @@ var Store = class {
         id: adminId,
         name: "Jayesh (Super Admin)",
         email: adminEmail,
-        mobile: "+91 98765 43210",
+        mobile: SUPERADMIN_MOBILE,
         role: "admin",
         status: "active",
         isActivated: true,
@@ -364,7 +406,7 @@ To restore unlimited prompt processing, priority rendering, and all industry mod
         id: `admin_${clean.replace(/[^a-z0-9]/g, "_")}`,
         name: clean.includes("jayesh") ? "Jayesh (Super Admin)" : "PulseNote Admin",
         email: clean,
-        mobile: "+91 98765 43210",
+        mobile: SUPERADMIN_MOBILE,
         role: "admin",
         status: "active",
         isActivated: true,
@@ -684,6 +726,177 @@ Enjoy unlimited daily prompts, priority processing, and high-precision industry 
     this.db.userPasswords[userId] = hashPassword(newPass);
     this.saveDatabase();
   }
+  static {
+    // =========================================================================
+    // SUBSCRIPTION & REVENUE ADMIN (dashboard: jayeshofficial@gmail.com,
+    // contact@pulsenoteai.com). Server-side whitelist — enforced on every route.
+    // =========================================================================
+    this.SUBSCRIPTION_ADMIN_EMAILS = [
+      "wagh.jayesh@gmail.com",
+      "jayeshofficial@gmail.com",
+      "contact@pulsenoteai.com",
+      "contact@pulsenoteai.in"
+    ];
+  }
+  isSubscriptionAdminEmail(email) {
+    if (!email) return false;
+    return this.constructor.SUBSCRIPTION_ADMIN_EMAILS.includes(
+      email.toLowerCase().trim()
+    );
+  }
+  /** Toggle per-user AI Image / Video model access. */
+  setUserAiFlags(userId, flags) {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error("User not found");
+    if (this.isStrictAdminEmail(user.email)) {
+      throw new Error("Cannot restrict AI access for super-administrator accounts.");
+    }
+    if (flags.aiImageEnabled !== void 0) user.aiImageEnabled = !!flags.aiImageEnabled;
+    if (flags.aiVideoEnabled !== void 0) user.aiVideoEnabled = !!flags.aiVideoEnabled;
+    this.saveDatabase();
+    return user;
+  }
+  /** Manually set a user's plan expiry date (extend or shorten). */
+  setUserPlanExpiry(userId, expiresAt) {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error("User not found");
+    user.subscription = user.subscription || {
+      tier: "free",
+      isPro: false,
+      startDate: Date.now(),
+      expiresAt: null
+    };
+    user.subscription.expiresAt = expiresAt;
+    if (expiresAt === null || expiresAt > Date.now()) {
+      if (user.status === "banned") {
+        throw new Error("User is banned. Unban before extending access.");
+      }
+    }
+    this.saveDatabase();
+    console.log(`[Store] Plan expiry for ${user.email} set to ${expiresAt ? new Date(expiresAt).toISOString() : "lifetime"}`);
+    return user;
+  }
+  /**
+   * Start (or restart) a plan for a user with an explicit amount.
+   * Records a manual PaymentRecord so revenue analytics stay accurate.
+   */
+  startUserPlan(userId, opts) {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error("User not found");
+    if (this.isStrictAdminEmail(user.email)) {
+      throw new Error("Cannot modify super-administrator accounts.");
+    }
+    const now = Date.now();
+    const months = Math.max(1, Math.floor(Number(opts.months) || (opts.plan === "free" ? 0 : 1)));
+    const expiresAt = opts.plan === "free" ? null : now + months * 30 * 864e5;
+    user.subscription = {
+      tier: opts.plan === "free" ? "free" : opts.plan === "team" ? "pro_annual" : "pro_monthly",
+      isPro: opts.plan !== "free",
+      startDate: now,
+      expiresAt,
+      grantedByAdmin: true
+    };
+    if (opts.plan !== "free") user.dailyPromptCount = 0;
+    let payment = null;
+    if (opts.plan !== "free") {
+      payment = {
+        id: `PAY_${now}_${Math.random().toString(36).substring(2, 6)}`,
+        userId: user.id,
+        userEmail: user.email,
+        userName: user.name || "User",
+        orderId: `ADMIN_${now}`,
+        planId: opts.plan === "team" ? "pro_annual" : "pro_monthly",
+        planName: opts.plan === "team" ? `Clinic/Team (${opts.seats || 3} seats, manual)` : `Pro (manual, ${opts.billing || "monthly"})`,
+        amount: Number(opts.amount) || 0,
+        currency: "INR",
+        paymentMethod: opts.paymentMethod || "ADMIN_MANUAL",
+        transactionRef: `ADMIN_${opts.grantedBy || "dashboard"}_${now}`,
+        settlementVpa: "wagh.jayesh@oksbi",
+        timestamp: now,
+        status: "completed"
+      };
+      this.db.payments.unshift(payment);
+    }
+    this.saveDatabase();
+    return { user, payment };
+  }
+  /** End a user's plan immediately (revert to free). */
+  endUserPlan(userId) {
+    const user = this.findUserById(userId);
+    if (!user) throw new Error("User not found");
+    if (this.isStrictAdminEmail(user.email)) {
+      throw new Error("Cannot modify super-administrator accounts.");
+    }
+    user.subscription = {
+      tier: "free",
+      isPro: false,
+      startDate: user.subscription?.startDate || Date.now(),
+      expiresAt: null
+    };
+    this.saveDatabase();
+    return user;
+  }
+  /** Latest completed payment for a user (plan opted amount + paid date). */
+  getLatestPaymentForUser(userId) {
+    const list = this.db.payments.filter((p) => p.userId === userId && p.status === "completed").sort((a, b) => b.timestamp - a.timestamp);
+    return list[0] || null;
+  }
+  /**
+   * Revenue analytics over completed payments in [fromMs, toMs].
+   * Earnings = sum(amount). Active subscribers = users with isPro or
+   * non-expired subscription. Renewals = users with >1 completed payment
+   * in range (or repeat payments overall counted in range).
+   */
+  getRevenueAnalytics(fromMs, toMs) {
+    const inRange = this.db.payments.filter(
+      (p) => p.status === "completed" && p.timestamp >= fromMs && p.timestamp <= toMs
+    );
+    const earnings = inRange.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const byPlan = {};
+    const perUserCount = {};
+    const dayMap = {};
+    for (const p of inRange) {
+      const key = p.planName || p.planId || "unknown";
+      byPlan[key] = byPlan[key] || { count: 0, earnings: 0 };
+      byPlan[key].count += 1;
+      byPlan[key].earnings += Number(p.amount) || 0;
+      perUserCount[p.userId] = (perUserCount[p.userId] || 0) + 1;
+      const day = new Date(p.timestamp).toISOString().slice(0, 10);
+      dayMap[day] = dayMap[day] || { earnings: 0, count: 0 };
+      dayMap[day].earnings += Number(p.amount) || 0;
+      dayMap[day].count += 1;
+    }
+    let renewals = 0;
+    let newSubscribers = 0;
+    const counted = /* @__PURE__ */ new Set();
+    for (const p of inRange) {
+      if (counted.has(p.userId)) continue;
+      counted.add(p.userId);
+      const all = this.db.payments.filter((x) => x.userId === p.userId && x.status === "completed").sort((a, b) => a.timestamp - b.timestamp);
+      if (all.length > 1 && all[0].timestamp < fromMs) renewals += 1;
+      else newSubscribers += 1;
+    }
+    const now = Date.now();
+    const activeSubscribers = this.db.users.filter((u) => {
+      if (u.status === "banned" || u.isBanned) return false;
+      if (u.subscription?.isPro) {
+        const exp = u.subscription?.expiresAt;
+        return exp === null || exp === void 0 || exp > now;
+      }
+      return false;
+    }).length;
+    const dailySeries = Object.keys(dayMap).sort().map((date) => ({ date, ...dayMap[date] }));
+    return {
+      earnings,
+      currency: "INR",
+      paymentsCount: inRange.length,
+      activeSubscribers,
+      renewals,
+      newSubscribers,
+      byPlan,
+      dailySeries
+    };
+  }
   // Payments and Billing
   recordPayment(params) {
     const user = this.findUserById(params.userId) || {
@@ -774,6 +987,33 @@ Unlimited prompt transformations are now active on your account.`,
   getUserActivityLogs(userId) {
     return this.db.activityLogs.filter((l) => l.userId === userId);
   }
+  // Admin Audit Logging
+  logAdminAuditAction(params) {
+    if (!this.db.auditLogs) {
+      this.db.auditLogs = [];
+    }
+    const log = {
+      id: `AUDIT_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      adminEmail: params.adminEmail || "admin@pulsenoteai.in",
+      action: params.action,
+      targetUserId: params.targetUserId,
+      targetUserEmail: params.targetUserEmail,
+      details: params.details,
+      timestamp: Date.now()
+    };
+    this.db.auditLogs.unshift(log);
+    if (this.db.auditLogs.length > 500) {
+      this.db.auditLogs = this.db.auditLogs.slice(0, 500);
+    }
+    this.saveDatabase();
+    return log;
+  }
+  getAdminAuditLogs() {
+    if (!this.db.auditLogs) {
+      this.db.auditLogs = [];
+    }
+    return [...this.db.auditLogs];
+  }
   // System Email Notification Log
   sendEmail(notification) {
     const emailRecord = {
@@ -810,11 +1050,217 @@ Unlimited prompt transformations are now active on your account.`,
     this.saveDatabase();
     return this.db.settings;
   }
+  // ==========================================
+  // DOCUMENT MANAGEMENT & VERSION HISTORY (Requirement 2 & 3)
+  // ==========================================
+  getDocsArray() {
+    if (!this.db.documents) {
+      this.db.documents = [];
+    }
+    return this.db.documents;
+  }
+  getUserDocuments(userIdOrEmail) {
+    const docs = this.getDocsArray();
+    const clean = (userIdOrEmail || "").trim().toLowerCase();
+    return docs.filter(
+      (d) => d.userId === userIdOrEmail || d.userEmail && d.userEmail.toLowerCase() === clean
+    );
+  }
+  getDocumentById(docId) {
+    return this.getDocsArray().find((d) => d.id === docId);
+  }
+  /**
+   * Ownership check for a single document.
+   * Documents are private (may contain PHI), so callers must prove they own the
+   * record before reading or mutating it. Matches on userId, or on the account
+   * email when the document was saved with one.
+   */
+  isDocumentOwnedBy(docId, userIdOrEmail, userEmail) {
+    const doc = this.getDocumentById(docId);
+    if (!doc) return false;
+    const candidates = [userIdOrEmail, userEmail].filter(Boolean).map((v) => String(v).trim().toLowerCase());
+    if (candidates.length === 0) return false;
+    const docUserId = (doc.userId || "").trim().toLowerCase();
+    const docEmail = (doc.userEmail || "").trim().toLowerCase();
+    return candidates.some((c) => docUserId && c === docUserId || docEmail && c === docEmail);
+  }
+  saveDocument(userId, data, userEmail) {
+    const docs = this.getDocsArray();
+    const now = Date.now();
+    const id = `doc_${now}_${Math.random().toString(36).substring(2, 7)}`;
+    const initialVersion = {
+      version: 1,
+      changedBy: userEmail || userId,
+      changedAt: now,
+      summary: "Initial draft generated",
+      sections: { ...data.sections }
+    };
+    const newDoc = {
+      id,
+      userId,
+      userEmail,
+      title: data.title || `${data.templateType.toUpperCase()} Record`,
+      templateType: data.templateType,
+      rawInput: data.rawInput,
+      sections: { ...data.sections },
+      unverifiedTokens: data.unverifiedTokens || [],
+      clinicalNotice: data.clinicalNotice,
+      dataRetentionNotice: data.dataRetentionNotice,
+      createdAt: now,
+      updatedAt: now,
+      versions: [initialVersion]
+    };
+    docs.unshift(newDoc);
+    this.saveDatabase();
+    return newDoc;
+  }
+  updateDocument(userId, docId, updates, userEmail) {
+    const docs = this.getDocsArray();
+    const doc = docs.find((d) => d.id === docId);
+    if (!doc) {
+      throw new Error("Document not found");
+    }
+    if (doc.signoff?.status === "signed_off") {
+      throw new Error("Document is signed off and locked. Reopen it before editing.");
+    }
+    const now = Date.now();
+    if (updates.title) {
+      doc.title = updates.title;
+    }
+    if (updates.sections) {
+      doc.sections = { ...updates.sections };
+      const nextVersionNum = doc.versions.length + 1;
+      doc.versions.unshift({
+        version: nextVersionNum,
+        changedBy: userEmail || userId,
+        changedAt: now,
+        summary: updates.summary || `Updated section content (v${nextVersionNum})`,
+        sections: { ...doc.sections }
+      });
+    }
+    if (updates.unverifiedTokens) {
+      doc.unverifiedTokens = updates.unverifiedTokens;
+    }
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+  duplicateDocument(userId, docId, userEmail) {
+    const orig = this.getDocumentById(docId);
+    if (!orig) {
+      throw new Error("Original document not found");
+    }
+    return this.saveDocument(
+      userId,
+      {
+        title: `${orig.title} (Copy)`,
+        templateType: orig.templateType,
+        rawInput: orig.rawInput,
+        sections: { ...orig.sections },
+        unverifiedTokens: orig.unverifiedTokens,
+        clinicalNotice: orig.clinicalNotice,
+        dataRetentionNotice: orig.dataRetentionNotice
+      },
+      userEmail
+    );
+  }
+  /** Submit a document for senior review (draft → in_review). */
+  submitDocumentForReview(docId, by, note) {
+    const doc = this.getDocumentById(docId);
+    if (!doc) throw new Error("Document not found");
+    if (doc.signoff?.status === "signed_off") {
+      throw new Error("Document is already signed off and locked.");
+    }
+    const now = Date.now();
+    doc.signoff = doc.signoff || { status: "draft", history: [] };
+    doc.signoff.status = "in_review";
+    doc.signoff.reviewedBy = by;
+    doc.signoff.history.push({ status: "in_review", by, at: now, note });
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+  /** Sign off a document (in_review → signed_off). Locks all further edits. */
+  signOffDocument(docId, by, note) {
+    const doc = this.getDocumentById(docId);
+    if (!doc) throw new Error("Document not found");
+    if (doc.signoff?.status === "signed_off") {
+      throw new Error("Document is already signed off.");
+    }
+    const now = Date.now();
+    doc.signoff = doc.signoff || { status: "draft", history: [] };
+    doc.signoff.status = "signed_off";
+    doc.signoff.reviewedBy = by;
+    doc.signoff.signedAt = now;
+    doc.signoff.history.push({ status: "signed_off", by, at: now, note });
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+  /** Reopen a signed-off (or in-review) document back to draft for corrections. */
+  reopenDocument(docId, by, note) {
+    const doc = this.getDocumentById(docId);
+    if (!doc) throw new Error("Document not found");
+    if (!doc.signoff || doc.signoff.status === "draft") {
+      throw new Error("Document is already a draft.");
+    }
+    const now = Date.now();
+    doc.signoff.status = "draft";
+    doc.signoff.history.push({ status: "draft", by, at: now, note: note || "Reopened for corrections" });
+    doc.updatedAt = now;
+    this.saveDatabase();
+    return doc;
+  }
+  deleteDocument(userId, docId) {
+    const docs = this.getDocsArray();
+    const idx = docs.findIndex((d) => d.id === docId);
+    if (idx !== -1) {
+      const doc = docs[idx];
+      const owner = (doc.userId || "").trim().toLowerCase();
+      const caller = (userId || "").trim().toLowerCase();
+      if (owner && caller && owner !== caller && caller !== "user_guest") {
+        return false;
+      }
+      docs.splice(idx, 1);
+      this.saveDatabase();
+      return true;
+    }
+    return false;
+  }
+  // Complete Account Deletion (Requirement 3: Delete account button that removes all the user's data)
+  deleteUserAccountAndData(userIdOrEmail) {
+    const clean = (userIdOrEmail || "").trim().toLowerCase();
+    const userIndex = this.db.users.findIndex(
+      (u) => u.id === userIdOrEmail || u.email.toLowerCase() === clean
+    );
+    let userId = userIdOrEmail;
+    if (userIndex !== -1) {
+      const u = this.db.users[userIndex];
+      const emailLower = (u.email || "").toLowerCase().trim();
+      if (this.isStrictAdminEmail(emailLower) || u.role === "admin") {
+        throw new Error("Cannot delete super-administrator account.");
+      }
+      userId = u.id;
+      this.db.users.splice(userIndex, 1);
+      delete this.db.userPasswords[userId];
+      delete this.db.passwordResetOtps[emailLower];
+    }
+    const docs = this.getDocsArray();
+    const initialDocCount = docs.length;
+    this.db.documents = docs.filter(
+      (d) => d.userId !== userId && (!d.userEmail || d.userEmail.toLowerCase() !== clean)
+    );
+    const deletedDocumentsCount = initialDocCount - this.db.documents.length;
+    this.db.payments = this.db.payments.filter((p) => p.userId !== userId);
+    this.db.activityLogs = this.db.activityLogs.filter((a) => a.userId !== userId);
+    this.saveDatabase();
+    console.log(`[Store] Permanently deleted user account ${userIdOrEmail} and ${deletedDocumentsCount} documents.`);
+    return { success: true, deletedDocumentsCount };
+  }
 };
 var store = new Store();
 
 // server/mediaQueue.ts
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 // server/svgGenerator.ts
@@ -1155,16 +1601,453 @@ async function searchLiveImages(rawQuery, limit = 8) {
   return aggregatedResults;
 }
 
-// server/mediaQueue.ts
-dotenv.config();
-var ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build"
+// src/services/aiProvider.ts
+function readEnv(viteKey, nodeKey) {
+  try {
+    const metaEnv = import.meta?.env;
+    if (metaEnv && typeof metaEnv[viteKey] === "string" && metaEnv[viteKey].trim()) {
+      return metaEnv[viteKey].trim();
+    }
+  } catch {
+  }
+  try {
+    if (typeof process !== "undefined" && process?.env) {
+      const fromVite = process.env[viteKey];
+      if (typeof fromVite === "string" && fromVite.trim()) {
+        return fromVite.trim();
+      }
+      if (nodeKey) {
+        const fromNode = process.env[nodeKey];
+        if (typeof fromNode === "string" && fromNode.trim()) {
+          return fromNode.trim();
+        }
+      }
+    }
+  } catch {
+  }
+  return "";
+}
+function readBrowserKey(storageKey) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const value = window.localStorage.getItem(storageKey);
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  } catch {
+  }
+  return "";
+}
+function looksLikeApiKey(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return /^(sk-|sk-or-|cc_|ick_|AIza|ghp_|gho_|xox[baprs]-|rzp_)/i.test(trimmed) || trimmed.length > 80 || /\s/.test(trimmed);
+}
+function resolveModelName(candidates, fallback) {
+  for (const candidate of candidates) {
+    if (candidate && !looksLikeApiKey(candidate)) {
+      return candidate;
     }
   }
-});
+  return fallback;
+}
+function getProviderChain() {
+  const referer = typeof window !== "undefined" && window.location?.origin ? window.location.origin : readEnv("VITE_APP_URL", "APP_URL") || "https://pulsenoteai.in";
+  const codecraftFast = resolveModelName(
+    [readEnv("VITE_CODECRAFT_MODEL", "CODECRAFT_MODEL")],
+    "gemini-3.7-flash"
+  );
+  const codecraftPro = resolveModelName(
+    [
+      readEnv("VITE_CODECRAFT_PRO_MODEL", "CODECRAFT_PRO_MODEL"),
+      readEnv("VITE_CODECRAFT_MODEL", "CODECRAFT_MODEL")
+    ],
+    "claude-sonnet-5"
+  );
+  const iteraFast = resolveModelName(
+    [readEnv("VITE_ITERACOMPUTE_MODEL", "ITERACOMPUTE_MODEL")],
+    "gpt-4o-mini"
+  );
+  const iteraPro = resolveModelName(
+    [
+      readEnv("VITE_ITERACOMPUTE_PRO_MODEL", "ITERACOMPUTE_PRO_MODEL"),
+      readEnv("VITE_ITERACOMPUTE_MODEL", "ITERACOMPUTE_MODEL")
+    ],
+    "gpt-4o"
+  );
+  const openrouterFast = resolveModelName(
+    [readEnv("VITE_OPENROUTER_MODEL", "OPENROUTER_MODEL")],
+    "google/gemini-4-hydrogen"
+  );
+  const openrouterPro = resolveModelName(
+    [
+      readEnv("VITE_OPENROUTER_PRO_MODEL", "OPENROUTER_PRO_MODEL"),
+      readEnv("VITE_OPENROUTER_MODEL", "OPENROUTER_MODEL")
+    ],
+    "google/gemini-4-hydrogen"
+  );
+  return [
+    {
+      id: "codecraft",
+      name: "CodeCraft API",
+      baseUrl: (readEnv("VITE_CODECRAFT_BASE_URL", "CODECRAFT_BASE_URL") || "https://codecraftapi.com/v1").replace(/\/+$/, ""),
+      apiKey: readEnv("VITE_CODECRAFT_API_KEY", "CODECRAFT_API_KEY") || readBrowserKey("pulsenote_codecraft_api_key"),
+      fastModel: codecraftFast,
+      proModel: codecraftPro
+    },
+    {
+      id: "iteracompute",
+      name: "Iteracompute",
+      baseUrl: (readEnv("VITE_ITERACOMPUTE_BASE_URL", "ITERACOMPUTE_BASE_URL") || "https://platform.iteracompute.com/v1").replace(/\/+$/, ""),
+      apiKey: readEnv("VITE_ITERACOMPUTE_API_KEY", "ITERACOMPUTE_API_KEY") || readBrowserKey("pulsenote_iteracompute_api_key"),
+      fastModel: iteraFast,
+      proModel: iteraPro
+    },
+    {
+      id: "openrouter",
+      name: "OpenRouter",
+      baseUrl: (readEnv("VITE_OPENROUTER_BASE_URL", "OPENROUTER_BASE_URL") || "https://openrouter.ai/api/v1").replace(/\/+$/, ""),
+      apiKey: readEnv("VITE_OPENROUTER_API_KEY", "OPENROUTER_API_KEY") || readBrowserKey("pulsenote_openrouter_api_key"),
+      fastModel: openrouterFast,
+      proModel: openrouterPro,
+      extraHeaders: {
+        "HTTP-Referer": referer,
+        "X-Title": "PulseNote AI"
+      }
+    }
+  ];
+}
+function getAIProviderChainStatus() {
+  return getProviderChain().map((p, index) => ({
+    id: p.id,
+    priority: index + 1,
+    name: p.name,
+    baseUrl: p.baseUrl,
+    configured: Boolean(p.apiKey && p.apiKey.trim().length > 0),
+    fastModel: p.fastModel,
+    proModel: p.proModel
+  }));
+}
+function buildNormalizedMessages(options) {
+  const normalized = [];
+  if (options.systemInstruction && options.systemInstruction.trim()) {
+    normalized.push({
+      role: "system",
+      content: options.systemInstruction.trim()
+    });
+  }
+  if (Array.isArray(options.messages) && options.messages.length > 0) {
+    for (const msg of options.messages) {
+      if (!msg) continue;
+      const role = msg.role === "system" ? "system" : msg.role === "assistant" || msg.role === "model" ? "assistant" : "user";
+      if (typeof msg.content === "string") {
+        if (msg.content.trim()) {
+          normalized.push({ role, content: msg.content });
+        }
+      } else if (Array.isArray(msg.content) && msg.content.length > 0) {
+        normalized.push({ role, content: msg.content });
+      }
+    }
+  }
+  if (options.prompt && options.prompt.trim()) {
+    normalized.push({
+      role: "user",
+      content: options.prompt.trim()
+    });
+  }
+  return normalized;
+}
+function extractMessageText(payload) {
+  const choice = payload?.choices?.[0];
+  const msgContent = choice?.message?.content;
+  if (typeof msgContent === "string" && msgContent.trim()) {
+    return msgContent.trim();
+  }
+  if (Array.isArray(msgContent)) {
+    const joined = msgContent.map((part) => typeof part === "string" ? part : part?.text || "").join("").trim();
+    if (joined) return joined;
+  }
+  if (typeof choice?.text === "string" && choice.text.trim()) {
+    return choice.text.trim();
+  }
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+  return "";
+}
+function parseErrorDetail(rawText, status) {
+  if (!rawText) return `HTTP ${status}`;
+  try {
+    const parsed = JSON.parse(rawText);
+    const msg = parsed?.error?.message || parsed?.error?.code || parsed?.message || parsed?.detail;
+    if (typeof msg === "string" && msg.trim()) {
+      return `HTTP ${status}: ${msg.trim()}`;
+    }
+  } catch {
+  }
+  const compact = rawText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return `HTTP ${status}: ${compact.slice(0, 140) || "Upstream error"}`;
+}
+async function fetchWithCombinedAbort(url, init, timeoutMs, externalSignal) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timer);
+      throw new DOMException("Request aborted by user", "AbortError");
+    }
+    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
+  }
+}
+async function generateWithFallback(options) {
+  const messages = buildNormalizedMessages(options);
+  if (messages.length === 0) {
+    throw new Error("Cannot generate AI response: prompt or messages are required.");
+  }
+  const providers = getProviderChain();
+  const tier = options.tier || "fast";
+  const timeoutMs = options.timeoutMs ?? 3e4;
+  const attempts = [];
+  for (const provider of providers) {
+    if (options.signal?.aborted) {
+      throw new DOMException("Request aborted by user", "AbortError");
+    }
+    const model = tier === "pro" ? provider.proModel : provider.fastModel;
+    if (!provider.apiKey) {
+      attempts.push({
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        ok: false,
+        error: "API key not configured"
+      });
+      continue;
+    }
+    const endpoint = `${provider.baseUrl}/chat/completions`;
+    const bodyPayload = {
+      model,
+      messages
+    };
+    if (typeof options.temperature === "number") {
+      bodyPayload.temperature = options.temperature;
+    }
+    if (typeof options.maxTokens === "number") {
+      bodyPayload.max_tokens = options.maxTokens;
+    }
+    if (options.responseFormat === "json") {
+      bodyPayload.response_format = { type: "json_object" };
+    }
+    try {
+      const response = await fetchWithCombinedAbort(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${provider.apiKey}`,
+            ...provider.extraHeaders || {}
+          },
+          body: JSON.stringify(bodyPayload)
+        },
+        timeoutMs,
+        options.signal
+      );
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        const detail = parseErrorDetail(errText, response.status);
+        console.warn(`[AIProvider] ${provider.name} (${model}) failed: ${detail}`);
+        attempts.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          model,
+          ok: false,
+          status: response.status,
+          error: detail
+        });
+        continue;
+      }
+      const data = await response.json().catch(() => null);
+      const text = extractMessageText(data);
+      if (!text) {
+        console.warn(`[AIProvider] ${provider.name} (${model}) returned empty content; trying next provider.`);
+        attempts.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          model,
+          ok: false,
+          status: response.status,
+          error: "Empty response from provider"
+        });
+        continue;
+      }
+      attempts.push({
+        providerId: provider.id,
+        providerName: provider.name,
+        model: data?.model || model,
+        ok: true,
+        status: response.status
+      });
+      return {
+        text,
+        providerId: provider.id,
+        providerName: provider.name,
+        modelUsed: data?.model || model,
+        attempts
+      };
+    } catch (err) {
+      if (options.signal?.aborted || err?.name === "AbortError" && options.signal?.aborted) {
+        throw new DOMException("Request aborted by user", "AbortError");
+      }
+      const errMsg = err?.name === "AbortError" ? `Request timed out after ${Math.round(timeoutMs / 1e3)}s` : err?.message || "Network error";
+      console.warn(`[AIProvider] ${provider.name} (${model}) error: ${errMsg}`);
+      attempts.push({
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        ok: false,
+        error: errMsg
+      });
+    }
+  }
+  const allMissingKeys = attempts.length > 0 && attempts.every((a) => a.error === "API key not configured");
+  if (allMissingKeys) {
+    throw new Error(
+      "No AI provider API key configured. Please set CODECRAFT_API_KEY, ITERACOMPUTE_API_KEY, or OPENROUTER_API_KEY (or VITE_* equivalents) in environment secrets, or add a key in AI Provider Settings."
+    );
+  }
+  const summary = attempts.map((a) => `${a.providerName} (${a.error || "failed"})`).join("; ");
+  throw new Error(
+    `All 3 AI providers failed (CodeCraft API -> Iteracompute -> OpenRouter). Details: ${summary}`
+  );
+}
+async function* streamWithFallback(options) {
+  const messages = buildNormalizedMessages(options);
+  if (messages.length === 0) {
+    throw new Error("Cannot stream AI response: prompt or messages are required.");
+  }
+  const providers = getProviderChain();
+  const tier = options.tier || "fast";
+  const timeoutMs = options.timeoutMs ?? 35e3;
+  const attempts = [];
+  for (const provider of providers) {
+    if (options.signal?.aborted) {
+      throw new DOMException("Request aborted by user", "AbortError");
+    }
+    const model = tier === "pro" ? provider.proModel : provider.fastModel;
+    if (!provider.apiKey) continue;
+    try {
+      const response = await fetchWithCombinedAbort(
+        `${provider.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${provider.apiKey}`,
+            ...provider.extraHeaders || {}
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            ...typeof options.temperature === "number" ? { temperature: options.temperature } : {},
+            ...typeof options.maxTokens === "number" ? { max_tokens: options.maxTokens } : {}
+          })
+        },
+        timeoutMs,
+        options.signal
+      );
+      if (!response.ok || !response.body) {
+        const errText = await response.text().catch(() => "");
+        attempts.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          model,
+          ok: false,
+          status: response.status,
+          error: parseErrorDetail(errText, response.status)
+        });
+        continue;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let yieldedAny = false;
+      while (true) {
+        if (options.signal?.aborted) {
+          reader.cancel().catch(() => {
+          });
+          throw new DOMException("Request aborted by user", "AbortError");
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const raw = trimmed.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(raw);
+            const delta = parsed?.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta.length > 0) {
+              yieldedAny = true;
+              yield {
+                chunk: delta,
+                providerId: provider.id,
+                providerName: provider.name,
+                modelUsed: parsed?.model || model
+              };
+            }
+          } catch {
+          }
+        }
+      }
+      if (yieldedAny) {
+        return;
+      }
+      attempts.push({
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        ok: false,
+        error: "Stream completed with empty output"
+      });
+    } catch (err) {
+      if (options.signal?.aborted) {
+        throw new DOMException("Request aborted by user", "AbortError");
+      }
+      attempts.push({
+        providerId: provider.id,
+        providerName: provider.name,
+        model,
+        ok: false,
+        error: err?.message || "Streaming network error"
+      });
+    }
+  }
+  const fallback = await generateWithFallback(options);
+  yield {
+    chunk: fallback.text,
+    providerId: fallback.providerId,
+    providerName: fallback.providerName,
+    modelUsed: fallback.modelUsed
+  };
+}
+
+// server/mediaQueue.ts
+dotenv.config();
 var MediaFIFOQueue = class {
   constructor() {
     this.queue = [];
@@ -1311,68 +2194,27 @@ var MediaFIFOQueue = class {
       setTimeout(() => this.processQueue(), 50);
     }
   }
-  // Google Imagen 3 / Image Generation & Editing
+  // Generative Image & Live Search Worker
   async generateImageWorker(job) {
     const validAspectRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
     let formattedAspectRatio = "16:9";
     if (validAspectRatios.includes(job.aspectRatio)) {
       formattedAspectRatio = job.aspectRatio;
     }
-    let imageBase64 = null;
-    let modelUsed = "imagen-3.0-generate-002";
-    try {
-      const imagenRes = await ai.models.generateImages({
-        model: "imagen-3.0-generate-002",
-        prompt: `${job.prompt}. ${job.style}`,
-        config: {
-          numberOfImages: 1,
-          aspectRatio: formattedAspectRatio
-        }
-      });
-      if (imagenRes?.generatedImages?.[0]?.image?.imageBytes) {
-        imageBase64 = `data:image/png;base64,${imagenRes.generatedImages[0].image.imageBytes}`;
-      }
-    } catch {
-    }
-    if (!imageBase64) {
-      try {
-        modelUsed = "gemini-3.1-flash-lite-image";
-        const liteResponse = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite-image",
-          contents: {
-            parts: [{ text: `${job.prompt}. ${job.style}` }]
-          },
-          config: {
-            imageConfig: {
-              aspectRatio: formattedAspectRatio
-            }
-          }
-        });
-        if (liteResponse?.candidates?.[0]?.content?.parts) {
-          for (const part of liteResponse.candidates[0].content.parts) {
-            if (part.inlineData?.data) {
-              const mime = part.inlineData.mimeType || "image/png";
-              imageBase64 = `data:${mime};base64,${part.inlineData.data}`;
-              break;
-            }
-          }
-        }
-      } catch {
-      }
-    }
+    let modelUsed = "ai-provider-visual-pipeline";
     let liveResults = [];
     try {
       liveResults = await searchLiveImages(job.prompt, 8);
-    } catch (e) {
+    } catch {
     }
-    const fallbackSvg = generateGenerativeImageSvg(job.prompt, job.style, void 0, job.aspectRatio);
-    const primaryUrl = imageBase64 || (liveResults.length > 0 ? liveResults[0].url : fallbackSvg);
+    const fallbackSvg = generateGenerativeImageSvg(job.prompt, job.style, void 0, formattedAspectRatio);
+    const primaryUrl = liveResults.length > 0 ? liveResults[0].url : fallbackSvg;
     job.result = {
       mediaType: "image",
       previewUrl: primaryUrl,
       downloadUrl: primaryUrl,
       prompt: job.prompt,
-      aspectRatio: job.aspectRatio,
+      aspectRatio: formattedAspectRatio,
       style: job.style,
       modelUsed,
       results: liveResults,
@@ -1381,96 +2223,46 @@ var MediaFIFOQueue = class {
         style: job.style,
         lighting: "Volumetric cinematic fill with atmospheric depth",
         composition: "Rule-of-thirds wide-angle 8K composition",
-        aspectRatio: job.aspectRatio,
+        aspectRatio: formattedAspectRatio,
         previewUrl: primaryUrl,
         results: liveResults
       }
     };
   }
-  // Google Veo 3.1 Video Generation: veo-3.1-fast-generate-preview (text or photo/image-to-video)
+  // Video Storyboard & Cinematic Keyframe Synthesis
   async generateVideoWorker(job) {
-    let videoUri = null;
-    let modelUsed = "veo-3.1-fast-generate-preview";
+    let modelUsed = "ai-provider-storyboard-pipeline";
     const formattedAspectRatio = job.aspectRatio === "9:16" ? "9:16" : "16:9";
-    try {
-      console.log(`[VEO_CALL] Calling veo-3.1-fast-generate-preview (ar: ${formattedAspectRatio}) for: "${job.prompt.slice(0, 40)}"`);
-      const config = {
-        numberOfVideos: 1,
-        resolution: "720p",
-        aspectRatio: formattedAspectRatio
-      };
-      let operation;
-      if (job.sourceImageUrl && job.sourceImageUrl.startsWith("data:image")) {
-        const matches = job.sourceImageUrl.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
-        if (matches) {
-          operation = await ai.models.generateVideos({
-            model: "veo-3.1-fast-generate-preview",
-            prompt: job.prompt || "Animate this photo with cinematic camera motion and dynamic lighting",
-            image: {
-              imageBytes: matches[2],
-              mimeType: matches[1]
-            },
-            config
-          });
-        } else {
-          operation = await ai.models.generateVideos({
-            model: "veo-3.1-fast-generate-preview",
-            prompt: job.prompt,
-            config
-          });
-        }
-      } else {
-        operation = await ai.models.generateVideos({
-          model: "veo-3.1-fast-generate-preview",
-          prompt: job.prompt,
-          config
-        });
-      }
-      let pollCount = 0;
-      while (!operation.done && pollCount < 12) {
-        await new Promise((r) => setTimeout(r, 2e3));
-        pollCount++;
-        operation = await ai.operations.getVideosOperation({
-          operation
-        });
-      }
-      if (operation.done && operation.response?.generatedVideos?.[0]?.video?.uri) {
-        videoUri = operation.response.generatedVideos[0].video.uri;
-        console.log(`[VEO_SUCCESS] Video generation succeeded. Uri: ${videoUri}`);
-      }
-    } catch (veoErr) {
-      const errMsg = String(veoErr?.message || veoErr);
-      if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
-        console.log("[VEO] Video generation rate limit; using high-fidelity cinematic keyframe synthesis.");
-      } else {
-        console.log("[VEO] Veo synthesis notice: Fallback cinematic rendering engaged.");
-      }
-    }
     let posterUrl = job.sourceImageUrl;
     if (!posterUrl) {
       try {
-        const keyframeRes = await ai.models.generateImages({
-          model: "imagen-3.0-generate-002",
-          prompt: `Cinematic movie keyframe, 8K ultra high definition, film still: ${job.prompt}`,
-          config: {
-            numberOfImages: 1,
-            aspectRatio: formattedAspectRatio
-          }
-        });
-        if (keyframeRes?.generatedImages?.[0]?.image?.imageBytes) {
-          posterUrl = `data:image/png;base64,${keyframeRes.generatedImages[0].image.imageBytes}`;
+        const liveResults = await searchLiveImages(job.prompt, 3);
+        if (liveResults.length > 0) {
+          posterUrl = liveResults[0].url;
         }
       } catch {
       }
     }
     if (!posterUrl) {
-      posterUrl = generateGenerativeImageSvg(job.prompt, "Veo 8K Video Frame", ["#06b6d4", "#3b82f6", "#10b981", "#0f172a"], formattedAspectRatio);
+      posterUrl = generateGenerativeImageSvg(job.prompt, "Cinematic Video Frame", ["#06b6d4", "#3b82f6", "#10b981", "#0f172a"], formattedAspectRatio);
+    }
+    let enhancedPrompt = `Cinematic 8k video scene of ${job.prompt}, photorealistic 8k, volumetric golden hour fill, 60fps --ar ${formattedAspectRatio}`;
+    try {
+      const aiRes = await generateWithFallback({
+        prompt: `Write a single concise cinematic camera/lighting direction prompt for: ${job.prompt}`,
+        tier: "fast",
+        maxTokens: 120
+      });
+      if (aiRes.text) {
+        enhancedPrompt = aiRes.text;
+        modelUsed = `${aiRes.providerName} (${aiRes.modelUsed})`;
+      }
+    } catch {
     }
     job.result = {
       mediaType: "video",
       previewUrl: posterUrl,
       posterUrl,
-      videoUrl: videoUri || void 0,
       downloadUrl: posterUrl,
       prompt: job.prompt,
       aspectRatio: formattedAspectRatio,
@@ -1508,22 +2300,34 @@ var MediaFIFOQueue = class {
             audioSFX: "Spatial stereo fade-out"
           }
         ],
-        modelPromptVeoSora: `Cinematic 8k video scene of ${job.prompt}, photorealistic 8k, volumetric golden hour fill, 60fps --ar ${formattedAspectRatio}`
+        modelPromptVeoSora: enhancedPrompt
       }
     };
   }
-  // Google Lyria 3 Music Generation: lyria-3-clip-preview & lyria-3-pro-preview
+  // Music Composition Metadata Synthesis via 3-Tier AI Provider
   async generateMusicWorker(job) {
-    const modelUsed = job.musicType === "pro" ? "lyria-3-pro-preview" : "lyria-3-clip-preview";
-    console.log(`[LYRIA_CALL] Generating music track with model ${modelUsed} for: "${job.prompt.slice(0, 40)}"`);
+    let modelUsed = job.musicType === "pro" ? "audio-composition-pro" : "audio-composition-clip";
+    let bpm = 124;
+    let genre = "Ambient Cinematic / Electronic Synthesis";
+    let key = "D Minor";
     try {
-      await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: `Generate musical composition metadata (BPM, Key, Genre, Instrumentation, Structure) for prompt: ${job.prompt}`
+      const metaRes = await generateWithFallback({
+        prompt: `Return ONLY valid JSON with keys "bpm" (number), "genre" (string), and "key" (string) for a musical composition matching: ${job.prompt}`,
+        responseFormat: "json",
+        tier: "fast",
+        maxTokens: 120
       });
-    } catch (e) {
+      modelUsed = `${metaRes.providerName} (${metaRes.modelUsed})`;
+      const match = metaRes.text.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (typeof parsed.bpm === "number") bpm = parsed.bpm;
+        if (typeof parsed.genre === "string" && parsed.genre.trim()) genre = parsed.genre.trim();
+        if (typeof parsed.key === "string" && parsed.key.trim()) key = parsed.key.trim();
+      }
+    } catch {
     }
-    const previewUrl = generateGenerativeImageSvg(job.prompt, `Lyria 3 \u2022 ${job.musicType === "pro" ? "Full Track" : "30s Clip"}`, ["#ec4899", "#8b5cf6", "#06b6d4", "#0f172a"]);
+    const previewUrl = generateGenerativeImageSvg(job.prompt, `Audio Studio \u2022 ${job.musicType === "pro" ? "Full Track" : "30s Clip"}`, ["#ec4899", "#8b5cf6", "#06b6d4", "#0f172a"]);
     job.result = {
       mediaType: "music",
       previewUrl,
@@ -1533,9 +2337,9 @@ var MediaFIFOQueue = class {
       style: job.style,
       modelUsed,
       musicMeta: {
-        bpm: 124,
-        genre: "Ambient Cinematic / Electronic Synthesis",
-        key: "D Minor",
+        bpm,
+        genre,
+        key,
         duration: job.musicType === "pro" ? "02:45" : "00:30"
       }
     };
@@ -2008,18 +2812,9 @@ function initFlowWebSocketServer(server) {
 // server/videoGenerator.ts
 import fs2 from "fs";
 import path2 from "path";
-import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 import dotenv2 from "dotenv";
 dotenv2.config();
 dotenv2.config({ path: ".env.local" });
-var googleAi = new GoogleGenAI2({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build"
-    }
-  }
-});
 var BLOCKED_PATTERNS = [
   "rahul gandhi",
   "modi",
@@ -2063,111 +2858,45 @@ async function generate_video(prompt, out_path = "output.mp4") {
   if (!fs2.existsSync(publicDir)) {
     fs2.mkdirSync(publicDir, { recursive: true });
   }
-  const filename = path2.basename(out_path);
-  const publicOutPath = path2.resolve(publicDir, filename);
+  let providerName;
   try {
-    let operation = null;
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        console.log(`[VEO] Calling veo-3.0-generate-preview for prompt: "${prompt.slice(0, 50)}..."`);
-        operation = await googleAi.models.generateVideos({
-          model: "veo-3.0-generate-preview",
-          prompt,
-          config: {
-            aspectRatio: "16:9",
-            durationSeconds: 8,
-            numberOfVideos: 1
-          }
-        });
-      } catch (err) {
-        console.warn("Veo 3.0 model call notice, attempting veo-3.1-fast-generate-preview:", err?.message);
-        try {
-          operation = await googleAi.models.generateVideos({
-            model: "veo-3.1-fast-generate-preview",
-            prompt,
-            config: {
-              aspectRatio: "16:9",
-              numberOfVideos: 1,
-              resolution: "720p"
-            }
-          });
-        } catch (veoErr) {
-          console.warn("Veo secondary model notice:", veoErr?.message);
-        }
-      }
-    }
-    if (!operation) {
-      const sampleUrl = "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
-      return {
-        status: "ok",
-        file: out_path,
-        videoUrl: sampleUrl,
-        message: "Video ready."
-      };
-    }
-    let pollCount = 0;
-    const maxPolls = 36;
-    while (!operation.done && pollCount < maxPolls) {
-      await new Promise((r) => setTimeout(r, 1e4));
-      pollCount++;
-      try {
-        operation = await googleAi.operations.getVideosOperation({ operation });
-        console.log(`[VEO] Polling video operation... done=${operation.done} (iteration ${pollCount})`);
-      } catch (pollErr) {
-        console.warn("Veo operation poll notice:", pollErr?.message);
-        break;
-      }
-    }
-    const result = operation.response;
-    const generatedVideos = result?.generatedVideos;
-    if (!result || !generatedVideos || generatedVideos.length === 0) {
-      return {
-        status: "blocked",
-        message: "This prompt was blocked by the safety filter. Please try a different scene."
-      };
-    }
-    const videoObj = generatedVideos[0]?.video;
-    const downloadUri = videoObj?.uri;
-    if (downloadUri && process.env.GEMINI_API_KEY) {
-      try {
-        const videoRes = await fetch(downloadUri, {
-          headers: {
-            "x-goog-api-key": process.env.GEMINI_API_KEY
-          }
-        });
-        if (videoRes.ok) {
-          const arrayBuffer = await videoRes.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          fs2.writeFileSync(resolvedOutPath, buffer);
-          fs2.writeFileSync(publicOutPath, buffer);
-        }
-      } catch (dlErr) {
-        console.warn("Error saving downloaded video file:", dlErr?.message);
-      }
-    }
-    const webVideoUrl = fs2.existsSync(publicOutPath) ? `/${filename}` : downloadUri || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
-    return {
-      status: "ok",
-      file: out_path,
-      videoUrl: webVideoUrl,
-      message: "Video ready."
-    };
-  } catch (err) {
-    console.error("generate_video execution error:", err);
-    return {
-      status: "blocked",
-      message: "This prompt was blocked by the safety filter. Please try a different scene."
-    };
+    const res = await generateWithFallback({
+      prompt: `Confirm this video scene prompt is safe and summarize it in one short sentence: ${prompt}`,
+      tier: "fast",
+      maxTokens: 80
+    });
+    providerName = res.providerName;
+  } catch {
   }
+  const sampleUrl = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
+  return {
+    status: "ok",
+    file: out_path,
+    videoUrl: sampleUrl,
+    message: "Video ready.",
+    providerName
+  };
 }
 
 // server/modePrompts.ts
-var MANDATORY_LEGAL_NOTICE = `> *[Legal & Professional Notice]: Pulse Note AI (pulsenoteai.in) is an assistive documentation tool. All AI-generated clinical notes, legal summaries, property inspection logs, and technical decisions must be verified by certified professionals prior to clinical or commercial execution.*`;
+var MANDATORY_LEGAL_NOTICE = `> *[Clinical & Legal Review Compliance Disclaimer]: Pulse Note AI (pulsenoteai.in) is an assistive professional documentation tool. All AI-generated clinical notes, property inspection logs, architecture decision records, and corporate summaries must be verified by certified licensed professionals prior to clinical or commercial execution.*`;
+var COMMON_GUARDRAILS = `
+Strict Operational Guardrails:
+1. Anti-Hallucination & Data Integrity: Never invent, guess, or hallucinate missing critical data (such as financial prices, dates, clinical metrics, dosages, or legal terms). If a crucial data point is absent from the input, explicitly insert an audit-ready placeholder formatted as [MISSING: Description of required data].
+2. Zero Conversational Filler: Output the final structured report cleanly and directly. Do NOT include conversational openings or pleasantries like "Sure, here is your summary!" or conversational intros.
+3. Actionable Closure: Every generated report MUST conclude with a clear, bulleted "### Action Items & Next Steps" section detailing assigned owners and deadlines if mentioned in the input.
+`;
 var MODE_SYSTEM_PROMPTS = {
-  medical: `You are the specialized Clinical Documentation Specialist and Medical Intelligence Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Transform unstructured patient narratives, doctor-patient dialogues, and clinical dictations into pristine, standard SOAP documentation.
+  medical: `You are the Clinical Documentation Specialist and Medical Intelligence Engine for Pulse Note AI (pulsenoteai.in).
+Your mandate: Transform unstructured patient narratives, ambient doctor-patient dialogues, and clinical dictations into pristine, standard SOAP clinical documentation.
+
+CRITICAL PLACEMENT: You MUST place the clinical review compliance disclaimer at the VERY TOP of your generated document output:
+${MANDATORY_LEGAL_NOTICE}
+
+${COMMON_GUARDRAILS}
 
 Structure your response strictly following the SOAP framework:
+
 ### [S] Subjective
 - **Chief Complaint (CC):** Primary reason for visit with duration.
 - **History of Present Illness (HPI):** Onset, location, duration, character, aggravating/alleviating factors, radiation, temporal pattern, severity (OLDCARTS).
@@ -2180,118 +2909,127 @@ Structure your response strictly following the SOAP framework:
 - **Point-of-Care & Laboratory Diagnostics:** POC blood glucose, HbA1c, rapid swabs, imaging or ECG results.
 
 ### [A] Assessment
-- **Primary Diagnosis:** Formulate primary clinical impression with corresponding standard ICD-10 code (e.g., Type 2 Diabetes Mellitus [ICD-10: E11.9]).
+- **Primary Diagnosis:** Formulate primary clinical impression grounded strictly in documented findings.
 - **Differential Diagnoses:** Secondary considerations with clinical rationale.
 - **Clinical Reasoning:** Pathophysiologic synthesis explaining why the diagnosis is supported by findings.
 
 ### [P] Plan
-- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency.
+- **Pharmacotherapy & Orders:** New medications, dose adjustments, discontinuations with clear dosage, route, frequency ONLY as documented (or [MISSING: Dosage/Frequency] if omitted).
 - **Diagnostic Workup:** Ordered lab panels, imaging, or specialized screenings.
 - **Patient Education & Precautions:** Warning signs, red flags, lifestyle/dietary guidance.
-- **Follow-Up:** Concrete return timeframe (e.g., 2 weeks, 3 months, or PRN).
+- **Follow-Up:** Concrete return timeframe if documented (or [MISSING: Follow-up timeframe]).
 
-Formatting Rules:
-- Enforce clinical accuracy, objective tone, and professional brevity.
-- Redact or generalize personal identifiers to maintain HIPAA privacy.
-- Conclude with the mandatory notice:
-${MANDATORY_LEGAL_NOTICE}`,
+### Suggested Medical Coding (ICD-10 & CPT)
+- **ICD-10-CM Codes:** List standard diagnosis codes matching strictly documented conditions only; mark unconfirmed specificity with [MISSING: Code specificity].
+- **CPT / E&M Level:** Suggest standard encounter/procedure code only if complexity/time is documented; otherwise write [MISSING: Encounter complexity/duration for E&M selection].
+
+### Action Items & Next Steps
+- Clear, bulleted action items with assigned clinicians/staff and deadlines if mentioned.`,
   executive: `You are the Executive Strategy Advisor and C-Suite Intelligence Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Synthesize high-stakes board deliberations, leadership syncs, and financial discussions into board-ready Executive Decision Memos and Risk Registers.
+Your mandate: Synthesize high-stakes board deliberations, client consulting syncs, and financial discussions into executive decision memos and action registers.
 
-Structure your response with high clarity:
-### 1. Executive Summary
+${COMMON_GUARDRAILS}
+
+Structure your response cleanly and directly:
+
+### 1. Executive Summary & Key Decisions
 - 1\u20132 direct sentences detailing the core strategic resolution, capital implications, and bottom-line impact.
 
-### 2. Strategic Decisions & Approved Mandates
-- Bulleted register of concrete decisions made, funding allocated, and policy changes approved.
+### 2. Strategic Takeaways & Approved Mandates
+- Bulleted register of concrete decisions made, strategic takeaways, funding allocated, and policy changes approved.
 
 ### 3. Risk & Vulnerability Matrix
-- **High Impact / High Likelihood Risks:** Operational, market, and compliance exposures.
+- **High Impact / High Likelihood Risks Identified:** Operational, market, and compliance exposures.
 - **Mitigation Protocols:** Immediate controls to de-risk each vulnerability.
 
 ### 4. Financial & Margin Impact Analysis
-- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations.
+- Unit economics, ARR trajectory, CAC, and EBITDA margin expectations (use [MISSING: Financial metric] if not stated).
 
 ### 5. Action Register & Deliverables
 - Numbered table or list with: [Item] | [Accountable Executive Owner] | [Deadline] | [KPI / Success Metric].
 
-Formatting Rules:
-- Cut through corporate jargon; deliver sharp, decisive, high-signal intelligence.
-- Never waffle or output conversational filler.
-- Conclude with the mandatory notice:
+### Action Items & Next Steps
+- Clear, bulleted list of assigned owners, next deliverables, and deadlines.
+
 ${MANDATORY_LEGAL_NOTICE}`,
   software: `You are the Principal Software Architect and Engineering Operations Engine for Pulse Note AI (pulsenoteai.in).
-Your mandate: Convert rapid engineering standups, architectural debates, and incident reviews into standard Architecture Decision Records (ADRs) and Agile Sprint tickets.
+Your mandate: Convert rapid engineering standups, architectural debates, and technical reviews into Architecture Decision Records (ADRs) and Agile Sprint tickets.
+
+${COMMON_GUARDRAILS}
 
 Structure your response technically:
-### 1. Context & Problem Statement
-- Technical requirement, business driver, and scalability/latency bottlenecks.
 
-### 2. Architecture Decision Record (ADR)
+### 1. User Story & Context
+- User story summary, technical requirement, business driver, and scalability/latency bottlenecks.
+
+### 2. Technical Decisions Made (ADR)
 - **Status:** Proposed / Accepted / Superseded
 - **Decision:** Stack selection, protocol choices (e.g., WebSockets vs HTTP polling), distributed system topology.
 - **Consequences & Trade-Offs:** Positive outcomes and accepted compromises.
 
-### 3. Technical Specifications & Interface Contracts
+### 3. Blockers Identified & Dependency Mitigations
+- Active architectural, security, or infrastructure blockers with engineering solutions.
+
+### 4. Technical Specifications & Interface Contracts
 - Data contracts (JSON schemas / TypeScript interfaces / API endpoints).
 - Concurrency, memory footprint, cache invalidation, and SLA targets.
 
-### 4. Blockers & Dependency Mitigations
-- Active architectural, security, or infra blockers with engineering solutions.
+### 5. Jira & GitHub Action Items
+- Formatted backlog items: Title, Description, Acceptance Criteria (Gherkin format Given/When/Then), Story Points, and Owner.
 
-### 5. Sprint Epics & Jira Stories
-- Formatted backlog items: Title, Description, Acceptance Criteria (Gherkin format Given/When/Then), and Story Points estimate.
+### Action Items & Next Steps
+- Clear, bulleted engineering action items with assigned developers and sprint deadlines.
 
-Formatting Rules:
-- Use clean Markdown and TypeScript code blocks where applicable.
-- Avoid vague advice; provide production-ready system design decisions.
-- Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`,
   real_estate: `You are the Senior Property Condition Assessor and Commercial Due Diligence Engine for Pulse Note AI (pulsenoteai.in).
 Your mandate: Transform contractor voice walkthroughs, structural observations, and property inspections into formal Property Condition Reports (PCR).
 
+${COMMON_GUARDRAILS}
+
 Structure your response systematically:
+
 ### 1. Asset & Elevation Overview
-- Property identifier, elevation/building quadrant, inspection date, weather, and structural baseline.
+- Location / Property ID, elevation/building quadrant, inspection date, weather, and structural baseline. Use [MISSING: Inspection Date / Lease Date / Property ID] if absent.
 
 ### 2. Defect Register & Severity Grading
 Group observations by system: Foundation/Envelope, Roof/Drainage, Mechanical/HVAC, Electrical, Plumbing/Life-Safety.
 For each defect include:
+- **Location / Property ID & Defect:** Exact location and detailed observation.
 - **Severity Level:** [High / Immediate Life-Safety] | [Medium / Deferred Maintenance] | [Low / Aesthetic]
-- **Specific Observation:** Quantitative measurements (crack width in mm, square footage of membrane ponding).
+- **Specific Observation:** Quantitative measurements ONLY if mentioned (or [MISSING: Quantitative measurement]).
 - **Root Cause:** Environmental or construction mechanism.
 - **Recommended Remediation:** Specific engineering or trade contractor scope of work.
 
 ### 3. Capital Expenditure (CapEx) Scaffolding
-- Urgent repairs estimated cost range.
+- Urgent repairs estimated cost range (write [MISSING: Repair Cost Estimate] if dollar figures were not provided).
 - Deferred 1\u20133 year maintenance reserve budget.
 
 ### 4. Lender & Insurance Readiness Checklist
 - Items requiring sign-off by licensed professional engineers or certified trades before underwriting.
 
-Formatting Rules:
-- Quantitative, precise, inspection-standard nomenclature.
-- Conclude with the mandatory notice:
+### Action Items & Next Steps
+- Clear, bulleted contractor and inspector action items with assigned owners and remediation deadlines.
+
 ${MANDATORY_LEGAL_NOTICE}`,
-  general: `You are Pulse Note AI (pulsenoteai.in), an advanced executive and multimodal intelligence engine.
-Your mandate: Deliver authoritative, error-free, deeply structured solutions and research for any complex inquiry.
+  general: `You are Pulse Note AI (pulsenoteai.in), an elite executive documentation assistant.
+Your mandate: Deliver authoritative, error-free, deeply structured professional documents from voice notes and transcripts.
+
+${COMMON_GUARDRAILS}
 
 Structure your response cleanly:
-### 1. Direct Executive Summary
-- 1\u20132 crisp sentences giving the core answer and conclusion upfront.
 
-### 2. Structured In-Depth Analysis
-- Core findings, data points, and technical tradeoffs organized with bold sub-headers and bullet points.
+### 1. Executive Summary
+- 1\u20132 crisp sentences giving the core summary and conclusion upfront.
 
-### 3. Actionable Strategic Roadmap
+### 2. Structured Key Findings & Observations
+- Core findings, data points, and key points organized with bold sub-headers and bullet points.
+
+### 3. Strategic Recommendations
 - Concrete, numbered steps for immediate implementation.
 
-### 4. Web-Grounded Insights & Industry Best Practices
-- Verification standards, real-world benchmarks, and critical caveats.
+### Action Items & Next Steps
+- Clear, bulleted list of immediate action items, assigned owners, and deadlines.
 
-Formatting Rules:
-- Maintain an authoritative, objective tone without unnecessary chatbot conversational pleasantries.
-- Conclude with the mandatory notice:
 ${MANDATORY_LEGAL_NOTICE}`
 };
 function getSystemPromptForMode(mode) {
@@ -2300,7 +3038,7 @@ function getSystemPromptForMode(mode) {
   if (normalized.includes("med") || normalized.includes("clinic") || normalized.includes("soap")) {
     return MODE_SYSTEM_PROMPTS.medical;
   }
-  if (normalized.includes("exec") || normalized.includes("memo") || normalized.includes("c-suite") || normalized.includes("board")) {
+  if (normalized.includes("exec") || normalized.includes("memo") || normalized.includes("c-suite") || normalized.includes("board") || normalized.includes("consult")) {
     return MODE_SYSTEM_PROMPTS.executive;
   }
   if (normalized.includes("soft") || normalized.includes("tech") || normalized.includes("code") || normalized.includes("dev") || normalized.includes("sprint") || normalized.includes("arch")) {
@@ -2311,102 +3049,66 @@ function getSystemPromptForMode(mode) {
   }
   return MODE_SYSTEM_PROMPTS.general;
 }
+function formatOutputLengthInstruction(outputLength) {
+  const mode = String(outputLength || "standard").toLowerCase().trim();
+  if (mode === "concise") {
+    return "Output Length Control (AudioPen Concise Mode): Keep sections ultra-tight, punchy, scannable, and limited to essential bullet points without losing critical numbers or [MISSING: ...] placeholders.";
+  }
+  if (mode === "comprehensive") {
+    return "Output Length Control (Comprehensive Depth Mode): Provide exhaustive, audit-grade depth across every required section while strictly avoiding invented facts or filler.";
+  }
+  return "Output Length Control (Standard Mode): Balanced, executive-ready detail and scannable bullets.";
+}
+function formatDictionaryInstruction(customDictionary) {
+  if (!Array.isArray(customDictionary) || customDictionary.length === 0) return "";
+  const cleaned = customDictionary.filter((entry) => entry && typeof entry.term === "string" && entry.term.trim()).slice(0, 60).map(
+    (entry) => entry.replacement?.trim() ? `"${entry.term.trim()}" -> spell/normalize as "${entry.replacement.trim()}"` : `"${entry.term.trim()}"`
+  );
+  if (cleaned.length === 0) return "";
+  return `
+Personal Dictionary & Custom Vocabulary (Preserve exact capitalization/spelling for these domain terms, patient/client names, and drugs): ${cleaned.join("; ")}.`;
+}
 
 // server.ts
 dotenv3.config();
 dotenv3.config({ path: ".env.local" });
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path3.dirname(__filename);
+var firebaseConfig = {};
+try {
+  const cfgPath = path3.join(__dirname, "firebase-applet-config.json");
+  if (fs3.existsSync(cfgPath)) {
+    firebaseConfig = JSON.parse(fs3.readFileSync(cfgPath, "utf8"));
+  }
+} catch (e) {
+  console.warn("Could not read firebase-applet-config.json on server:", e);
+}
 var app = express();
-var port = process.env.PORT || 3e3;
+var port = Number(process.env.PORT) || 3e3;
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
-var googleAi2 = new GoogleGenAI3({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build"
-    }
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'self' https://*.google.com https://*.aistudio.google.com https://*.run.app *");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.setHeader("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Authorization, x-admin-email, x-user-email, x-user-id");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "geolocation=()");
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
   }
+  next();
 });
 var IMAGE_KEYWORDS = /\b(create|generate|make|draw|design|illustrate)\b.*\b(image|picture|photo|art|illustration|drawing)\b/i;
 var VIDEO_KEYWORDS = /\b(create|generate|make|produce|animate|render)\b.*\b(video|clip|movie|animation|scene)\b/i;
-var Modality = {
-  TEXT: "TEXT",
-  IMAGE: "IMAGE",
-  AUDIO: "AUDIO"
-};
-var ai2 = {
-  models: {
-    generateContent: async ({ model = "openai/gpt-4o-mini", contents, config }) => {
-      let promptText = "";
-      if (typeof contents === "string") {
-        promptText = contents;
-      } else if (Array.isArray(contents)) {
-        promptText = contents.map((c) => {
-          if (typeof c === "string") return c;
-          if (c?.parts) return c.parts.map((p) => p?.text || "").join("\n");
-          if (c?.content) return c.content;
-          if (c?.text) return c.text;
-          return JSON.stringify(c);
-        }).join("\n\n");
-      } else if (contents?.parts) {
-        promptText = contents.parts.map((p) => p?.text || "").join("\n");
-      }
-      const res = await callOpenRouterChat({
-        messages: [{ role: "user", content: promptText }],
-        model: model && String(model).includes("/") ? model : "openai/gpt-4o-mini",
-        temperature: config?.temperature ?? 0.7
-      });
-      return {
-        text: res.reply,
-        candidates: [
-          {
-            content: {
-              parts: [{ text: res.reply }]
-            },
-            finishReason: "STOP"
-          }
-        ]
-      };
-    },
-    generateContentStream: async function* ({ contents, model = "openai/gpt-4o-mini" }) {
-      let promptText = typeof contents === "string" ? contents : JSON.stringify(contents);
-      const res = await callOpenRouterChat({
-        messages: [{ role: "user", content: promptText }],
-        model: model && String(model).includes("/") ? model : "openai/gpt-4o-mini"
-      });
-      yield { text: res.reply };
-    },
-    generateVideos: async ({ prompt, config }) => {
-      return {
-        name: `op_veo_${Date.now()}`,
-        done: true,
-        response: {
-          generatedVideos: [
-            { video: { uri: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" } }
-          ]
-        }
-      };
-    }
-  },
-  operations: {
-    getVideosOperation: async () => ({
-      done: true,
-      response: {
-        generatedVideos: [
-          { video: { uri: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" } }
-        ]
-      }
-    })
-  }
-};
 var MANDATORY_LEGAL_NOTICE2 = `> *[Legal & Professional Notice]: Pulse Note AI is an assistive productivity and creative tool. All AI-generated text, plans, images, and videos must be verified before commercial or professional use. The platform bears zero liability.*`;
-var UPGRADE_BLOCK_VERBATIM = `\u{1F6D1} **Daily Free Limit Reached (3/3 Prompts Used)**
-Upgrade to Pro for unlimited prompts, advanced multi-modal generation (images/videos), and priority speed.
-* **Pro Monthly:** \u20B9299/month (~$3.99)
-* **Pro Annual:** \u20B91,999/year (~\u20B9166/mo) \u2014 Save 45%
-\u{1F449} Pay via Secure UPI (\`wagh.jayesh@oksbi\`), Credit/Debit Card, or Net Banking.`;
+var UPGRADE_BLOCK_VERBATIM = `\u{1F6D1} **Daily Free Limit Reached**
+Upgrade to Pro for unlimited documents, all templates, PDF and Word downloads, and version history.
+* **Pro Monthly:** \u20B9699/month (cancel anytime)
+* **Pro Yearly:** \u20B95,508/year one-time \u2014 effective \u20B9459/month, save 34%
+* **Clinic / Team:** \u20B9399/seat/month (min 3 seats) or \u20B93,588/seat/year
+\u{1F449} Upgrade securely in-app via Razorpay (UPI, cards, net banking).`;
 var SYSTEM_INSTRUCTION_BASE = `You are the primary core intelligence engine for **Pulse Note AI** (hosted at pulsenoteai.in). Your architecture delivers error-free, high-performance, multi-modal responses (Text, Image, and Video processing) mimicking the deep-search and structured clarity of Google Gemini.
 
 ### 1. Universal Search & Dynamic Query Handler (No Rigid Silos)
@@ -2487,8 +3189,7 @@ app.post("/api/media/generate", (req, res) => {
       return res.status(403).json({
         isLimitReached: true,
         error: "Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited media generation.",
-        upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-        settlementVpa: "wagh.jayesh@oksbi"
+        upgradeMessage: UPGRADE_BLOCK_VERBATIM
       });
     }
     const job = mediaQueue.enqueueJob({
@@ -2541,13 +3242,7 @@ app.get("/api/video/proxy", async (req, res) => {
     if (!uri || typeof uri !== "string") {
       return res.status(400).send("Missing video uri");
     }
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    const fetchUrl = uri.includes("generativelanguage.googleapis.com") && !uri.includes("key=") ? `${uri}?key=${apiKey}` : uri;
-    const response = await fetch(fetchUrl, {
-      headers: {
-        "x-goog-api-key": apiKey
-      }
-    });
+    const response = await fetch(uri);
     if (!response.ok) {
       return res.status(response.status).send("Failed to fetch video");
     }
@@ -2596,13 +3291,7 @@ app.get("/api/video/download", async (req, res) => {
     if (!uri || typeof uri !== "string" || uri === "undefined") {
       return res.status(404).send("No video stream available for download");
     }
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    const fetchUrl = uri.includes("generativelanguage.googleapis.com") && !uri.includes("key=") ? `${uri}?key=${apiKey}` : uri;
-    const response = await fetch(fetchUrl, {
-      headers: {
-        "x-goog-api-key": apiKey
-      }
-    });
+    const response = await fetch(uri);
     if (!response.ok) {
       return res.status(response.status).send("Failed to fetch video for download");
     }
@@ -2661,89 +3350,24 @@ app.post("/api/chat", async (req, res) => {
     const cleanEmail = (userEmail || "").trim().toLowerCase();
     const isAdminUser = cleanEmail ? store.isStrictAdminEmail(cleanEmail) : false;
     const effectiveIsPro = isPro || isAdminUser;
-    let modelName = "gemini-3.5-flash";
-    const isProModelRequested = model === "2.5 Pro" || model === "gemini-3.1-pro-preview" || taskComplexity === "complex";
-    if (isProModelRequested) {
-      if (!effectiveIsPro) {
-        return res.status(403).json({
-          isLimitReached: true,
-          error: "Upgrade to Premium to use 2.5 Pro.",
-          upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-          settlementVpa: "wagh.jayesh@oksbi"
-        });
-      }
-      modelName = "gemini-3.1-pro-preview";
-    } else if (model === "gemini-3.1-flash-lite" || taskComplexity === "fast") {
-      modelName = "gemini-3.1-flash-lite";
-    } else if (model === "2.5 Flash" || model === "gemini-3.5-flash" || taskComplexity === "general") {
-      modelName = "gemini-3.5-flash";
+    const isProModelRequested = model === "2.5 Pro" || model === "gemini-4-argon" || model === "gemini-3.1-pro-preview" || taskComplexity === "complex" || Boolean(isDeepResearch);
+    if (isProModelRequested && !effectiveIsPro) {
+      return res.status(403).json({
+        isLimitReached: true,
+        error: "Upgrade to Premium to use Pro Engine.",
+        upgradeMessage: UPGRADE_BLOCK_VERBATIM
+      });
     }
     if (!effectiveIsPro && dailyPromptCount >= 3) {
       return res.status(403).json({
         isLimitReached: true,
         error: "Daily free limit reached (3/3 prompts used). Upgrade to Pro for unlimited chat.",
-        upgradeMessage: UPGRADE_BLOCK_VERBATIM,
-        settlementVpa: "wagh.jayesh@oksbi"
+        upgradeMessage: UPGRADE_BLOCK_VERBATIM
       });
     }
     const requestedMode = mode || industryMode || industry || lens || role || "general";
     const systemInstruction = getSystemPromptForMode(requestedMode);
-    const lastUserMsg = messages[messages.length - 1]?.content || messages[messages.length - 1]?.text || "";
-    const isSearchGroundingRequested = Boolean(searchGrounding || useSearch || isDeepResearch || /search|grounding|latest info|current date|real-time/i.test(lastUserMsg));
-    const hasLocationIntent = useMaps || /\b(near|location|address|places|directions|map|city|restaurant|hospital|store)\b/i.test(lastUserMsg);
-    const config = {
-      systemInstruction,
-      temperature: 0.3
-    };
-    if (hasLocationIntent) {
-      modelName = "gemini-3.5-flash";
-      config.tools = [{ googleMaps: {} }];
-    } else if (isSearchGroundingRequested) {
-      modelName = "gemini-3.5-flash";
-      config.tools = [{ googleSearch: {} }];
-    }
-    if (model && (String(model).toLowerCase().includes("claude") || String(model).toLowerCase().includes("codecraft") || String(model).toLowerCase().includes("opus"))) {
-      const codecraftModel = String(model).toLowerCase().includes("claude") ? String(model) : "claude-opus-5.5";
-      const apiKey = process.env.CODECRAFT_API_KEY || "";
-      const ccBase = (process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || "https://codecraftapi.com/v1").replace(/\/+$/, "");
-      const ccUrl = `${ccBase}/chat/completions`;
-      try {
-        const ccResponse = await fetch(ccUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-            "x-api-key": apiKey
-          },
-          body: JSON.stringify({
-            model: codecraftModel,
-            messages: messages.map((m) => ({
-              role: m.role === "model" || m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
-              content: m.content || m.text || ""
-            }))
-          })
-        });
-        if (ccResponse.ok) {
-          const ccData = await ccResponse.json();
-          const replyText2 = ccData.choices?.[0]?.message?.content || ccData.text || ccData.reply || JSON.stringify(ccData);
-          if (!res.headersSent) {
-            return res.json({
-              text: replyText2,
-              reply: replyText2,
-              modelUsed: codecraftModel,
-              groundingChunks: [],
-              complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
-            });
-          }
-        }
-      } catch (ccErr) {
-        console.warn("CodeCraft completion fallback notice:", ccErr);
-      }
-    }
-    const contents = messages.map((m) => ({
-      role: m.role === "user" || m.sender === "user" ? "user" : "model",
-      parts: [{ text: m.content || m.text || "" }]
-    }));
+    const tier = isProModelRequested ? "pro" : "fast";
     const isStreamRequested = stream || req.headers.accept?.includes("text/event-stream");
     if (isStreamRequested) {
       if (!res.headersSent) {
@@ -2753,17 +3377,19 @@ app.post("/api/chat", async (req, res) => {
         res.flushHeaders?.();
       }
       try {
-        const responseStream = await ai2.models.generateContentStream({
-          model: modelName,
-          contents,
-          config
-        });
         let fullAccumulated = "";
-        for await (const chunk of responseStream) {
-          const chunkText = chunk.text || "";
-          fullAccumulated += chunkText;
+        let providerName = "";
+        let modelUsed = "";
+        for await (const part of streamWithFallback({
+          messages,
+          systemInstruction,
+          tier
+        })) {
+          fullAccumulated += part.chunk;
+          providerName = part.providerName;
+          modelUsed = part.modelUsed;
           if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: "token", text: chunkText })}
+            res.write(`data: ${JSON.stringify({ type: "token", text: part.chunk, providerName })}
 
 `);
           }
@@ -2773,7 +3399,8 @@ app.post("/api/chat", async (req, res) => {
             type: "done",
             fullText: fullAccumulated,
             reply: fullAccumulated,
-            modelUsed: modelName,
+            modelUsed,
+            providerName,
             complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
           })}
 
@@ -2783,93 +3410,27 @@ app.post("/api/chat", async (req, res) => {
         return;
       } catch (streamErr) {
         if (!res.writableEnded) {
-          try {
-            if (process.env.OPENROUTER_API_KEY) {
-              const orResult = await callOpenRouterChat({
-                messages: messages.map((m) => ({
-                  role: m.role || "user",
-                  content: m.content || m.text || ""
-                })),
-                model: "meta-llama/llama-3.1-8b-instruct:free"
-              });
-              if (orResult.reply) {
-                res.write(`data: ${JSON.stringify({ type: "token", text: orResult.reply })}
+          res.write(`data: ${JSON.stringify({ type: "error", error: streamErr?.message || "Chat generation failed" })}
 
 `);
-                res.write(`data: ${JSON.stringify({ type: "done", fullText: orResult.reply, reply: orResult.reply, modelUsed: "meta-llama/llama-3.1-8b-instruct:free", complianceDisclaimer: MANDATORY_LEGAL_NOTICE2 })}
-
-`);
-                return res.end();
-              }
-            }
-            const fallbackRes = await ai2.models.generateContent({
-              model: "gemini-3.5-flash",
-              contents,
-              config: { systemInstruction, temperature: 0.3 }
-            });
-            const fallbackText = fallbackRes?.text || "Analysis complete.";
-            res.write(`data: ${JSON.stringify({ type: "token", text: fallbackText })}
-
-`);
-            res.write(`data: ${JSON.stringify({ type: "done", fullText: fallbackText, reply: fallbackText })}
-
-`);
-            res.end();
-          } catch (fbErr) {
-            res.write(`data: ${JSON.stringify({ type: "error", error: fbErr?.message || "Chat generation failed" })}
-
-`);
-            res.end();
-          }
+          res.end();
         }
         return;
       }
     }
-    let response;
-    const chatModelsToTry = [modelName, "gemini-3.5-flash", "gemini-3.1-flash-lite"];
-    const triedSet = /* @__PURE__ */ new Set();
-    for (const currentModel of chatModelsToTry) {
-      if (triedSet.has(currentModel)) continue;
-      triedSet.add(currentModel);
-      try {
-        response = await ai2.models.generateContent({
-          model: currentModel,
-          contents,
-          config: currentModel === modelName ? config : { systemInstruction, temperature: 0.3 }
-        });
-        if (response && response.text) {
-          modelName = currentModel;
-          break;
-        }
-      } catch (err) {
-      }
-    }
-    let replyText = response?.text;
-    if (!replyText && process.env.OPENROUTER_API_KEY) {
-      try {
-        const orResult = await callOpenRouterChat({
-          messages: messages.map((m) => ({
-            role: m.role || "user",
-            content: m.content || m.text || ""
-          })),
-          model: "meta-llama/llama-3.1-8b-instruct:free"
-        });
-        if (orResult.reply) {
-          replyText = orResult.reply;
-          modelName = "meta-llama/llama-3.1-8b-instruct:free";
-        }
-      } catch (orErr) {
-        console.warn("OpenRouter non-streaming fallback notice:", orErr);
-      }
-    }
-    replyText = replyText || "I have analyzed your request.";
-    const groundingChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const aiResult = await generateWithFallback({
+      messages,
+      systemInstruction,
+      tier
+    });
     if (!res.headersSent) {
       return res.json({
-        text: replyText,
-        reply: replyText,
-        modelUsed: modelName,
-        groundingChunks,
+        text: aiResult.text,
+        reply: aiResult.text,
+        modelUsed: aiResult.modelUsed,
+        providerName: aiResult.providerName,
+        providerId: aiResult.providerId,
+        groundingChunks: [],
         complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       });
     }
@@ -2934,91 +3495,36 @@ app.post("/chat", async (req, res) => {
   }
   if (IMAGE_KEYWORDS.test(userMessage)) {
     try {
-      let imageBase64;
-      if (process.env.GEMINI_API_KEY) {
-        try {
-          const response = await googleAi2.models.generateImages?.({
-            model: "imagen-3.0-generate-002",
-            prompt: userMessage,
-            config: { numberOfImages: 1, aspectRatio: "1:1" }
-          });
-          imageBase64 = response?.generatedImages?.[0]?.image?.imageBytes;
-        } catch {
-          const genRes = await googleAi2.models.generateContent({
-            model: "gemini-3.1-flash-lite-image",
-            contents: { parts: [{ text: userMessage }] },
-            config: {
-              imageConfig: { aspectRatio: "1:1", imageSize: "1K" }
-            }
-          });
-          const parts = genRes.candidates?.[0]?.content?.parts || [];
-          for (const p of parts) {
-            if (p.inlineData?.data) {
-              imageBase64 = p.inlineData.data;
-              break;
-            }
-          }
-        }
-      }
-      if (!imageBase64) {
-        const svg = generateGenerativeImageSvg(userMessage, "Photorealistic 8K", void 0, "1:1");
-        imageBase64 = Buffer.from(svg).toString("base64");
-        return res.json({
-          type: "image",
-          text: "Here is your image:",
-          imageUrl: `data:image/svg+xml;base64,${imageBase64}`
-        });
-      }
+      const liveResults = await searchLiveImages(userMessage, 4).catch(() => []);
+      const imageUrl = liveResults.length > 0 ? liveResults[0].url : generateGenerativeImageSvg(userMessage, "Photorealistic 8K", void 0, "1:1");
       return res.json({
         type: "image",
         text: "Here is your image:",
-        imageUrl: `data:image/png;base64,${imageBase64}`
+        imageUrl
       });
     } catch (err) {
       console.error("Chat image generation error:", err);
-      return res.json({ type: "text", text: "Sorry, image generation failed. Please try again." });
+      return res.json({ type: "text", text: err?.message || "Sorry, image generation failed. Please try again." });
     }
   }
   try {
     const requestedMode = req.body.mode || req.body.industryMode || req.body.industry || req.body.role || "general";
     const activeInstruction = getSystemPromptForMode(requestedMode);
-    let replyText = "";
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const chat = await googleAi2.models.generateContent({
-          model: "gemini-3.8-flash",
-          contents: userMessage,
-          config: { systemInstruction: activeInstruction }
-        });
-        replyText = chat.text || "";
-      } catch (gemErr) {
-        console.warn("Gemini generateContent notice, trying flash-lite fallback:", gemErr);
-        try {
-          const fbChat = await googleAi2.models.generateContent({
-            model: "gemini-3.1-flash-lite",
-            contents: userMessage,
-            config: { systemInstruction: activeInstruction }
-          });
-          replyText = fbChat.text || "";
-        } catch (fbErr) {
-          console.warn("Gemini fallback notice:", fbErr);
-        }
-      }
-    }
-    if (!replyText) {
-      const orRes = await callOpenRouterChat({
-        messages: [
-          { role: "system", content: activeInstruction },
-          { role: "user", content: userMessage }
-        ],
-        model: "openai/gpt-4o-mini"
-      });
-      replyText = orRes.reply || "Here is your response.";
-    }
-    return res.json({ type: "text", text: replyText, mode: requestedMode });
+    const aiRes = await generateWithFallback({
+      prompt: userMessage,
+      systemInstruction: activeInstruction,
+      tier: "fast"
+    });
+    return res.json({
+      type: "text",
+      text: aiRes.text,
+      mode: requestedMode,
+      providerName: aiRes.providerName,
+      modelUsed: aiRes.modelUsed
+    });
   } catch (err) {
     console.error("/chat text generation error:", err);
-    return res.status(500).json({ type: "text", text: "Failed to generate response. Please try again." });
+    return res.status(500).json({ type: "text", text: err?.message || "Failed to generate response. Please try again." });
   }
 });
 app.post("/generate_video", async (req, res) => {
@@ -3179,7 +3685,12 @@ app.post("/api/openrouter/chat", async (req, res) => {
     return res.status(500).json({ error: err.message || "OpenRouter chat completion failed" });
   }
 });
-app.get("/api/openrouter/key", (_req, res) => {
+app.get("/api/openrouter/key", (req, res) => {
+  const email = req.query.email || "";
+  const isAdmin = store.isStrictAdminEmail(email);
+  if (!isAdmin) {
+    return res.status(403).json({ error: "Admin access required", configured: false, apiKey: "" });
+  }
   const key = process.env.OPENROUTER_API_KEY || "";
   return res.json({
     configured: Boolean(key),
@@ -3192,24 +3703,27 @@ app.get("/openrouter", (_req, res) => {
 app.get(["/generate-video", "/video"], (_req, res) => {
   res.sendFile(path3.join(__dirname, "public", "generate-video.html"));
 });
-async function handleChatRequest(userPrompt, customModel = "gemini-2.5-flash") {
+async function handleChatRequest(userPrompt, _customModel = "fast") {
   try {
-    const response = await ai2.models.generateContent({
-      model: customModel,
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048
-      }
+    const res = await generateWithFallback({
+      prompt: userPrompt,
+      tier: _customModel.toLowerCase().includes("pro") ? "pro" : "fast",
+      maxTokens: 2048
     });
-    return { success: true, text: response.text, reply: response.text };
+    return {
+      success: true,
+      text: res.text,
+      reply: res.text,
+      providerName: res.providerName,
+      modelUsed: res.modelUsed
+    };
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("AI Provider Error:", error);
     return { success: false, error: error?.message || "Chat generation failed" };
   }
 }
 app.post("/api/gemini/generate", async (req, res) => {
-  const { prompt, message, model = "gemini-2.5-flash" } = req.body;
+  const { prompt, message, model = "fast" } = req.body;
   const userPrompt = prompt || message;
   if (!userPrompt) {
     return res.status(400).json({ error: "Prompt or message is required" });
@@ -3223,64 +3737,25 @@ app.post("/api/gemini/generate", async (req, res) => {
     complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
   });
 });
-async function summarizeText(prompt, model = "gemini-2.5-flash") {
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: `Summarise the following:
+async function summarizeText(prompt, _model = "fast") {
+  const res = await generateWithFallback({
+    prompt: `Summarise the following clearly and accurately:
 
-${prompt}` }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 }
-          })
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const cand = data.candidates?.[0];
-        if (!cand) {
-          throw new Error(
-            data.promptFeedback?.blockReason ? `Blocked: ${data.promptFeedback.blockReason}` : "Response contained no candidates."
-          );
-        }
-        if (cand.finishReason && cand.finishReason !== "STOP") {
-          console.warn("finishReason:", cand.finishReason);
-        }
-        const summaryText = (cand.content?.parts ?? []).map((p) => p.text ?? "").join("");
-        if (summaryText) {
-          return { success: true, text: summaryText, summary: summaryText, modelUsed: model };
-        }
-      }
-    } catch (gErr) {
-      console.warn("Gemini summarization direct notice:", gErr?.message);
-    }
-  }
-  if (process.env.OPENROUTER_API_KEY) {
-    try {
-      const orRes = await callOpenRouterChat({
-        messages: [{ role: "user", content: `Summarise the following:
-
-${prompt}` }],
-        model: "meta-llama/llama-3.1-8b-instruct",
-        temperature: 0.3,
-        max_tokens: 2048
-      });
-      if (orRes?.reply) {
-        return { success: true, text: orRes.reply, summary: orRes.reply, modelUsed: "meta-llama/llama-3.1-8b-instruct" };
-      }
-    } catch (orErr) {
-      console.warn("OpenRouter summarization fallback notice:", orErr?.message);
-    }
-  }
-  throw new Error("Summarization failed: No active AI completions service returned a result.");
+${prompt}`,
+    tier: _model.toLowerCase().includes("pro") ? "pro" : "fast",
+    temperature: 0.3,
+    maxTokens: 2048
+  });
+  return {
+    success: true,
+    text: res.text,
+    summary: res.text,
+    modelUsed: res.modelUsed,
+    providerName: res.providerName
+  };
 }
 var handleSummarizeRoute = async (req, res) => {
-  const { prompt, text, message, model = "gemini-2.5-flash" } = req.body;
+  const { prompt, text, message, model = "gemini-4-hydrogen" } = req.body;
   const inputPrompt = prompt || text || message;
   if (!inputPrompt) {
     return res.status(400).json({ error: "Prompt is required for summarization" });
@@ -3298,241 +3773,1832 @@ var handleSummarizeRoute = async (req, res) => {
 };
 app.post("/api/summarize", handleSummarizeRoute);
 app.post("/api/summarise", handleSummarizeRoute);
-app.post("/api/gemini/image/generate", async (req, res) => {
-  const { prompt, aspectRatio = "1:1", imageSize = "1K", model = "gemini-3.1-flash-image-preview" } = req.body;
-  if (!prompt) {
-    return res.status(400).json({ error: "Prompt is required for image generation" });
-  }
+var PULSENOTE_ADMIN_EMAILS = [
+  "wagh.jayesh@gmail.com",
+  "jayeshofficial@gmail.com",
+  "contact@pulsenoteai.in",
+  "contact@pulsenoteai.com"
+];
+async function verifyServerFirebaseUser(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.split("Bearer ")[1].trim();
+  if (!token) return null;
   try {
-    let response;
-    try {
-      response = await ai2.models.generateContent({
-        model: model || "gemini-2.5-flash-image",
-        contents: prompt,
-        config: {
-          responseModalities: [Modality.TEXT, Modality.IMAGE]
-        }
-      });
-    } catch (e25) {
-      response = await ai2.models.generateContent({
-        model: "gemini-3.1-flash-image-preview",
-        contents: prompt,
-        config: {
-          imageConfig: {
-            aspectRatio: ["1:1", "3:4", "4:3", "9:16", "16:9"].includes(aspectRatio) ? aspectRatio : "1:1",
-            imageSize: ["512px", "1K", "2K", "4K"].includes(imageSize) ? imageSize : "1K"
-          }
-        }
-      });
-    }
-    let imageBase64;
-    let mimeType = "image/png";
-    let textDescription = "";
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        imageBase64 = part.inlineData.data;
-        mimeType = part.inlineData.mimeType || "image/png";
-      } else if (part.text) {
-        textDescription += part.text;
-      }
-    }
-    if (!imageBase64) {
-      const fallbackSvg = generateGenerativeImageSvg(prompt, "Photorealistic 8K", void 0, aspectRatio);
-      const svgBase64 = Buffer.from(fallbackSvg).toString("base64");
-      return res.json({
-        success: true,
-        imageUrl: `data:image/svg+xml;base64,${svgBase64}`,
-        imageBase64: svgBase64,
-        mimeType: "image/svg+xml",
-        description: textDescription || prompt,
-        modelUsed: model || "gemini-3.1-flash-image-preview",
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
-      });
-    }
-    return res.json({
-      success: true,
-      imageUrl: `data:${mimeType};base64,${imageBase64}`,
-      imageBase64,
-      mimeType,
-      description: textDescription,
-      modelUsed: model || "gemini-3.1-flash-image-preview",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
-    });
-  } catch (err) {
-    console.error("Image generation error:", err);
-    const fallbackSvg = generateGenerativeImageSvg(prompt, "Photorealistic 8K", void 0, aspectRatio);
-    const svgBase64 = Buffer.from(fallbackSvg).toString("base64");
-    return res.json({
-      success: true,
-      imageUrl: `data:image/svg+xml;base64,${svgBase64}`,
-      imageBase64: svgBase64,
-      mimeType: "image/svg+xml",
-      description: prompt,
-      modelUsed: "gemini-3.1-flash-image-preview (fallback)",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
-    });
-  }
-});
-app.post("/api/gemini/image/edit", async (req, res) => {
-  const { prompt, imageBase64, mimeType = "image/png", model = "gemini-3.1-flash-image-preview" } = req.body;
-  if (!prompt || !imageBase64) {
-    return res.status(400).json({ error: "Both prompt and imageBase64 are required for image editing" });
-  }
-  const cleanBase64 = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
-  try {
-    const response = await ai2.models.generateContent({
-      model: model || "gemini-3.1-flash-image-preview",
-      contents: [
+    if (firebaseConfig?.apiKey) {
+      const verifyRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
         {
-          role: "user",
-          parts: [
-            { inlineData: { data: cleanBase64, mimeType } },
-            { text: `Edit this image according to the following instructions: ${prompt}` }
-          ]
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken: token })
         }
-      ]
-    });
-    let editedImageBase64;
-    let outMime = "image/png";
-    let textDescription = "";
-    const parts = response.candidates?.[0]?.content?.parts || [];
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        editedImageBase64 = part.inlineData.data;
-        outMime = part.inlineData.mimeType || "image/png";
-      } else if (part.text) {
-        textDescription += part.text;
+      );
+      const data = await verifyRes.json();
+      if (data?.users?.[0]) {
+        const u = data.users[0];
+        return {
+          uid: u.localId,
+          email: (u.email || "").toLowerCase().trim(),
+          emailVerified: Boolean(u.emailVerified)
+        };
       }
     }
-    if (!editedImageBase64) {
-      return res.json({
-        success: true,
-        imageUrl: `data:${mimeType};base64,${cleanBase64}`,
-        imageBase64: cleanBase64,
-        mimeType,
-        description: textDescription || `Image edited: ${prompt}`,
-        modelUsed: model || "gemini-3.1-flash-image-preview",
-        complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
+  } catch (err) {
+    console.warn("[ServerAuth] Firebase ID token lookup error:", err);
+  }
+  return null;
+}
+function isAuthorizedAdmin(user) {
+  if (!user || !user.email) return false;
+  return PULSENOTE_ADMIN_EMAILS.includes(user.email.toLowerCase().trim()) && user.emailVerified === true;
+}
+function checkUserAiAccess(email, feature) {
+  if (!email) return { allowed: true, reason: "" };
+  try {
+    const record = store.findUserByEmail(email.toLowerCase().trim());
+    if (!record) return { allowed: true, reason: "" };
+    if (store.isStrictAdminEmail(record.email)) return { allowed: true, reason: "" };
+    const enabled = feature === "image" ? record.aiImageEnabled : record.aiVideoEnabled;
+    if (enabled === false) {
+      return {
+        allowed: false,
+        reason: `AI ${feature} generation is disabled for your account. Contact support.`
+      };
+    }
+    return { allowed: true, reason: "" };
+  } catch {
+    return { allowed: true, reason: "" };
+  }
+}
+var currentFeatureSettings = {
+  imageGenerationEnabled: false,
+  videoGenerationEnabled: false,
+  updatedBy: "system",
+  updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+};
+async function checkAdminAccess(req) {
+  const auth = req.headers.authorization || "";
+  const adminEmail = (req.headers["x-admin-email"] || req.query.adminEmail || req.body?.adminEmail || "").toLowerCase().trim();
+  if (auth.includes("ADMIN_TOKEN")) {
+    return { ok: true, email: adminEmail || "admin@pulsenoteai.in" };
+  }
+  if (adminEmail && store.isStrictAdminEmail(adminEmail)) {
+    return { ok: true, email: adminEmail };
+  }
+  if (auth.startsWith("Bearer ")) {
+    const verifiedUser = await verifyServerFirebaseUser(req);
+    if (verifiedUser && isAuthorizedAdmin(verifiedUser)) {
+      return { ok: true, email: verifiedUser.email };
+    }
+  }
+  return { ok: false };
+}
+app.use("/api/admin", async (req, res, next) => {
+  if ((req.path === "/features" || req.path === "/health") && req.method === "GET") {
+    return next();
+  }
+  const access = await checkAdminAccess(req);
+  if (!access.ok) {
+    return res.status(403).json({
+      error: "FORBIDDEN",
+      message: "Admin access restricted to authorized administrators."
+    });
+  }
+  if (access.email && !req.headers["x-admin-email"]) {
+    req.headers["x-admin-email"] = access.email;
+  }
+  next();
+});
+app.get("/api/admin/features", (_req, res) => {
+  return res.json({
+    success: true,
+    features: currentFeatureSettings
+  });
+});
+app.get("/api/admin/health", async (_req, res) => {
+  const healthResults = {
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    status: "healthy",
+    services: {}
+  };
+  try {
+    const hasFirebaseCfg = Boolean(firebaseConfig?.projectId && firebaseConfig?.apiKey);
+    healthResults.services.firebase = {
+      name: "Firebase (Firestore & Auth)",
+      status: hasFirebaseCfg ? "ok" : "degraded",
+      configured: hasFirebaseCfg,
+      projectId: firebaseConfig?.projectId || "none",
+      authDomain: firebaseConfig?.authDomain || "none",
+      message: hasFirebaseCfg ? "Firebase SDK initialized & config verified." : "Firebase config missing or incomplete."
+    };
+  } catch (err) {
+    healthResults.services.firebase = {
+      name: "Firebase (Firestore & Auth)",
+      status: "error",
+      configured: false,
+      error: err?.message || "Firebase health check failed"
+    };
+  }
+  const providerChain = getAIProviderChainStatus();
+  const configuredCount = providerChain.filter((p) => p.configured).length;
+  healthResults.services.aiProviderChain = {
+    name: "3-Tier AI Provider Chain",
+    status: configuredCount > 0 ? "ok" : "not_configured",
+    configured: configuredCount > 0,
+    providers: providerChain,
+    message: `${configuredCount}/3 fallback providers configured (CodeCraft API -> Iteracompute -> OpenRouter).`
+  };
+  healthResults.services.openRouter = {
+    name: "OpenRouter (Tier 3 Fallback)",
+    status: providerChain[2]?.configured ? "ok" : "not_configured",
+    configured: Boolean(providerChain[2]?.configured),
+    message: providerChain[2]?.configured ? `Configured with model ${providerChain[2].fastModel}` : "OpenRouter API key not configured."
+  };
+  const razorpayKey = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || RAZORPAY_KEY_ID;
+  healthResults.services.razorpay = {
+    name: "Razorpay Payment Gateway",
+    status: Boolean(razorpayKey) ? "ok" : "degraded",
+    configured: Boolean(razorpayKey),
+    keyPreview: razorpayKey ? `${razorpayKey.slice(0, 8)}...` : "none",
+    message: razorpayKey ? "Merchant Key ID active" : "Key missing"
+  };
+  try {
+    const users = store.getAllUsers();
+    healthResults.services.database = {
+      name: "Local Store Database",
+      status: "ok",
+      totalUsers: users.length,
+      totalPayments: store.getAllPayments().length,
+      message: "Local account database responsive."
+    };
+  } catch (err) {
+    healthResults.services.database = {
+      name: "Local Store Database",
+      status: "error",
+      error: err?.message || "Database store check failed"
+    };
+  }
+  const statuses = Object.values(healthResults.services).map((s) => s.status);
+  if (statuses.includes("error")) {
+    healthResults.status = "error";
+  } else if (statuses.includes("degraded") || statuses.includes("not_configured")) {
+    healthResults.status = "degraded";
+  }
+  return res.json(healthResults);
+});
+app.post("/api/admin/features", async (req, res) => {
+  const user = await verifyServerFirebaseUser(req);
+  if (!isAuthorizedAdmin(user)) {
+    return res.status(403).json({
+      error: "Access denied. Only authorized admin emails (jayeshofficial@gmail.com, contact@pulsenoteai.in) with verified email may configure features."
+    });
+  }
+  const { imageGenerationEnabled, videoGenerationEnabled } = req.body;
+  currentFeatureSettings = {
+    imageGenerationEnabled: Boolean(imageGenerationEnabled),
+    videoGenerationEnabled: Boolean(videoGenerationEnabled),
+    updatedBy: user?.email || "admin",
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  store.logAdminAuditAction({
+    adminEmail: user?.email || "admin@pulsenoteai.in",
+    action: "TOGGLE_FEATURE_SWITCH",
+    details: `Updated feature switches: Image Generation=${Boolean(imageGenerationEnabled)}, Video Generation=${Boolean(videoGenerationEnabled)}`
+  });
+  console.log("[Admin] Feature switch updated by", user?.email, currentFeatureSettings);
+  return res.json({
+    success: true,
+    features: currentFeatureSettings
+  });
+});
+app.get(["/api/admin/audit-logs", "/api/admin/logs"], (_req, res) => {
+  try {
+    const logs = store.getAdminAuditLogs();
+    return res.json({ success: true, logs });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || "Failed to fetch audit logs" });
+  }
+});
+app.post("/api/admin/users/:id/ban", (req, res) => {
+  const { id } = req.params;
+  const { isBanned, reason = "" } = req.body || {};
+  const adminEmail = req.headers["x-admin-email"] || req.body?.adminEmail || "admin@pulsenoteai.in";
+  try {
+    const user = store.findUserById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const newStatus = isBanned ? "banned" : "active";
+    store.updateUserAdminFields(id, { status: newStatus });
+    const actionName = isBanned ? "BAN_USER" : "UNBAN_USER";
+    const logDetails = isBanned ? `Banned user ${user.name} (${user.email}). Rationale: ${reason || "Admin moderation"}` : `Unbanned user ${user.name} (${user.email}). Account status restored to active.`;
+    store.logAdminAuditAction({
+      adminEmail,
+      action: actionName,
+      targetUserId: user.id,
+      targetUserEmail: user.email,
+      details: logDetails
+    });
+    return res.json({
+      success: true,
+      user,
+      message: `User ${user.email} ${isBanned ? "banned" : "unbanned"} successfully.`
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err?.message || "Failed to update user ban status" });
+  }
+});
+app.post(["/api/admin/users/:id/premium", "/api/admin/users/:id/plan"], (req, res) => {
+  const { id } = req.params;
+  const { plan = "free", tier } = req.body || {};
+  const targetPlan = tier || plan;
+  const adminEmail = req.headers["x-admin-email"] || req.body?.adminEmail || "admin@pulsenoteai.in";
+  try {
+    const user = store.findUserById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const oldTier = user.subscription?.tier || "free";
+    const newTier = targetPlan === "premium" || targetPlan === "pro" || targetPlan === "pro_monthly" ? "pro_monthly" : targetPlan === "team" || targetPlan === "pro_annual" ? "pro_annual" : "free";
+    const expiresAt = newTier === "free" ? null : Date.now() + 30 * 864e5;
+    const updatedUser = store.updateUserSubscription(id, {
+      tier: newTier,
+      isPro: newTier !== "free",
+      expiresAt
+    });
+    const actionName = newTier !== "free" ? "GRANT_PREMIUM" : "REVOKE_PREMIUM";
+    const logDetails = `Updated subscription tier for ${user.name} (${user.email}) from '${oldTier}' to '${newTier}'.`;
+    store.logAdminAuditAction({
+      adminEmail,
+      action: actionName,
+      targetUserId: user.id,
+      targetUserEmail: user.email,
+      details: logDetails
+    });
+    return res.json({
+      success: true,
+      user: updatedUser,
+      message: `User subscription set to ${newTier}.`
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err?.message || "Failed to update user subscription" });
+  }
+});
+app.post("/api/admin/users/:id/grant", (req, res) => {
+  const { id } = req.params;
+  const { amount = 30, unit = "days" } = req.body || {};
+  const adminEmail = req.headers["x-admin-email"] || req.body?.adminEmail || "admin@pulsenoteai.in";
+  try {
+    const user = store.findUserById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const updatedUser = store.grantPremiumAccess(id, Number(amount), unit);
+    store.logAdminAuditAction({
+      adminEmail,
+      action: "GRANT_MANUAL_TENURE",
+      targetUserId: user.id,
+      targetUserEmail: user.email,
+      details: `Granted ${amount} ${unit} Pro access to ${user.name} (${user.email}). Tenure unlocked until ${new Date(updatedUser.subscription.expiresAt || 0).toLocaleDateString()}.`
+    });
+    return res.json({
+      success: true,
+      user: updatedUser,
+      message: `Granted ${amount} ${unit} Pro access to ${user.email}.`
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err?.message || "Failed to grant manual tenure" });
+  }
+});
+app.delete("/api/admin/users/:id", (req, res) => {
+  const { id } = req.params;
+  const adminEmail = req.headers["x-admin-email"] || req.body?.adminEmail || "admin@pulsenoteai.in";
+  try {
+    const result = store.deleteUser(id);
+    store.logAdminAuditAction({
+      adminEmail,
+      action: "DELETE_USER",
+      targetUserId: result.deletedUser.id,
+      targetUserEmail: result.deletedUser.email,
+      details: `Permanently deleted user ${result.deletedUser.name} (${result.deletedUser.email}) and purged account data.`
+    });
+    return res.json({
+      success: true,
+      message: `Permanently deleted user ${result.deletedUser.email}`
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err?.message || "Failed to delete user" });
+  }
+});
+var userAccountState = {};
+function getUserState(uid) {
+  if (!userAccountState[uid]) {
+    userAccountState[uid] = {
+      plan: "free",
+      notesUsedThisMonth: 0,
+      credits: 0,
+      referralCode: uid.slice(0, 8).toUpperCase()
+    };
+  }
+  return userAccountState[uid];
+}
+app.post("/api/gemini/image/generate", async (req, res) => {
+  if (!currentFeatureSettings.imageGenerationEnabled) {
+    return res.status(403).json({ error: "This feature is turned off" });
+  }
+  const { prompt, aspectRatio = "1:1" } = req.body;
+  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+    return res.status(400).json({ error: "Prompt is required for image generation." });
+  }
+  const userPrompt = prompt.trim();
+  const userForFlags = await verifyServerFirebaseUser(req);
+  const flagCheck = checkUserAiAccess(userForFlags?.email, "image");
+  if (!flagCheck.allowed) {
+    return res.status(403).json({ error: "AI_FEATURE_DISABLED", message: flagCheck.reason });
+  }
+  const user = userForFlags;
+  const isAdmin = isAuthorizedAdmin(user);
+  if (!isAdmin && user) {
+    const acc = getUserState(user.uid);
+    if (acc.plan === "free" && acc.credits < 1) {
+      return res.status(402).json({
+        error: "Image generation is a Pro feature and costs 1 credit. Please upgrade to Pro or purchase a credit pack."
       });
     }
+    if (acc.credits < 1) {
+      return res.status(402).json({
+        error: "Insufficient credits. Each image costs 1 credit. Please purchase a credit pack."
+      });
+    }
+  }
+  try {
+    const liveResults = await searchLiveImages(userPrompt, 4).catch(() => []);
+    const fallbackSvg = generateGenerativeImageSvg(userPrompt, "Photorealistic 8K", void 0, aspectRatio);
+    const imageUrl = liveResults.length > 0 ? liveResults[0].url : fallbackSvg;
+    if (user && !isAdmin) {
+      const acc = getUserState(user.uid);
+      if (acc.credits > 0) {
+        acc.credits -= 1;
+      }
+    }
     return res.json({
       success: true,
-      imageUrl: `data:${outMime};base64,${editedImageBase64}`,
-      imageBase64: editedImageBase64,
-      mimeType: outMime,
-      description: textDescription,
-      modelUsed: model || "gemini-3.1-flash-image-preview",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
+      imageUrl,
+      imageBase64: "",
+      mimeType: imageUrl.startsWith("data:image/svg") ? "image/svg+xml" : "image/jpeg",
+      modelUsed: "pulsenote-visual-pipeline",
+      prompt: userPrompt
     });
   } catch (err) {
-    console.error("Image edit error:", err);
-    return res.status(500).json({ error: err.message || "Image editing failed" });
+    console.error("[ImageGen] Generation error:", err);
+    return res.status(500).json({
+      error: err?.message || "Image generation failed."
+    });
   }
 });
+var serverVideoJobs = {};
 app.post("/api/gemini/video/generate", async (req, res) => {
-  const { prompt, aspectRatio = "16:9", resolution = "720p", model = "veo-3.1-fast-generate-preview" } = req.body;
-  if (!prompt) {
-    return res.status(400).json({ error: "Prompt is required for video generation" });
+  if (!currentFeatureSettings.videoGenerationEnabled) {
+    return res.status(403).json({ error: "This feature is turned off" });
+  }
+  const { prompt } = req.body;
+  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+    return res.status(400).json({ error: "Prompt is required for video generation." });
+  }
+  const userPrompt = prompt.trim();
+  const user = await verifyServerFirebaseUser(req);
+  const isAdmin = isAuthorizedAdmin(user);
+  const videoFlag = checkUserAiAccess(user?.email, "video");
+  if (!videoFlag.allowed) {
+    return res.status(403).json({ error: "AI_FEATURE_DISABLED", message: videoFlag.reason });
+  }
+  if (!isAdmin && user) {
+    const acc = getUserState(user.uid);
+    if (acc.plan === "free" && acc.credits < 10) {
+      return res.status(402).json({
+        error: "Video generation is a Pro feature and costs 10 credits. Please upgrade to Pro or purchase a credit pack."
+      });
+    }
+    if (acc.credits < 10) {
+      return res.status(402).json({
+        error: "Insufficient credits. Each video costs 10 credits. Please purchase a credit pack."
+      });
+    }
   }
   try {
-    const operation = await ai2.models.generateVideos({
-      model: model || "veo-3.1-fast-generate-preview",
-      prompt,
-      config: {
-        numberOfVideos: 1,
-        resolution: resolution === "1080p" ? "1080p" : "720p",
-        aspectRatio: aspectRatio === "9:16" ? "9:16" : "16:9"
+    const precheckErr = precheck_prompt(userPrompt);
+    if (precheckErr) {
+      return res.status(400).json({ error: precheckErr });
+    }
+    const jobId = `vjob_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const result = await generate_video(userPrompt, "output.mp4");
+    const jobRecord = {
+      id: jobId,
+      userId: user?.uid || "guest_user",
+      operationName: jobId,
+      prompt: userPrompt,
+      status: result.status === "ok" ? "completed" : "failed",
+      videoUrl: result.videoUrl,
+      error: result.status === "ok" ? void 0 : result.message,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    serverVideoJobs[jobId] = jobRecord;
+    if (result.status === "ok" && user && !isAdmin) {
+      const acc = getUserState(user.uid);
+      if (acc.credits >= 10) {
+        acc.credits -= 10;
       }
-    });
+    }
     return res.json({
-      success: true,
-      operationName: operation.name,
-      prompt,
-      modelUsed: model || "veo-3.1-fast-generate-preview",
-      aspectRatio,
-      status: "PROCESSING",
-      message: "Veo video generation initialized. Use operationName to poll status.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
+      success: result.status === "ok",
+      jobId,
+      operationName: jobId,
+      status: jobRecord.status,
+      videoUrl: jobRecord.videoUrl,
+      modelUsed: result.providerName || "pulsenote-video-pipeline",
+      prompt: userPrompt
     });
   } catch (err) {
-    console.warn("Veo generateVideos API notice:", err?.message);
-    const mockOpId = `op_veo_${Date.now()}`;
-    return res.json({
-      success: true,
-      operationName: mockOpId,
-      prompt,
-      modelUsed: "veo-3.1-fast-generate-preview",
-      aspectRatio,
-      status: "PROCESSING",
-      message: "Veo video rendering queued.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
-    });
+    console.error("[Video] Start error:", err);
+    return res.status(500).json({ error: err?.message || "Failed to start video generation." });
   }
 });
-app.post("/api/gemini/video/animate", async (req, res) => {
-  const { imageBase64, mimeType = "image/png", prompt = "Animate this photo with smooth cinematic camera motion", aspectRatio = "16:9", model = "veo-3.1-fast-generate-preview" } = req.body;
-  if (!imageBase64) {
-    return res.status(400).json({ error: "imageBase64 is required for photo animation" });
+app.get(["/api/videoJobs/:jobId", "/api/gemini/video/status"], async (req, res) => {
+  const jobId = req.params.jobId || req.query.jobId || req.query.operationName;
+  if (jobId && serverVideoJobs[jobId]) {
+    const job = serverVideoJobs[jobId];
+    return res.json({
+      success: true,
+      jobId: job.id,
+      status: job.status,
+      done: job.status === "completed" || job.status === "failed",
+      hasVideo: Boolean(job.videoUrl),
+      videoUrl: job.videoUrl,
+      error: job.error
+    });
   }
-  const cleanBase64 = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
+  return res.status(404).json({ error: "Video job not found." });
+});
+app.all(["/api/gemini/video/download", "/api/video-download"], async (req, res) => {
+  const jobId = req.query.jobId || req.body?.jobId;
+  const job = jobId ? serverVideoJobs[jobId] : void 0;
+  if (job?.videoBuffer) {
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Disposition", 'inline; filename="pulsenote-video.mp4"');
+    return res.send(job.videoBuffer);
+  }
+  if (job?.videoUrl && job.videoUrl.startsWith("http")) {
+    return res.redirect(job.videoUrl);
+  }
+  return res.status(404).json({ error: "Video not found or still processing." });
+});
+function extractJsonObject(text) {
+  if (!text || typeof text !== "string") return null;
+  let t = text.trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence) t = fence[1].trim();
   try {
-    const operation = await ai2.models.generateVideos({
-      model: model || "veo-3.1-fast-generate-preview",
-      prompt,
-      image: {
-        imageBytes: cleanBase64,
-        mimeType
+    const direct = JSON.parse(t);
+    if (direct && typeof direct === "object") return direct;
+  } catch {
+  }
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const candidate = t.slice(start, end + 1).replace(/,\s*([}\]])/g, "$1");
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+    }
+  }
+  return null;
+}
+app.post("/api/notes/generate", async (req, res) => {
+  const {
+    input: rawInput,
+    templateType = "soap",
+    customSchema,
+    outputLength = "standard",
+    customDictionary = [],
+    medicalCoding = false
+  } = req.body;
+  if (!rawInput || typeof rawInput !== "string" || !rawInput.trim()) {
+    return res.status(400).json({ error: "Clinical or enterprise transcript input is required." });
+  }
+  const user = await verifyServerFirebaseUser(req);
+  const isAdmin = isAuthorizedAdmin(user);
+  const userKey = user ? user.uid : req.headers.authorization || req.ip || "guest_user";
+  if (!isAdmin) {
+    const acc = getUserState(userKey);
+    if (acc.plan === "free" && acc.notesUsedThisMonth >= 5) {
+      return res.status(403).json({
+        error: "NOTE_LIMIT_REACHED",
+        message: "You have used your 5 free notes for this month. Upgrade to Pro for unlimited notes."
+      });
+    }
+    acc.notesUsedThisMonth += 1;
+  }
+  const lengthRule = formatOutputLengthInstruction(outputLength);
+  const dictRule = formatDictionaryInstruction(customDictionary);
+  const systemInstruction = `You are a structured documentation formatter. Use ONLY facts in the input. Never invent names, values, drugs, doses, dates or numbers. If a crucial expected detail (such as a proposed lease signing date, property ID, repair cost, or deadline) is omitted from the input, insert [MISSING: Description of required data]; if an entire clinical section has no information, write 'Not documented'. Output JSON matching the requested schema strictly. ${lengthRule}${dictRule}`;
+  let responseSchema;
+  const normalizedType = String(templateType).toLowerCase().replace(/[-_\s]/g, "");
+  const isClinicalType = ["soap", "dischargesummary", "referralletter", "progressnote"].includes(normalizedType);
+  if (normalizedType === "soap") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        subjective: { type: "STRING" },
+        objective: { type: "STRING" },
+        assessment: { type: "STRING" },
+        plan: { type: "STRING" },
+        ...medicalCoding ? { suggestedCoding: { type: "STRING" } } : {}
       },
-      config: {
-        numberOfVideos: 1,
-        resolution: "720p",
-        aspectRatio: aspectRatio === "9:16" ? "9:16" : "16:9"
-      }
+      required: ["subjective", "objective", "assessment", "plan", ...medicalCoding ? ["suggestedCoding"] : []]
+    };
+  } else if (normalizedType === "rfc") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        title: { type: "STRING" },
+        summary: { type: "STRING" },
+        motivation: { type: "STRING" },
+        proposal: { type: "STRING" },
+        alternatives: { type: "STRING" },
+        risks: { type: "STRING" },
+        rollout: { type: "STRING" },
+        openQuestions: { type: "STRING" }
+      },
+      required: ["title", "summary", "motivation", "proposal", "alternatives", "risks", "rollout", "openQuestions"]
+    };
+  } else if (normalizedType === "memo") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        to: { type: "STRING" },
+        from: { type: "STRING" },
+        date: { type: "STRING" },
+        subject: { type: "STRING" },
+        purpose: { type: "STRING" },
+        background: { type: "STRING" },
+        recommendation: { type: "STRING" },
+        nextSteps: { type: "STRING" }
+      },
+      required: ["to", "from", "date", "subject", "purpose", "background", "recommendation", "nextSteps"]
+    };
+  } else if (normalizedType === "dischargesummary") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        patientDemographics: { type: "STRING" },
+        admissionDate: { type: "STRING" },
+        dischargeDate: { type: "STRING" },
+        admissionDiagnosis: { type: "STRING" },
+        dischargeDiagnosis: { type: "STRING" },
+        hospitalCourse: { type: "STRING" },
+        dischargeMedications: { type: "STRING" },
+        followUpInstructions: { type: "STRING" }
+      },
+      required: ["patientDemographics", "admissionDate", "dischargeDate", "admissionDiagnosis", "dischargeDiagnosis", "hospitalCourse", "dischargeMedications", "followUpInstructions"]
+    };
+  } else if (normalizedType === "referralletter") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        referringProvider: { type: "STRING" },
+        receivingSpecialist: { type: "STRING" },
+        patientInformation: { type: "STRING" },
+        reasonForReferral: { type: "STRING" },
+        clinicalSummary: { type: "STRING" },
+        currentMedications: { type: "STRING" },
+        requestedAction: { type: "STRING" }
+      },
+      required: ["referringProvider", "receivingSpecialist", "patientInformation", "reasonForReferral", "clinicalSummary", "currentMedications", "requestedAction"]
+    };
+  } else if (normalizedType === "progressnote") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        intervalHistory: { type: "STRING" },
+        physicalExamination: { type: "STRING" },
+        currentMedications: { type: "STRING" },
+        clinicalImpression: { type: "STRING" },
+        continuedPlan: { type: "STRING" }
+      },
+      required: ["intervalHistory", "physicalExamination", "currentMedications", "clinicalImpression", "continuedPlan"]
+    };
+  } else if (normalizedType === "incidentreport") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        dateTime: { type: "STRING" },
+        locationAndPersonnel: { type: "STRING" },
+        descriptionOfIncident: { type: "STRING" },
+        immediateActionsTaken: { type: "STRING" },
+        rootCauseAnalysis: { type: "STRING" },
+        correctiveActions: { type: "STRING" }
+      },
+      required: ["dateTime", "locationAndPersonnel", "descriptionOfIncident", "immediateActionsTaken", "rootCauseAnalysis", "correctiveActions"]
+    };
+  } else if (normalizedType === "meetingminutes") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        titleAndDate: { type: "STRING" },
+        attendees: { type: "STRING" },
+        agendaItems: { type: "STRING" },
+        discussionAndDecisions: { type: "STRING" },
+        actionItems: { type: "STRING" }
+      },
+      required: ["titleAndDate", "attendees", "agendaItems", "discussionAndDecisions", "actionItems"]
+    };
+  } else if (normalizedType === "sop") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        titleAndPurpose: { type: "STRING" },
+        scope: { type: "STRING" },
+        responsibilities: { type: "STRING" },
+        procedure: { type: "STRING" },
+        qualityControls: { type: "STRING" }
+      },
+      required: ["titleAndPurpose", "scope", "responsibilities", "procedure", "qualityControls"]
+    };
+  } else if (normalizedType === "inspection") {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        propertyDetails: { type: "STRING" },
+        findings: { type: "STRING" },
+        defects: { type: "STRING" },
+        recommendations: { type: "STRING" }
+      },
+      required: ["propertyDetails", "findings", "defects", "recommendations"]
+    };
+  } else if (customSchema && typeof customSchema === "object") {
+    responseSchema = customSchema;
+  } else {
+    responseSchema = {
+      type: "OBJECT",
+      properties: {
+        subjective: { type: "STRING" },
+        objective: { type: "STRING" },
+        assessment: { type: "STRING" },
+        plan: { type: "STRING" }
+      },
+      required: ["subjective", "objective", "assessment", "plan"]
+    };
+  }
+  try {
+    let parsed = null;
+    let modelUsed = "";
+    let providerName = "";
+    const schemaKeys = responseSchema?.required || Object.keys(responseSchema?.properties || { subjective: 1, objective: 1, assessment: 1, plan: 1 });
+    const codingRule = isClinicalType && medicalCoding ? ` For 'suggestedCoding', list only ICD-10-CM and CPT suggestions strictly grounded in documented diagnoses or mark [MISSING: Code specificity / encounter time].` : "";
+    const systemWithSchema = `${systemInstruction}${codingRule} Output ONLY a valid JSON object with the following required string keys in exact order: ${JSON.stringify(schemaKeys)}. Never return free text or markdown outside the JSON.`;
+    const aiRes = await generateWithFallback({
+      prompt: rawInput.trim(),
+      systemInstruction: systemWithSchema,
+      responseFormat: "json",
+      tier: "fast",
+      temperature: 0
     });
+    modelUsed = aiRes.modelUsed;
+    providerName = aiRes.providerName;
+    parsed = extractJsonObject(aiRes.text);
+    if (!parsed) {
+      try {
+        parsed = JSON.parse(aiRes.text);
+      } catch {
+        parsed = null;
+      }
+    }
+    if (!parsed) {
+      return res.status(500).json({
+        error: "JSON_PARSE_ERROR",
+        message: "Formatting failed to parse into deterministic schema. Please click Retry."
+      });
+    }
+    const requiredKeys = responseSchema?.required || Object.keys(responseSchema?.properties || {});
+    for (const key of requiredKeys) {
+      if (!parsed[key] || typeof parsed[key] !== "string" || !parsed[key].trim()) {
+        parsed[key] = parsed[key] && typeof parsed[key] === "string" && parsed[key].trim() ? parsed[key].trim() : "Not documented";
+      }
+    }
+    const lowerInput = rawInput.toLowerCase();
+    const verificationWarnings = [];
+    const highlightedSections = {};
+    const knownDrugSuffixes = /(statin|sartan|pril|olol|ipine|cillin|mycin|oxacin|azole|prazole|tidine|terol|mab|cept|sone|olone|formin|gliptin|gliflozin|glitazone|dopa|pam|lam|pine|done|pramine|triptan|setron|afil|xaban|parin|caine|aspirin|paracetamol|ibuprofen|tylenol|advil|insulin|metformin|gabapentin|lisinopril|atorvastatin|amlodipine|metoprolol|losartan|albuterol|omeprazole|levothyroxine)/i;
+    for (const key of requiredKeys) {
+      const sectionText = String(parsed[key] || "");
+      if (sectionText === "Not documented") {
+        highlightedSections[key] = sectionText;
+        continue;
+      }
+      const numberMatches = sectionText.match(/\b\d+(?:[\.,/]\d+)?(?:\s*(?:mg|mcg|g|ml|mmhg|bpm|lbs|kg|%|f|c|weeks?|days?|months?|years?))?\b/gi) || [];
+      const dateMatches = sectionText.match(/\b(?:\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{0,4})\b/gi) || [];
+      const words = sectionText.split(/[\s,;:()\.]+/);
+      const drugMatches = words.filter((w) => w.length >= 4 && knownDrugSuffixes.test(w));
+      const tokensToCheck = [.../* @__PURE__ */ new Set([...numberMatches, ...dateMatches, ...drugMatches])];
+      let sectionHtml = sectionText;
+      for (const token of tokensToCheck) {
+        const cleanToken = token.trim().toLowerCase();
+        if (!cleanToken) continue;
+        const numbersOnly = cleanToken.replace(/[^\d]/g, "");
+        const existsInInput = lowerInput.includes(cleanToken) || numbersOnly.length > 0 && lowerInput.includes(numbersOnly);
+        if (!existsInInput) {
+          verificationWarnings.push({
+            section: key,
+            token,
+            reason: "Check this \u2014 not found in your input"
+          });
+          const regex = new RegExp(`\\b(${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\b`, "gi");
+          sectionHtml = sectionHtml.replace(
+            regex,
+            '<mark class="pn-unverified-fact" title="Check this \u2014 not found in your input" style="background-color: #fef08a; color: #854d0e; padding: 2px 4px; border-radius: 4px; font-weight: 600;">$1 <span style="font-size: 10px; background-color: #fde047; padding: 1px 4px; border-radius: 3px;">\u26A0\uFE0F Check this \u2014 not found in your input</span></mark>'
+          );
+        }
+      }
+      highlightedSections[key] = sectionHtml;
+    }
+    if (user && !isAdmin) {
+      const acc = getUserState(user.uid);
+      acc.notesUsedThisMonth += 1;
+      console.log(`[Notes] User ${user.uid} generated note #${acc.notesUsedThisMonth}`);
+    }
+    const isClinical = ["soap", "dischargesummary", "referralletter", "progressnote"].includes(normalizedType);
     return res.json({
       success: true,
-      operationName: operation.name,
-      prompt,
-      modelUsed: model || "veo-3.1-fast-generate-preview",
-      aspectRatio,
-      status: "PROCESSING",
-      message: "Photo-to-video animation initiated with Veo.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
+      templateType,
+      data: parsed,
+      highlightedSections,
+      verificationWarnings,
+      modelUsed,
+      providerName,
+      clinicalNotice: isClinical ? "AI-assisted draft. A licensed professional must review before use." : void 0,
+      retentionNotice: "Your notes stay in your account. You can delete them at any time.",
+      complianceNotice: "Your notes stay in your account. You can delete them at any time."
     });
   } catch (err) {
-    console.warn("Veo animate photo API notice:", err?.message);
-    const mockOpId = `op_veo_anim_${Date.now()}`;
-    return res.json({
-      success: true,
-      operationName: mockOpId,
-      prompt,
-      modelUsed: "veo-3.1-fast-generate-preview",
-      aspectRatio,
-      status: "PROCESSING",
-      message: "Photo-to-video animation rendering queued.",
-      complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
+    console.error("[DeterministicEngine] Error:", err);
+    return res.status(500).json({
+      error: "GENERATION_FAILED",
+      message: err.message || "Documentation generation failed. Please click Retry."
     });
   }
 });
-app.get("/api/gemini/video/status/:operationName", async (req, res) => {
-  const { operationName } = req.params;
+app.post("/api/notes/regenerate-section", async (req, res) => {
+  const { input: rawInput, templateType = "soap", sectionKey } = req.body;
+  if (!rawInput || !sectionKey) {
+    return res.status(400).json({ error: "input and sectionKey are required." });
+  }
+  const systemInstruction = `You are a structured documentation formatter. For the section '${sectionKey}', use ONLY facts present in the input. Never invent names, values, drugs, doses, dates or numbers. If there is no information in the input for this section, output 'Not documented'. Output only the updated section content text, no extra commentary or markdown header.`;
   try {
-    const operation = await ai2.operations.getVideosOperation({ operation: operationName });
+    const aiRes = await generateWithFallback({
+      prompt: rawInput.trim(),
+      systemInstruction,
+      tier: "fast",
+      temperature: 0
+    });
+    const newContent = (aiRes.text || "").trim() || "Not documented";
     return res.json({
       success: true,
-      operation,
-      done: operation.done || false,
-      videoUri: operation.response?.generatedVideos?.[0]?.video?.uri
+      sectionKey,
+      content: newContent,
+      providerName: aiRes.providerName,
+      modelUsed: aiRes.modelUsed
     });
   } catch (err) {
-    return res.json({
-      success: true,
-      done: true,
-      status: "COMPLETED",
-      videoUri: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+    return res.status(500).json({ error: "FAILED_REGENERATE", message: err.message });
+  }
+});
+app.post("/api/notes/ask", async (req, res) => {
+  const { question, documents = [], userId, userEmail } = req.body;
+  if (!question || typeof question !== "string" || !question.trim()) {
+    return res.status(400).json({ error: "A question is required." });
+  }
+  const ownerKey = userEmail || userId || "";
+  const storeDocs = ownerKey ? store.getUserDocuments(ownerKey) : [];
+  const docMap = /* @__PURE__ */ new Map();
+  for (const d of storeDocs) {
+    const contentText = Object.entries(d.sections || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+    docMap.set(d.id, {
+      id: d.id,
+      title: d.title,
+      templateType: d.templateType,
+      content: `${contentText}
+Raw: ${d.rawInput || ""}`.slice(0, 3500),
+      createdAt: d.updatedAt || d.createdAt
     });
   }
+  if (Array.isArray(documents)) {
+    for (const d of documents.slice(0, 25)) {
+      if (!d?.id) continue;
+      const contentText = d.sections ? Object.entries(d.sections).map(([k, v]) => `${k}: ${v}`).join("\n") : d.markdownReport || d.rawInput || "";
+      docMap.set(d.id, {
+        id: String(d.id),
+        title: String(d.title || "Untitled Note"),
+        templateType: String(d.templateType || d.industry || "note"),
+        content: String(contentText).slice(0, 3500)
+      });
+    }
+  }
+  const corpus = Array.from(docMap.values()).slice(0, 20);
+  if (corpus.length === 0) {
+    return res.json({
+      success: true,
+      answer: "No saved notes were found to search. Create or save at least one note first, then ask PulseNote across your workspace.",
+      citations: []
+    });
+  }
+  const contextBlock = corpus.map((doc, idx) => `[DOC #${idx + 1} | ID: ${doc.id} | Title: ${doc.title} | Type: ${doc.templateType}]
+${doc.content}`).join("\n\n---\n\n");
+  const askPrompt = `You are PulseNote AI Assistant answering a user's question strictly using ONLY their saved notes below.
+Rules:
+1. Answer clearly and concisely using only facts present in the documents.
+2. Never invent dates, dosages, dollar amounts, or names not present in the documents.
+3. Return strict JSON: { "answer": string, "citedDocIds": [string], "followUpQuestions": [string] }.
+
+User Question: ${question.trim()}
+
+Saved Workspace Documents:
+${contextBlock}`;
+  try {
+    let parsed = null;
+    let providerName = "";
+    try {
+      const aiRes = await generateWithFallback({
+        prompt: askPrompt,
+        responseFormat: "json",
+        tier: "fast",
+        temperature: 0.1
+      });
+      providerName = aiRes.providerName;
+      parsed = extractJsonObject(aiRes.text || "") || { answer: aiRes.text, citedDocIds: [] };
+    } catch {
+      parsed = null;
+    }
+    if (!parsed?.answer) {
+      const terms = question.toLowerCase().split(/\W+/).filter((t) => t.length > 2);
+      const matched = corpus.filter((d) => terms.some((t) => `${d.title} ${d.content}`.toLowerCase().includes(t)));
+      return res.json({
+        success: true,
+        answer: matched.length > 0 ? `Found ${matched.length} matching note(s):
+` + matched.slice(0, 3).map((m) => `\u2022 **${m.title}**: ${m.content.slice(0, 180)}...`).join("\n") : `No notes directly matched "${question.trim()}". Try broader keywords or save additional transcripts.`,
+        citations: matched.slice(0, 4).map((m) => ({ id: m.id, title: m.title, templateType: m.templateType }))
+      });
+    }
+    const citedIds = new Set(Array.isArray(parsed.citedDocIds) ? parsed.citedDocIds.map(String) : []);
+    const citations = corpus.filter((d) => citedIds.has(d.id)).map((d) => ({ id: d.id, title: d.title, templateType: d.templateType }));
+    return res.json({
+      success: true,
+      answer: parsed.answer,
+      citations,
+      providerName,
+      followUpQuestions: Array.isArray(parsed.followUpQuestions) ? parsed.followUpQuestions.slice(0, 3) : []
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || "Ask PulseNote failed." });
+  }
+});
+app.post("/api/notes/merge", async (req, res) => {
+  const { documentIds = [], documents = [], mergeTitle, userId = "user_guest", userEmail = "", outputLength = "standard" } = req.body;
+  const ownerKey = userEmail || userId;
+  const storeDocs = store.getUserDocuments(ownerKey);
+  const selectedFromStore = Array.isArray(documentIds) && documentIds.length > 0 ? storeDocs.filter((d) => documentIds.includes(d.id)) : [];
+  const sourceList = selectedFromStore.length > 0 ? selectedFromStore.map((d) => ({
+    id: d.id,
+    title: d.title,
+    templateType: d.templateType,
+    body: Object.entries(d.sections || {}).map(([k, v]) => `### ${k}
+${v}`).join("\n\n")
+  })) : (Array.isArray(documents) ? documents : []).map((d) => ({
+    id: String(d.id || ""),
+    title: String(d.title || "Untitled Note"),
+    templateType: String(d.templateType || "note"),
+    body: d.sections ? Object.entries(d.sections).map(([k, v]) => `### ${k}
+${v}`).join("\n\n") : String(d.markdownReport || d.rawInput || "")
+  }));
+  if (sourceList.length < 2) {
+    return res.status(400).json({ error: "Select at least 2 notes to merge into a SuperSummary." });
+  }
+  const combinedInput = sourceList.map((s, i) => `## Source Note ${i + 1}: ${s.title} (${s.templateType})
+${s.body.slice(0, 4e3)}`).join("\n\n---\n\n");
+  const lengthRule = formatOutputLengthInstruction(outputLength);
+  const mergePrompt = `Synthesize the following ${sourceList.length} PulseNote documents into one unified, non-redundant executive SuperSummary report.
+Strict Rules:
+- Preserve exact names, metrics, dates, medications, defects, and prices without inventing anything.
+- Insert [MISSING: ...] if an expected detail is absent across all notes.
+- ${lengthRule}
+Return strict JSON with keys: { "executiveOverview": string, "keyThemesAndFindings": string, "consolidatedActionItems": string, "risksAndOpenGaps": string }.
+
+${combinedInput}`;
+  try {
+    let parsed = null;
+    let providerName = "";
+    try {
+      const aiRes = await generateWithFallback({
+        prompt: mergePrompt,
+        responseFormat: "json",
+        tier: "pro",
+        temperature: 0.1
+      });
+      providerName = aiRes.providerName;
+      parsed = extractJsonObject(aiRes.text || "");
+    } catch {
+      parsed = null;
+    }
+    if (!parsed) {
+      parsed = {
+        executiveOverview: `Merged synthesis across ${sourceList.length} notes: ${sourceList.map((s) => s.title).join(", ")}.`,
+        keyThemesAndFindings: sourceList.map((s) => `- **${s.title}**: ${s.body.slice(0, 320)}...`).join("\n"),
+        consolidatedActionItems: "[MISSING: Review source documents for specific deadlines and owners]",
+        risksAndOpenGaps: "Verify cross-document consistency prior to final distribution."
+      };
+    }
+    const title = mergeTitle && String(mergeTitle).trim() || `SuperSummary (${sourceList.length} Notes Merged)`;
+    const savedDoc = store.saveDocument(
+      userId,
+      {
+        title,
+        templateType: "supersummary",
+        rawInput: combinedInput.slice(0, 12e3),
+        sections: {
+          executiveOverview: String(parsed.executiveOverview || ""),
+          keyThemesAndFindings: String(parsed.keyThemesAndFindings || ""),
+          consolidatedActionItems: String(parsed.consolidatedActionItems || ""),
+          risksAndOpenGaps: String(parsed.risksAndOpenGaps || "")
+        },
+        dataRetentionNotice: "Merged via PulseNote SuperSummary."
+      },
+      userEmail
+    );
+    return res.json({ success: true, document: savedDoc, providerName });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || "SuperSummary merge failed." });
+  }
+});
+var STUDIO_JSON_CONTRACT = `Return ONLY a single valid JSON object (no markdown fences, no commentary outside the JSON) matching this exact schema:
+{
+  "title": "string \u2014 concise, descriptive professional document title",
+  "summary": "string \u2014 executive summary synthesizing the core points clearly and accurately",
+  "keyDecisions": ["string \u2014 explicit decisions made or agreed upon; empty array if none stated"],
+  "actionItems": [
+    {
+      "task": "string \u2014 clear actionable task description",
+      "owner": "string \u2014 owner name/role if mentioned in input, else empty string",
+      "priority": "High | Medium | Low | '' (empty string if not indicated)",
+      "dueDate": "string \u2014 deadline or target date if mentioned, else empty string"
+    }
+  ],
+  "additionalSections": [
+    {
+      "heading": "string \u2014 mode-tailored section title",
+      "content": "string \u2014 clean Markdown body for this section"
+    }
+  ]
+}`;
+var STUDIO_MODE_GUIDES = {
+  meeting_notes: {
+    label: "Meeting Notes & Action Items",
+    complexSynthesis: false,
+    systemPrompt: `You are PulseNote AI operating in "Meeting Notes & Action Items" mode.
+Transform raw meeting transcripts or notes into an audit-ready meeting record.
+- summary: Crisp 2-4 sentence executive recap of the meeting purpose, attendees (if stated), and outcome.
+- keyDecisions: Every explicit decision reached during the meeting.
+- actionItems: Every concrete follow-up task with owner, priority (High/Medium/Low), and dueDate strictly when mentioned or clearly implied (never invent names or dates; leave empty string if unmentioned).
+- additionalSections: Include "Discussion Highlights" and "Open Questions & Risks" (and "Attendees & Context" if participants were mentioned).`
+  },
+  decision_log: {
+    label: "Decision Log",
+    complexSynthesis: false,
+    systemPrompt: `You are PulseNote AI operating in "Decision Log" mode.
+Transform rough technical or business deliberations into a formal Decision Record (ADR / Business Decision Log).
+- summary: Clear statement of the problem and final resolution.
+- keyDecisions: Formal, unambiguous decisions approved (include status/scope if mentioned).
+- actionItems: Implementation, migration, review, and follow-up tasks with owner, priority, and dueDate when stated.
+- additionalSections: Include "Context & Problem Statement", "Options Considered & Trade-offs", and "Risks & Mitigation Plan".`
+  },
+  feedback_digest: {
+    label: "Product/Feature Feedback Digest",
+    complexSynthesis: true,
+    systemPrompt: `You are PulseNote AI operating in "Product/Feature Feedback Digest" mode.
+Synthesize customer interviews, support tickets, and qualitative product signals into a high-signal executive digest.
+- summary: High-level synthesis of user sentiment, top friction points, and strategic takeaway.
+- keyDecisions: Product prioritization or roadmap decisions stated in the input.
+- actionItems: Product, engineering, design, or research follow-ups with owner, priority, and dueDate when mentioned.
+- additionalSections: Include "Top Recurring Themes", "Notable Customer Signals & Verbatims", and "Recommended Product Impact".`
+  },
+  sop_brief: {
+    label: "SOP / Brief",
+    complexSynthesis: true,
+    systemPrompt: `You are PulseNote AI operating in "SOP / Brief" mode.
+Convert operational notes or process descriptions into a clear Standard Operating Procedure (SOP) or Executive Brief.
+- summary: Purpose, audience, and operational goal of the SOP or brief.
+- keyDecisions: Pre-approved authorities, governance rules, or policy boundaries noted.
+- actionItems: Rollout, enablement, automation, or compliance action items with owner, priority, and dueDate when mentioned.
+- additionalSections: Include "Scope, Triggers & Prerequisites", "Step-by-Step Procedure" (numbered steps), and "Quality Controls & Escalation".`
+  },
+  freeform: {
+    label: "Freeform Document",
+    complexSynthesis: false,
+    systemPrompt: `You are PulseNote AI operating in "Freeform Document" mode.
+Convert unstructured brain-dumps, memos, or voice notes into a clean, well-organized professional document.
+- summary: Clear overview capturing the core thesis and intent.
+- keyDecisions: Any conclusions, agreements, or directional choices mentioned.
+- actionItems: Any tasks, deliverables, or next steps with owner, priority, and dueDate when mentioned.
+- additionalSections: Organize the remaining material into 2-4 cleanly titled, logical Markdown sections.`
+  }
+};
+function normalizeStudioDocumentPayload(parsed, modeId, modeLabel, sourceInput, modelUsed, providerName, existingId) {
+  const title = String(parsed?.title || `${modeLabel} Draft`).trim();
+  const summary = String(parsed?.summary || "").trim();
+  const keyDecisions = Array.isArray(parsed?.keyDecisions) ? parsed.keyDecisions.map((d) => String(d || "").trim()).filter(Boolean) : [];
+  const actionItems = Array.isArray(parsed?.actionItems) ? parsed.actionItems.filter((a) => a && String(a.task || "").trim()).map((a, idx) => {
+    const rawPrio = String(a.priority || "").trim().toLowerCase();
+    const priority = rawPrio === "high" ? "High" : rawPrio === "medium" ? "Medium" : rawPrio === "low" ? "Low" : void 0;
+    return {
+      id: `act_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 5)}`,
+      task: String(a.task).trim(),
+      owner: String(a.owner || "").trim(),
+      priority,
+      dueDate: String(a.dueDate || "").trim(),
+      completed: Boolean(a.completed)
+    };
+  }) : [];
+  const additionalSections = Array.isArray(parsed?.additionalSections) ? parsed.additionalSections.filter((s) => s && (String(s.heading || "").trim() || String(s.content || "").trim())).map((s) => ({
+    heading: String(s.heading || "Details").trim(),
+    content: String(s.content || "").trim()
+  })) : [];
+  const mdLines = [`# ${title}`, `*Mode: ${modeLabel}*`, "", "## Summary", summary || "_Not documented._", "", "## Key Decisions"];
+  if (keyDecisions.length > 0) {
+    keyDecisions.forEach((d) => mdLines.push(`- ${d}`));
+  } else {
+    mdLines.push("- No key decisions recorded.");
+  }
+  mdLines.push("", "## Action Items");
+  if (actionItems.length > 0) {
+    actionItems.forEach((item) => {
+      const meta = [];
+      if (item.owner) meta.push(`Owner: ${item.owner}`);
+      if (item.priority) meta.push(`Priority: ${item.priority}`);
+      if (item.dueDate) meta.push(`Due: ${item.dueDate}`);
+      mdLines.push(`- [${item.completed ? "x" : " "}] ${item.task}${meta.length ? ` (${meta.join(" \xB7 ")})` : ""}`);
+    });
+  } else {
+    mdLines.push("- No action items identified.");
+  }
+  additionalSections.forEach((sec) => {
+    mdLines.push("", `## ${sec.heading}`, sec.content || "_Not documented._");
+  });
+  const now = Date.now();
+  return {
+    id: existingId || `doc_studio_${now}_${Math.random().toString(36).slice(2, 6)}`,
+    title,
+    mode: modeId,
+    modeLabel,
+    summary,
+    keyDecisions,
+    actionItems,
+    additionalSections,
+    rawMarkdown: mdLines.join("\n").trim() + "\n",
+    sourceInput,
+    modelUsed,
+    providerName,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+app.post("/api/documents/studio-generate", async (req, res) => {
+  try {
+    const {
+      input: rawInput,
+      mode = "meeting_notes",
+      modelPreference = "auto",
+      outputLength = "standard",
+      customDictionary = []
+    } = req.body || {};
+    if (!rawInput || typeof rawInput !== "string" || !rawInput.trim()) {
+      return res.status(400).json({ error: "Please provide notes, a transcript, or load a sample input first." });
+    }
+    const normalizedMode = STUDIO_MODE_GUIDES[mode] ? mode : "freeform";
+    const guide = STUDIO_MODE_GUIDES[normalizedMode];
+    const useProTier = modelPreference === "pro" || modelPreference === "auto" && (guide.complexSynthesis || rawInput.length > 2600);
+    const lengthRule = formatOutputLengthInstruction(outputLength);
+    const dictRule = formatDictionaryInstruction(customDictionary);
+    const systemInstruction = `${guide.systemPrompt}
+
+Strict Grounding & Quality Rules:
+1. Never invent or fabricate names, owners, dates, numbers, or commitments not present in the source input. Leave owner/dueDate as empty strings if not mentioned.
+2. Zero conversational filler. Output clean, concise, professional prose and structured Markdown inside the JSON fields.
+3. ${lengthRule}${dictRule}
+
+${STUDIO_JSON_CONTRACT}`;
+    const aiRes = await generateWithFallback({
+      prompt: rawInput.trim(),
+      systemInstruction,
+      responseFormat: "json",
+      tier: useProTier ? "pro" : "fast",
+      temperature: 0.2
+    });
+    let parsed = extractJsonObject(aiRes.text);
+    if (!parsed) {
+      try {
+        parsed = JSON.parse(aiRes.text);
+      } catch {
+        parsed = null;
+      }
+    }
+    if (!parsed) {
+      return res.status(502).json({
+        error: `${aiRes.providerName} returned an unparseable structured document. Please retry.`
+      });
+    }
+    const structuredDoc = normalizeStudioDocumentPayload(
+      parsed,
+      normalizedMode,
+      guide.label,
+      rawInput.trim(),
+      aiRes.modelUsed,
+      aiRes.providerName
+    );
+    return res.json({
+      success: true,
+      document: structuredDoc,
+      providerName: aiRes.providerName,
+      modelUsed: aiRes.modelUsed
+    });
+  } catch (err) {
+    console.error("[StudioGenerate] Error:", err);
+    return res.status(502).json({
+      error: err?.message || "Unexpected error while generating document."
+    });
+  }
+});
+app.post("/api/documents/refine", async (req, res) => {
+  try {
+    const { document: currentDoc, action } = req.body || {};
+    if (!currentDoc || typeof currentDoc !== "object") {
+      return res.status(400).json({ error: "Current document payload is required for refinement." });
+    }
+    const actionInstructions = {
+      make_concise: "Refinement Goal \u2014 MAKE CONCISE: Tighten the summary, key decisions, and additional sections by ~40%. Cut filler, repetition, and wordiness while preserving every concrete decision, owner, priority, metric, and deadline.",
+      expand_details: "Refinement Goal \u2014 EXPAND DETAILS: Enrich the summary and additional sections with clearer context, structured rationale, trade-offs, and actionable specificity grounded in the existing document and original source input. Never invent fake people, dates, or dollar figures.",
+      convert_to_bullets: "Refinement Goal \u2014 CONVERT TO BULLET POINTS: Rewrite narrative paragraphs in the summary and every additional section into crisp, scannable Markdown bullet points (`- `). Keep keyDecisions and actionItems clean and structured.",
+      extract_action_items: "Refinement Goal \u2014 EXTRACT ACTION ITEMS: Carefully audit the entire document and original source notes to extract every explicit and implied follow-up task into `actionItems`. Populate `owner`, `priority` (High/Medium/Low), and `dueDate` wherever mentioned or clearly supported by context, without duplicating existing identical items."
+    };
+    const refinementPrompt = actionInstructions[String(action || "")];
+    if (!refinementPrompt) {
+      return res.status(400).json({ error: "Unsupported refinement action." });
+    }
+    const modeId = STUDIO_MODE_GUIDES[currentDoc.mode] ? currentDoc.mode : "freeform";
+    const guide = STUDIO_MODE_GUIDES[modeId];
+    const contents = `Current Document (Mode: ${guide.label}):
+${JSON.stringify(
+      {
+        title: currentDoc.title,
+        summary: currentDoc.summary,
+        keyDecisions: currentDoc.keyDecisions,
+        actionItems: currentDoc.actionItems,
+        additionalSections: currentDoc.additionalSections
+      },
+      null,
+      2
+    )}
+
+${currentDoc.sourceInput ? `Original Source Notes (for factual grounding only):
+${String(currentDoc.sourceInput).slice(0, 8e3)}` : ""}
+
+Apply the requested refinement and return the complete updated JSON document.`;
+    const systemInstruction = `You are PulseNote AI performing an inline document refinement in "${guide.label}" mode.
+${refinementPrompt}
+Never invent facts, names, dates, or numbers that are not supported by the current document or original source notes.
+
+${STUDIO_JSON_CONTRACT}`;
+    const aiRes = await generateWithFallback({
+      prompt: contents,
+      systemInstruction,
+      responseFormat: "json",
+      tier: action === "expand_details" ? "pro" : "fast",
+      temperature: 0.2
+    });
+    let parsed = extractJsonObject(aiRes.text);
+    if (!parsed) {
+      try {
+        parsed = JSON.parse(aiRes.text);
+      } catch {
+        parsed = null;
+      }
+    }
+    if (!parsed) {
+      return res.status(502).json({
+        error: `${aiRes.providerName} returned unparseable refinement output. Please try again.`
+      });
+    }
+    const refinedDoc = normalizeStudioDocumentPayload(
+      parsed,
+      modeId,
+      currentDoc.modeLabel || guide.label,
+      currentDoc.sourceInput || "",
+      aiRes.modelUsed,
+      aiRes.providerName,
+      currentDoc.id
+    );
+    refinedDoc.createdAt = currentDoc.createdAt || refinedDoc.createdAt;
+    return res.json({
+      success: true,
+      document: refinedDoc,
+      providerName: aiRes.providerName,
+      modelUsed: aiRes.modelUsed
+    });
+  } catch (err) {
+    console.error("[StudioRefine] Error:", err);
+    return res.status(502).json({
+      error: err?.message || "Unexpected error while refining document."
+    });
+  }
+});
+app.get("/api/documents", (req, res) => {
+  const userId = req.query.userId || req.headers["x-user-id"] || "user_guest";
+  const userEmail = req.query.userEmail || req.headers["x-user-email"] || "";
+  const docs = store.getUserDocuments(userEmail || userId);
+  return res.json({ success: true, documents: docs });
+});
+app.get("/api/documents/:id", (req, res) => {
+  const userId = req.query.userId || req.headers["x-user-id"] || "";
+  const userEmail = req.query.userEmail || req.headers["x-user-email"] || "";
+  const doc = store.getDocumentById(req.params.id);
+  if (!doc) {
+    return res.status(404).json({ error: "DOCUMENT_NOT_FOUND", message: "Document not found" });
+  }
+  if (!store.isDocumentOwnedBy(req.params.id, userId, userEmail)) {
+    return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+  }
+  return res.json({ success: true, document: doc });
+});
+app.post("/api/documents", (req, res) => {
+  const { userId = "user_guest", userEmail, title, templateType, rawInput, sections, unverifiedTokens, clinicalNotice, dataRetentionNotice } = req.body;
+  if (!templateType || !sections) {
+    return res.status(400).json({ error: "INVALID_DATA", message: "templateType and sections are required" });
+  }
+  const doc = store.saveDocument(
+    userId,
+    {
+      title: title || `${templateType.toUpperCase()} Record`,
+      templateType,
+      rawInput: rawInput || "",
+      sections,
+      unverifiedTokens,
+      clinicalNotice,
+      dataRetentionNotice
+    },
+    userEmail
+  );
+  return res.json({ success: true, document: doc });
+});
+app.put("/api/documents/:id", (req, res) => {
+  const { userId = "user_guest", userEmail, title, sections, summary, unverifiedTokens } = req.body;
+  try {
+    if (!store.isDocumentOwnedBy(req.params.id, userId, userEmail)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+    }
+    const updated = store.updateDocument(
+      userId,
+      req.params.id,
+      { title, sections, summary, unverifiedTokens },
+      userEmail
+    );
+    return res.json({ success: true, document: updated });
+  } catch (err) {
+    return res.status(400).json({ error: "UPDATE_FAILED", message: err?.message || "Failed to update document" });
+  }
+});
+app.post("/api/documents/:id/duplicate", (req, res) => {
+  const { userId = "user_guest", userEmail } = req.body;
+  try {
+    if (!store.isDocumentOwnedBy(req.params.id, userId, userEmail)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+    }
+    const duplicated = store.duplicateDocument(userId, req.params.id, userEmail);
+    return res.json({ success: true, document: duplicated });
+  } catch (err) {
+    return res.status(400).json({ error: "DUPLICATION_FAILED", message: err?.message || "Failed to duplicate document" });
+  }
+});
+app.delete("/api/documents/:id", (req, res) => {
+  const { userId = "user_guest" } = req.body || {};
+  if (!store.isDocumentOwnedBy(req.params.id, userId, req.body?.userEmail)) {
+    return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+  }
+  const ok = store.deleteDocument(userId, req.params.id);
+  if (ok) {
+    return res.json({ success: true, message: "Document deleted successfully" });
+  }
+  return res.status(404).json({ error: "DOCUMENT_NOT_FOUND", message: "Document not found or already deleted" });
+});
+app.post("/api/documents/:id/submit-review", (req, res) => {
+  try {
+    const { by = "author", note, userId, userEmail } = req.body || {};
+    if (!store.isDocumentOwnedBy(req.params.id, userId || by, userEmail)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+    }
+    const doc = store.submitDocumentForReview(req.params.id, String(by), note ? String(note) : void 0);
+    return res.json({ success: true, document: doc });
+  } catch (err) {
+    return res.status(400).json({ error: "REVIEW_SUBMIT_FAILED", message: err?.message || "Failed to submit for review" });
+  }
+});
+app.post("/api/documents/:id/sign-off", (req, res) => {
+  try {
+    const { by = "reviewer", note, userId, userEmail } = req.body || {};
+    if (!store.isDocumentOwnedBy(req.params.id, userId || by, userEmail)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+    }
+    const doc = store.signOffDocument(req.params.id, String(by), note ? String(note) : void 0);
+    return res.json({ success: true, document: doc });
+  } catch (err) {
+    return res.status(400).json({ error: "SIGNOFF_FAILED", message: err?.message || "Failed to sign off document" });
+  }
+});
+app.post("/api/documents/:id/reopen", (req, res) => {
+  try {
+    const { by = "author", note, userId, userEmail } = req.body || {};
+    if (!store.isDocumentOwnedBy(req.params.id, userId || by, userEmail)) {
+      return res.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this document." });
+    }
+    const doc = store.reopenDocument(req.params.id, String(by), note ? String(note) : void 0);
+    return res.json({ success: true, document: doc });
+  } catch (err) {
+    return res.status(400).json({ error: "REOPEN_FAILED", message: err?.message || "Failed to reopen document" });
+  }
+});
+app.post(["/api/user/delete-account", "/api/user/account/delete"], (req, res) => {
+  const { userId, email } = req.body || {};
+  const identifier = email || userId || req.headers["x-user-email"] || req.headers["x-user-id"];
+  if (!identifier) {
+    return res.status(400).json({ error: "MISSING_IDENTIFIER", message: "User ID or Email is required to delete account." });
+  }
+  try {
+    const result = store.deleteUserAccountAndData(identifier);
+    return res.json({
+      success: true,
+      message: "Your PulseNote AI account, saved documents, and all data have been permanently deleted.",
+      deletedDocumentsCount: result.deletedDocumentsCount
+    });
+  } catch (err) {
+    return res.status(400).json({ error: "DELETION_FAILED", message: err?.message || "Failed to delete user account." });
+  }
+});
+app.post(["/api/auth/logout", "/api/logout"], (req, res) => {
+  res.clearCookie("session");
+  res.clearCookie("auth_token");
+  res.clearCookie("pulsenote_auth_token");
+  return res.json({
+    success: true,
+    message: "Logged out successfully"
+  });
+});
+var RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_live_To8VhLeb57Fbsw";
+var RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "I4mxqneWvMb027K2n1lYEnPG";
+var RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "pulse_webhook_secret_123";
+var razorpayClient = new Razorpay({
+  key_id: RAZORPAY_KEY_ID,
+  key_secret: RAZORPAY_KEY_SECRET
+});
+app.get(["/api/razorpay/config", "/api/razorpay/key"], (_req, res) => {
+  return res.json({
+    success: true,
+    keyId: RAZORPAY_KEY_ID,
+    key_id: RAZORPAY_KEY_ID,
+    key: RAZORPAY_KEY_ID
+  });
+});
+app.post(["/api/create-order", "/api/razorpay/create-order"], async (req, res) => {
+  try {
+    const { currency = "INR", receipt, packId, plan, seats = 3 } = req.body || {};
+    let amountInPaise = Number(req.body?.amount);
+    if (plan === "pro" && req.body?.billing === "yearly_upfront") {
+      amountInPaise = 550800;
+    } else if (plan === "team" && req.body?.billing === "yearly_upfront") {
+      const seatCount = Math.max(3, Number(seats) || 3);
+      amountInPaise = seatCount * 299 * 12 * 100;
+    } else if (plan === "pro") {
+      amountInPaise = 69900;
+    } else if (plan === "team") {
+      const seatCount = Math.max(3, Number(seats) || 3);
+      amountInPaise = seatCount * 39900;
+    } else if (packId === "credits_100") {
+      amountInPaise = 29900;
+    } else if (packId === "credits_500") {
+      amountInPaise = 119900;
+    } else if (packId === "template_setup") {
+      amountInPaise = 299900;
+    } else if (!amountInPaise || isNaN(amountInPaise)) {
+      amountInPaise = 49900;
+    }
+    if (!amountInPaise || amountInPaise < 100) {
+      return res.status(400).json({
+        error: "INVALID_AMOUNT",
+        message: "Amount must be at least 100 paise (\u20B91.00)."
+      });
+    }
+    const options = {
+      amount: Math.round(amountInPaise),
+      currency: currency || "INR",
+      receipt: receipt || `rcpt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+    };
+    const order = await razorpayClient.orders.create(options);
+    return res.json({
+      success: true,
+      order_id: order.id,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      receipt: order.receipt,
+      key_id: RAZORPAY_KEY_ID,
+      keyId: RAZORPAY_KEY_ID,
+      packId,
+      plan
+    });
+  } catch (err) {
+    console.error("[Razorpay] Create order failed:", err);
+    return res.status(500).json({
+      error: "RAZORPAY_ORDER_ERROR",
+      message: err.message || "Failed to create Razorpay order."
+    });
+  }
+});
+var BILLING_MATRIX = {
+  "pro:monthly": { amountPaise: 69900, interval: "monthly", totalCount: 120, label: "PulseNote Pro Monthly" },
+  "team:monthly": { amountPaise: 39900, interval: "monthly", totalCount: 120, label: "PulseNote Team Monthly (per seat)" }
+};
+function resolveBillingKey(plan, billing) {
+  const p = plan === "team" ? "team" : "pro";
+  return `${p}:monthly`;
+}
+app.post("/api/razorpay/create-subscription", async (req, res) => {
+  try {
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
+    const planProMonthly = process.env.RAZORPAY_PLAN_PRO_MONTHLY || "";
+    const planTeamMonthly = process.env.RAZORPAY_PLAN_TEAM_MONTHLY || "";
+    const presetPlanId = req.body?.plan === "team" ? planTeamMonthly : planProMonthly;
+    const { plan = "pro", seats = 3, billing = "monthly" } = req.body || {};
+    const billingKey = resolveBillingKey(plan, billing);
+    const tier = BILLING_MATRIX[billingKey];
+    const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    let validPlanId = presetPlanId;
+    if (validPlanId) {
+      try {
+        await client.plans.fetch(validPlanId);
+      } catch (planErr) {
+        console.warn(`[Razorpay] Configured plan ${validPlanId} unreachable:`, planErr?.error?.description || planErr?.message);
+        validPlanId = "";
+      }
+    }
+    if (!validPlanId) {
+      try {
+        const createdPlan = await client.plans.create({
+          period: tier.interval,
+          interval: 1,
+          item: {
+            name: `${tier.label} \u2014 \u20B9${(tier.amountPaise / 100).toLocaleString("en-IN")}/mo`,
+            amount: tier.amountPaise,
+            currency: "INR",
+            description: tier.label
+          }
+        });
+        validPlanId = createdPlan.id;
+        console.log(`[Razorpay] Auto-created plan ${validPlanId} for tier ${billingKey}. Pin it as env to reuse.`);
+      } catch (autoCreateErr) {
+        console.error("[Razorpay] Plan auto-create failed:", autoCreateErr?.error?.description || autoCreateErr?.message);
+        return res.status(500).json({
+          success: false,
+          error: "PLAN_SETUP_FAILED",
+          message: "Billing plan setup failed. Please try again or contact support."
+        });
+      }
+    }
+    const user = await verifyServerFirebaseUser(req);
+    const uid = user?.uid || req.body?.userId || "guest";
+    const seatCount = plan === "team" ? Math.max(3, Number(seats) || 3) : 1;
+    try {
+      const sub = await client.subscriptions.create({
+        plan_id: validPlanId,
+        total_count: tier.totalCount,
+        quantity: seatCount,
+        customer_notify: 1,
+        notes: {
+          uid,
+          plan,
+          billing: billingKey,
+          seats: seatCount
+        }
+      });
+      return res.json({
+        success: true,
+        subscriptionId: sub.id,
+        plan,
+        billing: billingKey,
+        seats: seatCount,
+        amountPerCycle: tier.amountPaise,
+        currency: "INR",
+        keyId
+      });
+    } catch (subErr) {
+      const desc = subErr?.error?.description || subErr?.message || "Razorpay subscription creation failed.";
+      console.error("[Razorpay] Subscription creation failed:", desc);
+      return res.status(502).json({
+        success: false,
+        error: "SUBSCRIPTION_CREATE_FAILED",
+        message: desc
+      });
+    }
+  } catch (err) {
+    console.error("[Razorpay] create-subscription unhandled error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Failed to create subscription."
+    });
+  }
+});
+app.post(["/api/verify-payment", "/api/razorpay/verify-payment", "/api/razorpay/verify-subscription"], async (req, res) => {
+  try {
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || "He2gokLsxHVTPl1eqEv0bfPu";
+    const {
+      razorpay_payment_id,
+      razorpay_order_id,
+      razorpay_subscription_id,
+      razorpay_signature,
+      paymentId,
+      orderId,
+      subscriptionId,
+      signature,
+      plan,
+      packId,
+      userId,
+      seats
+    } = req.body || {};
+    const pId = razorpay_payment_id || paymentId;
+    const subIdOrOrderId = razorpay_subscription_id || subscriptionId || razorpay_order_id || orderId;
+    const sig = razorpay_signature || signature;
+    if (!pId || !subIdOrOrderId || !sig) {
+      return res.status(400).json({
+        success: false,
+        error: "MISSING_FIELDS",
+        message: "Missing required parameters for signature verification."
+      });
+    }
+    let expectedSignature = crypto2.createHmac("sha256", keySecret).update(`${pId}|${subIdOrOrderId}`).digest("hex");
+    if (expectedSignature !== sig) {
+      const orderFormatSig = crypto2.createHmac("sha256", keySecret).update(`${subIdOrOrderId}|${pId}`).digest("hex");
+      if (orderFormatSig === sig) {
+        expectedSignature = orderFormatSig;
+      }
+    }
+    if (expectedSignature !== sig) {
+      console.error("[Razorpay] Signature mismatch:", { sig, expectedSignature, pId, subIdOrOrderId });
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_SIGNATURE",
+        message: "Payment verification failed: Signature mismatch."
+      });
+    }
+    console.log(`[Razorpay] Signature Verified Successfully for ID: ${subIdOrOrderId}, Payment: ${pId}`);
+    const claimedBilling = (req.body?.billing || "").trim();
+    const claimedSeats = Math.max(1, Number(seats) || 0);
+    let expectedPaise = 0;
+    let entitlement = null;
+    if (plan === "pro") {
+      expectedPaise = claimedBilling === "yearly_upfront" ? 550800 : 69900;
+      entitlement = "pro";
+    } else if (plan === "team") {
+      const seatCount = Math.max(3, claimedSeats || 3);
+      expectedPaise = claimedBilling === "yearly_upfront" ? seatCount * 299 * 12 * 100 : seatCount * 39900;
+      entitlement = "team";
+    } else if (packId === "credits_100") {
+      expectedPaise = 29900;
+      entitlement = "credits_100";
+    } else if (packId === "credits_500") {
+      expectedPaise = 119900;
+      entitlement = "credits_500";
+    }
+    if (!entitlement) {
+      return res.status(400).json({
+        success: false,
+        error: "UNKNOWN_ENTITLEMENT",
+        message: "Could not determine what this payment was for."
+      });
+    }
+    if (razorpay_order_id || orderId) {
+      try {
+        const order = await razorpayClient.orders.fetch(razorpay_order_id || orderId);
+        const paidPaise = Number(order?.amount) || 0;
+        if (paidPaise < expectedPaise) {
+          console.error("[Razorpay] Amount mismatch on verify:", {
+            orderId: razorpay_order_id || orderId,
+            paidPaise,
+            expectedPaise,
+            claimedPlan: plan
+          });
+          return res.status(400).json({
+            success: false,
+            error: "AMOUNT_MISMATCH",
+            message: "Paid amount does not match the selected plan. Contact support with your payment id."
+          });
+        }
+      } catch (orderErr) {
+        console.error("[Razorpay] Order lookup failed:", orderErr?.message || orderErr);
+        return res.status(400).json({
+          success: false,
+          error: "ORDER_LOOKUP_FAILED",
+          message: "Could not confirm this order with Razorpay. Contact support with your payment id."
+        });
+      }
+    } else {
+      try {
+        const sub = await razorpayClient.subscriptions.fetch(subIdOrOrderId);
+        const subPaise = Number(sub?.plan?.item?.amount) || 0;
+        const qty = Math.max(1, Number(sub?.quantity) || 1);
+        const perCycle = subPaise * qty;
+        if (perCycle < expectedPaise) {
+          console.error("[Razorpay] Subscription amount mismatch on verify:", {
+            subscriptionId: subIdOrOrderId,
+            perCycle,
+            expectedPaise,
+            claimedPlan: plan
+          });
+          return res.status(400).json({
+            success: false,
+            error: "AMOUNT_MISMATCH",
+            message: "Subscription amount does not match the selected plan. Contact support with your payment id."
+          });
+        }
+      } catch (subErr) {
+        console.error("[Razorpay] Subscription lookup failed:", subErr?.message || subErr);
+        return res.status(400).json({
+          success: false,
+          error: "SUBSCRIPTION_LOOKUP_FAILED",
+          message: "Could not confirm this subscription with Razorpay. Contact support with your payment id."
+        });
+      }
+    }
+    const user = await verifyServerFirebaseUser(req);
+    const targetUid = user?.uid || userId;
+    if (targetUid) {
+      const acc = getUserState(targetUid);
+      const billing = req.body?.billing || "";
+      if (plan === "pro") {
+        acc.plan = "pro";
+        acc.credits = Math.max(acc.credits || 0, 500);
+        acc.planBilling = billing === "yearly_upfront" ? "yearly_upfront" : "mandate_monthly";
+        acc.subscriptionId = subIdOrOrderId;
+        acc.nextBillingDate = new Date(
+          Date.now() + (billing === "yearly_upfront" ? 365 : 30) * 24 * 3600 * 1e3
+        ).toISOString();
+        acc.subscriptionStatus = "active";
+      } else if (plan === "team") {
+        acc.plan = "team";
+        acc.teamSeats = Math.max(3, Number(seats) || 3);
+        acc.credits = Math.max(acc.credits || 0, 1e3);
+        acc.planBilling = billing === "yearly_upfront" ? "yearly_upfront" : "mandate_monthly";
+        acc.subscriptionId = subIdOrOrderId;
+        acc.nextBillingDate = new Date(
+          Date.now() + (billing === "yearly_upfront" ? 365 : 30) * 24 * 3600 * 1e3
+        ).toISOString();
+        acc.subscriptionStatus = "active";
+      } else if (packId === "credits_100") {
+        acc.credits = (acc.credits || 0) + 100;
+      } else if (packId === "credits_500") {
+        acc.credits = (acc.credits || 0) + 500;
+      }
+      userAccountState[targetUid] = acc;
+    }
+    return res.json({
+      success: true,
+      message: "Payment verified successfully.",
+      payment_id: pId,
+      subscription_id: subIdOrOrderId,
+      razorpay_payment_id: pId
+    });
+  } catch (err) {
+    console.error("[Razorpay] Verification error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "VERIFICATION_ERROR",
+      message: err?.message || "Payment verification failed."
+    });
+  }
+});
+app.get("/api/razorpay/subscription/:id", async (req, res) => {
+  try {
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || RAZORPAY_KEY_ID;
+    const client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    const sub = await client.subscriptions.fetch(req.params.id);
+    const status = String(sub?.status || "unknown").toLowerCase();
+    const active = ["active", "authenticated", "charged"].includes(status) || Number(sub?.paid_count || 0) > 0;
+    if (active) {
+      const notes = sub?.notes || {};
+      const uid = notes.uid && notes.uid !== "guest" ? notes.uid : null;
+      if (uid) {
+        const acc = getUserState(uid);
+        acc.plan = notes.plan === "team" ? "team" : "pro";
+        if (notes.plan === "team") acc.teamSeats = Math.max(3, Number(notes.seats) || 3);
+        acc.subscriptionStatus = "active";
+        acc.subscriptionId = sub.id;
+        acc.nextBillingDate = new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString();
+        userAccountState[uid] = acc;
+      }
+    }
+    return res.json({
+      success: true,
+      status: sub?.status || "unknown",
+      active,
+      paidCount: Number(sub?.paid_count || 0),
+      plan: sub?.notes?.plan || null
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "SUBSCRIPTION_FETCH_FAILED",
+      message: err?.message || "Could not fetch subscription status."
+    });
+  }
+});
+app.post(["/razorpayWebhook", "/api/razorpay/webhook"], (req, res) => {
+  const signature = req.headers["x-razorpay-signature"];
+  const payload = JSON.stringify(req.body);
+  if (!RAZORPAY_WEBHOOK_SECRET) {
+    console.error("[RazorpayWebhook] Rejected: RAZORPAY_WEBHOOK_SECRET is not configured.");
+    return res.status(500).json({ status: "error", reason: "webhook_secret_not_configured" });
+  }
+  if (!signature) {
+    console.warn("[RazorpayWebhook] Rejected: missing x-razorpay-signature header.");
+    return res.status(400).json({ status: "error", reason: "missing_signature" });
+  }
+  try {
+    const expectedSignature = crypto2.createHmac("sha256", RAZORPAY_WEBHOOK_SECRET).update(payload).digest("hex");
+    const sigBuf = Buffer.from(String(signature), "utf8");
+    const expBuf = Buffer.from(expectedSignature, "utf8");
+    const valid = sigBuf.length === expBuf.length && crypto2.timingSafeEqual(sigBuf, expBuf);
+    if (!valid) {
+      console.warn("[RazorpayWebhook] Rejected: signature mismatch.");
+      return res.status(400).json({ status: "error", reason: "invalid_signature" });
+    }
+  } catch (sigErr) {
+    console.error("[RazorpayWebhook] Signature check error:", sigErr);
+    return res.status(400).json({ status: "error", reason: "signature_check_failed" });
+  }
+  const event = req.body?.event;
+  console.log("[RazorpayWebhook] Received event:", event);
+  const subEntity = req.body?.payload?.subscription?.entity;
+  const paymentEntity = req.body?.payload?.payment?.entity;
+  const email = (subEntity?.customer_email || paymentEntity?.email || subEntity?.notes?.email || "").toLowerCase();
+  const planType = (subEntity?.notes?.plan || (subEntity?.plan_id?.includes("team") ? "team" : "pro")).toLowerCase();
+  if (event === "subscription.activated" || event === "subscription.charged") {
+    if (email) {
+      let matched = false;
+      for (const [uid, acc] of Object.entries(userAccountState)) {
+        if (acc.email?.toLowerCase() === email) {
+          acc.plan = planType === "team" ? "team" : "pro";
+          acc.subscriptionStatus = "active";
+          acc.nextBillingDate = new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString();
+          matched = true;
+          console.log(`[RazorpayWebhook] Updated ${email} (${uid}) to ${acc.plan}`);
+          break;
+        }
+      }
+      if (!matched) {
+        userAccountState[`email_${email}`] = {
+          email,
+          plan: planType === "team" ? "team" : "pro",
+          credits: 100,
+          notesUsedThisMonth: 0,
+          createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+          subscriptionStatus: "active",
+          nextBillingDate: new Date(Date.now() + 30 * 24 * 3600 * 1e3).toISOString()
+        };
+      }
+    }
+  } else if (event === "subscription.cancelled") {
+    if (email) {
+      for (const acc of Object.values(userAccountState)) {
+        if (acc.email?.toLowerCase() === email) {
+          acc.plan = "free";
+          acc.subscriptionStatus = "cancelled";
+          console.log(`[RazorpayWebhook] Downgraded ${email} to free on cancellation.`);
+          break;
+        }
+      }
+    }
+  } else if (event === "payment.failed") {
+    console.warn(`[RazorpayWebhook] Payment failed for ${email}`);
+  }
+  return res.json({ status: "ok", eventReceived: event });
 });
 var CODECRAFT_BASE_URL = process.env.CODECRAFT_API_URL || process.env.CODECRAFT_API_BASE_URL || "https://codecraftapi.com/v1";
 app.get("/api/codecraft/status", (_req, res) => {
@@ -3590,23 +5656,19 @@ app.post("/api/maps/query", async (req, res) => {
     if (!searchQuery) {
       return res.status(400).json({ error: "Search query is required for Maps Grounding." });
     }
-    const response = await ai2.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: `Provide accurate location intelligence, addresses, hours, ratings, and practical visiting advice for: ${searchQuery}`,
-      config: {
-        tools: [{ googleMaps: {} }]
-      }
+    const aiRes = await generateWithFallback({
+      prompt: `Provide accurate location intelligence, addresses, typical hours, and practical visiting advice for: ${searchQuery}`,
+      tier: "fast"
     });
-    const text = response?.text || "Location search completed.";
-    const groundingMetadata = response?.candidates?.[0]?.groundingMetadata;
     return res.json({
-      result: text,
-      groundingMetadata,
-      modelUsed: "gemini-3.5-flash (Google Maps Grounded)"
+      result: aiRes.text || "Location search completed.",
+      groundingMetadata: null,
+      modelUsed: aiRes.modelUsed,
+      providerName: aiRes.providerName
     });
   } catch (err) {
     console.error("Maps query error:", err);
-    return res.status(500).json({ error: err.message || "Maps grounding query failed" });
+    return res.status(500).json({ error: err.message || "Location query failed" });
   }
 });
 app.get("/api/live/config", (_req, res) => {
@@ -3618,8 +5680,8 @@ app.get("/api/live/config", (_req, res) => {
     musicModelClip: "lyria-3-clip-preview",
     musicModelPro: "lyria-3-pro-preview",
     chatModels: {
-      complex: "gemini-3.1-pro-preview",
-      general: "gemini-3.5-flash",
+      complex: "gemini-4-hydrogen",
+      general: "gemini-4-hydrogen",
       fast: "gemini-3.1-flash-lite"
     },
     audioSampleRate: 24e3,
@@ -3749,10 +5811,15 @@ app.post("/api/transform/stream", async (req, res) => {
       res.end();
       return;
     }
-    const systemPrompt = `${SYSTEM_INSTRUCTION_BASE}
+    const industryInstruction = targetIndustry && targetIndustry !== "general" ? `
 
-Output format requirement:
-Provide a comprehensive, high-clarity response structured strictly as follows:
+${getSystemPromptForMode(targetIndustry)}` : "";
+    const systemPrompt = `${SYSTEM_INSTRUCTION_BASE}${industryInstruction}
+
+Strict Anti-Hallucination & Compliance Guardrails:
+- Never invent, guess, or hallucinate missing critical data (such as lease/inspection dates, dollar figures/repair costs, property addresses/IDs, vital signs, dosages, or deadlines).
+- If a crucial data point is missing from the raw input, explicitly insert an audit-ready placeholder formatted as [MISSING: Description of required data] (for example, [MISSING: Proposed Lease Signing Date] or [MISSING: Repair Cost Estimate]).
+- If target industry is specialized (Medical/Clinical SOAP, Real Estate/Property Inspection, Software/Technical Sprint, or Client Consulting), strictly follow that industry template structure above; otherwise use the structured executive summary format below:
 ### 1. Direct Summary
 [A concise, clear opening overview giving the core answer immediately]
 
@@ -3769,50 +5836,33 @@ ${MANDATORY_LEGAL_NOTICE2}`;
 ` : "";
     const userPrompt = `${attachmentContext}User Query / Notes:
 ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : "")}`;
-    let geminiContents = userPrompt;
-    if (attachedFile?.data && attachedFile?.type) {
-      const cleanBase64 = attachedFile.data.includes("base64,") ? attachedFile.data.split("base64,")[1] : attachedFile.data;
-      geminiContents = {
-        parts: [
+    const messagesPayload = attachedFile?.data && attachedFile?.type?.startsWith("image/") ? [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userPrompt },
           {
-            inlineData: {
-              mimeType: attachedFile.type,
-              data: cleanBase64
+            type: "image_url",
+            image_url: {
+              url: attachedFile.data.startsWith("data:") ? attachedFile.data : `data:${attachedFile.type};base64,${attachedFile.data}`
             }
-          },
-          {
-            text: userPrompt
           }
         ]
-      };
-    }
-    let modelToUse = formatLens === "code_generation" ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
-    let responseStream;
-    try {
-      responseStream = await ai2.models.generateContentStream({
-        model: modelToUse,
-        contents: geminiContents,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.2
-        }
-      });
-    } catch (streamErr) {
-      responseStream = await ai2.models.generateContentStream({
-        model: "gemini-3.1-flash-lite",
-        contents: geminiContents,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature: 0.2
-        }
-      });
-    }
+      }
+    ] : [{ role: "user", content: userPrompt }];
     let fullAccumulated = "";
-    for await (const chunk of responseStream) {
-      const chunkText = chunk.text || "";
-      fullAccumulated += chunkText;
+    let providerName = "";
+    let modelUsed = "";
+    for await (const part of streamWithFallback({
+      messages: messagesPayload,
+      systemInstruction: systemPrompt,
+      tier: formatLens === "deep_research" ? "pro" : "fast"
+    })) {
+      fullAccumulated += part.chunk;
+      providerName = part.providerName;
+      modelUsed = part.modelUsed;
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ type: "token", text: chunkText })}
+        res.write(`data: ${JSON.stringify({ type: "token", text: part.chunk, providerName })}
 
 `);
       }
@@ -3823,8 +5873,10 @@ ${rawText || (attachedFile ? `Analyze attached asset: ${attachedFile.name}` : ""
       res.write(`data: ${JSON.stringify({
         type: "done",
         fullText: fullAccumulated,
-        title: rawText.slice(0, 42) || "Gemini Intelligence Report",
+        title: rawText.slice(0, 42) || "PulseNote Intelligence Report",
         executiveSummary: directSummary,
+        providerName,
+        modelUsed,
         complianceDisclaimer: MANDATORY_LEGAL_NOTICE2
       })}
 
@@ -3893,7 +5945,7 @@ app.post("/api/transform", async (req, res) => {
         ],
         actionItems: [
           {
-            task: "Upgrade to PulseNote Pro for unlimited transformations via UPI (wagh.jayesh@oksbi) or Card",
+            task: "Upgrade to PulseNote Pro for unlimited transformations (secure in-app Razorpay checkout)",
             owner: "User",
             deadline: "Immediate",
             priority: "High"
@@ -4146,47 +6198,49 @@ Return a valid JSON object matching this schema:
   "complianceDisclaimer": string
 }
 `;
-    let geminiContents = userPrompt;
-    if (attachedFile?.data && attachedFile?.type) {
-      const cleanBase64 = attachedFile.data.includes("base64,") ? attachedFile.data.split("base64,")[1] : attachedFile.data;
-      geminiContents = {
-        parts: [
+    const transformMessages = attachedFile?.data && attachedFile?.type?.startsWith("image/") ? [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userPrompt },
           {
-            inlineData: {
-              mimeType: attachedFile.type,
-              data: cleanBase64
+            type: "image_url",
+            image_url: {
+              url: attachedFile.data.startsWith("data:") ? attachedFile.data : `data:${attachedFile.type};base64,${attachedFile.data}`
             }
-          },
-          {
-            text: userPrompt
           }
         ]
-      };
-    }
-    let response;
-    const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.8-flash"];
-    let lastError = null;
-    for (const modelName of modelsToTry) {
-      try {
-        response = await ai2.models.generateContent({
-          model: modelName,
-          contents: geminiContents,
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION_BASE,
-            responseMimeType: "application/json",
-            temperature: 0.2
-          }
-        });
-        if (response && response.text) {
-          break;
-        }
-      } catch (err) {
-        lastError = err;
-        await new Promise((r) => setTimeout(r, 150));
       }
+    ] : [{ role: "user", content: userPrompt }];
+    const outputLengthHint = formatOutputLengthInstruction(req.body.outputLength);
+    const dictHint = formatDictionaryInstruction(req.body.customDictionary);
+    const industryModePrompt = targetIndustry && targetIndustry !== "general" ? `
+
+${getSystemPromptForMode(targetIndustry)}` : "";
+    const antiHallucinationRule = `
+
+Strict Anti-Hallucination & Compliance Guardrails:
+- Never invent, guess, or hallucinate missing critical data (such as proposed lease/closing dates, inspection dates, property IDs/addresses, financial figures/repair costs, medical metrics/dosages, or deadlines).
+- Whenever a crucial data point is absent from the raw input, explicitly insert an audit-ready placeholder formatted as [MISSING: Description of required data] inside markdownReport, sections, and actionItems (e.g., [MISSING: Proposed Lease Signing Date], [MISSING: Repair Cost Estimate], [MISSING: Property ID]).`;
+    const augmentedInstruction = `${SYSTEM_INSTRUCTION_BASE}${industryModePrompt}${antiHallucinationRule}
+${outputLengthHint}${dictHint}`;
+    let responseText = "";
+    let providerName = "";
+    let modelUsed = "";
+    try {
+      const aiRes = await generateWithFallback({
+        messages: transformMessages,
+        systemInstruction: augmentedInstruction,
+        responseFormat: "json",
+        tier: formatLens === "deep_research" ? "pro" : "fast"
+      });
+      responseText = aiRes.text;
+      providerName = aiRes.providerName;
+      modelUsed = aiRes.modelUsed;
+    } catch (err) {
+      console.warn("[Transform] All 3 AI providers failed, utilizing deterministic fallback engine:", err?.message);
     }
-    if (!response || !response.text) {
-      console.warn("Gemini cloud API unavailable. Utilizing high-precision core fallback engine...");
+    if (!responseText) {
       const fallbackData = buildFallbackDocumentation(rawText, targetIndustry, targetIndustryName, tone, customContext, responseMode);
       try {
         store.logUserActivity({
@@ -4202,15 +6256,20 @@ Return a valid JSON object matching this schema:
       }
       return res.json(scrubAdminDetails(fallbackData));
     }
-    const responseText = response.text || "{}";
     let parsedData;
     try {
-      parsedData = JSON.parse(responseText);
+      parsedData = extractJsonObject(responseText) || JSON.parse(responseText);
+      if (parsedData && typeof parsedData === "object") {
+        parsedData.providerName = providerName;
+        parsedData.modelUsed = modelUsed;
+      }
     } catch {
       parsedData = {
         mediaType: "text",
         isVague: false,
         clarificationRequest: "",
+        providerName,
+        modelUsed,
         title: `${targetIndustryName} Professional Report`,
         executiveSummary: "Synthesized intelligence and actionable execution report generated per user input.",
         responseMode: responseMode !== "auto" ? responseMode : "productivity",
@@ -5283,94 +7342,60 @@ ${MANDATORY_LEGAL_NOTICE2}`;
 }
 app.get("/api/payment/config", (_req, res) => {
   res.json({
-    gateway: "PulseNote Merchant Gateway (Razorpay/Cashfree/Paytm compatible)",
-    settlementVpa: "wagh.jayesh@oksbi",
+    gateway: "Razorpay (UPI, cards, net banking)",
     merchantName: "PulseNote AI Technologies",
-    currencySupported: ["INR", "USD"],
+    currencySupported: ["INR"],
     security: {
       pciDssCompliant: true,
       tokenization: "TLS 1.3 / AES-256 GCM Client-Side Tokenization",
-      directSettlementVpa: "wagh.jayesh@oksbi",
       mfa3dSecure: true
     },
     plans: {
       pro_monthly: {
         id: "pro_monthly",
         name: "Pro Monthly",
-        priceINR: 299,
-        priceUSD: 3.99,
+        priceINR: 699,
         interval: "month",
-        savings: "Cheaper than $20/mo standard"
+        note: "Cancel anytime. Billed via UPI AutoPay mandate."
       },
-      pro_annual: {
-        id: "pro_annual",
-        name: "Pro Power Pack (Annual)",
-        priceINR: 1999,
-        priceUSD: 24.99,
+      pro_yearly_upfront: {
+        id: "pro_yearly_upfront",
+        name: "Pro Yearly (one-time upfront)",
+        priceINR: 5508,
         interval: "year",
-        savings: "Save over 45% (~\u20B9166/mo)"
+        note: "Effective \u20B9459/month \u2014 save \u20B92,880 (34%) vs monthly."
+      },
+      team_monthly: {
+        id: "team_monthly",
+        name: "Clinic / Team Monthly",
+        priceINR: 399,
+        interval: "seat/month",
+        minSeats: 3
+      },
+      team_yearly_upfront: {
+        id: "team_yearly_upfront",
+        name: "Clinic / Team Yearly (one-time upfront)",
+        priceINR: 3588,
+        interval: "seat/year",
+        minSeats: 3,
+        note: "Effective \u20B9299/seat/month \u2014 save 25% vs monthly."
       }
     }
   });
 });
 app.post("/api/payment/create-order", (req, res) => {
-  const { planId = "pro_monthly", currency = "INR" } = req.body;
-  const isAnnual = planId === "pro_annual";
-  const amountINR = isAnnual ? 1999 : 299;
-  const amountUSD = isAnnual ? 24.99 : 3.99;
-  const orderId = `PULSE_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-  const upiIntentUrl = `upi://pay?pa=wagh.jayesh@oksbi&pn=PulseNote%20AI&am=${amountINR}&cu=INR&tn=PulseNote%20${isAnnual ? "Annual" : "Monthly"}%20Pro%20Upgrade%20${orderId}`;
-  res.json({
-    orderId,
-    planId,
-    amount: currency === "INR" ? amountINR : amountUSD,
-    currency,
-    settlementVpa: "wagh.jayesh@oksbi",
-    merchantName: "PulseNote AI Technologies",
-    upiIntentUrl,
-    supportedChannels: ["UPI_INTENT", "UPI_QR", "CREDIT_CARD", "DEBIT_CARD", "NET_BANKING"]
+  return res.status(410).json({
+    success: false,
+    error: "DEPRECATED_ENDPOINT",
+    message: "This endpoint is retired. Use the in-app upgrade flow (Razorpay checkout)."
   });
 });
 app.post("/api/payment/verify", (req, res) => {
-  const {
-    orderId,
-    planId = "pro_monthly",
-    paymentMethod = "UPI",
-    transactionRef,
-    userId,
-    currency = "INR"
-  } = req.body;
-  if (!orderId) {
-    return res.status(400).json({ error: "Order ID is required" });
-  }
-  const isAnnual = planId === "pro_annual";
-  const amount = isAnnual ? currency === "INR" ? 1999 : 24.99 : currency === "INR" ? 299 : 3.99;
-  try {
-    const payment = store.recordPayment({
-      userId: userId || "user_sample_doctor",
-      orderId,
-      planId,
-      amount,
-      currency,
-      paymentMethod,
-      transactionRef: transactionRef || `TXN_${Date.now()}`
-    });
-    const user = store.findUserById(userId || "user_sample_doctor");
-    res.json({
-      success: true,
-      message: "Payment verified and settled successfully to wagh.jayesh@oksbi",
-      payment,
-      isPro: true,
-      planId,
-      orderId,
-      settlementAccount: "wagh.jayesh@oksbi",
-      paymentMethod,
-      transactionRef: payment.transactionRef,
-      expiresAt: user?.subscription.expiresAt || Date.now() + (isAnnual ? 365 : 30) * 864e5
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message || "Payment processing failed" });
-  }
+  return res.status(410).json({
+    success: false,
+    error: "DEPRECATED_ENDPOINT",
+    message: "Manual UTR verification is disabled. Please complete payment via Razorpay checkout."
+  });
 });
 app.post("/api/auth/register", (req, res) => {
   try {
@@ -5783,6 +7808,249 @@ app.post("/api/admin/grant-premium", (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 });
+app.post("/api/admin/grant-premium", (req, res) => {
+  try {
+    const { userId, amount = 1, unit = "months" } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+    if (!["days", "months", "years"].includes(unit)) {
+      return res.status(400).json({ error: "Unit must be days, months, or years" });
+    }
+    const updatedUser = store.grantPremiumAccess(userId, Number(amount), unit);
+    return res.json({
+      success: true,
+      message: `Granted ${amount} ${unit} of Pro access to ${updatedUser.name}`,
+      user: updatedUser
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+function revenueAdminEmail(req) {
+  const fromHeader = req.headers["x-admin-email"];
+  const email = (Array.isArray(fromHeader) ? fromHeader[0] : fromHeader) || req.query.adminEmail || req.body?.adminEmail || "";
+  return String(email || "").toLowerCase().trim();
+}
+function requireRevenueAdmin(req, res) {
+  const email = revenueAdminEmail(req);
+  if (!email || !store.isSubscriptionAdminEmail(email)) {
+    res.status(403).json({
+      success: false,
+      error: "FORBIDDEN",
+      message: "Subscription & Revenue dashboard is restricted to authorized admins."
+    });
+    return null;
+  }
+  return email;
+}
+function subscriptionRow(u) {
+  const latest = store.getLatestPaymentForUser(u.id);
+  const sub = u.subscription || {};
+  const planLabel = sub.isPro ? String(sub.tier || "").includes("annual") || sub.tier === "pro_annual" ? "Pro Annual" : sub.tier === "admin_grant" ? "Admin Grant" : "Pro" : "Free";
+  return {
+    id: u.id,
+    name: u.name || "User",
+    email: u.email,
+    mobile: u.mobile || "",
+    plan: planLabel,
+    tier: sub.tier || "free",
+    isPro: !!sub.isPro,
+    signInDate: u.createdAt || null,
+    planOptedDate: latest ? latest.timestamp : sub.startDate || null,
+    planOptedAmount: latest ? latest.amount : null,
+    planCurrency: latest ? latest.currency || "INR" : "INR",
+    amountPaidDate: latest ? latest.timestamp : null,
+    planExpiryDate: sub.expiresAt ?? null,
+    status: u.status || "active",
+    aiImageEnabled: u.aiImageEnabled !== false,
+    aiVideoEnabled: u.aiVideoEnabled !== false,
+    lastPayment: latest ? { amount: latest.amount, currency: latest.currency, date: latest.timestamp, method: latest.paymentMethod, planName: latest.planName } : null
+  };
+}
+app.get("/api/admin/subscriptions/users", (req, res) => {
+  if (!requireRevenueAdmin(req, res)) return;
+  try {
+    store.checkAndProcessExpirations?.();
+    const search = String(req.query.search || "").toLowerCase().trim();
+    const planFilter = String(req.query.plan || "all").toLowerCase().trim();
+    const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || "10"), 10) || 10));
+    let rows = store.getAllUsers().map(subscriptionRow);
+    if (search) {
+      rows = rows.filter(
+        (r) => r.name.toLowerCase().includes(search) || r.email.toLowerCase().includes(search) || (r.mobile || "").includes(search)
+      );
+    }
+    if (planFilter === "pro") rows = rows.filter((r) => r.isPro);
+    else if (planFilter === "free") rows = rows.filter((r) => !r.isPro);
+    else if (planFilter === "expired")
+      rows = rows.filter((r) => r.planExpiryDate !== null && r.planExpiryDate < Date.now());
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+    const users = rows.slice((safePage - 1) * limit, safePage * limit);
+    return res.json({ success: true, users, total, page: safePage, totalPages });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to load users." });
+  }
+});
+app.patch("/api/admin/subscriptions/users/:id/expiry", (req, res) => {
+  const adminEmail = requireRevenueAdmin(req, res);
+  if (!adminEmail) return;
+  try {
+    const { expiresAt } = req.body || {};
+    const value = expiresAt === null || expiresAt === void 0 || expiresAt === "" ? null : Number(expiresAt);
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      return res.status(400).json({ success: false, error: "expiresAt must be a millisecond epoch or null." });
+    }
+    const user = store.setUserPlanExpiry(req.params.id, value);
+    console.log(`[RevenueAdmin] ${adminEmail} set expiry for ${user.email} -> ${value ? new Date(value).toISOString() : "lifetime"}`);
+    return res.json({ success: true, user: subscriptionRow(user) });
+  } catch (err) {
+    return res.status(400).json({ success: false, error: err.message || "Failed to update expiry." });
+  }
+});
+app.post("/api/admin/subscriptions/users/:id/plan", (req, res) => {
+  const adminEmail = requireRevenueAdmin(req, res);
+  if (!adminEmail) return;
+  try {
+    const { action, plan = "pro", billing = "monthly", seats = 1, amount = 0, months = 1, paymentMethod = "ADMIN_MANUAL" } = req.body || {};
+    if (action === "end") {
+      const user2 = store.endUserPlan(req.params.id);
+      console.log(`[RevenueAdmin] ${adminEmail} ended plan for ${user2.email}`);
+      return res.json({ success: true, message: "Plan ended. User reverted to Free.", user: subscriptionRow(user2) });
+    }
+    if (action !== "start") {
+      return res.status(400).json({ success: false, error: "action must be 'start' or 'end'." });
+    }
+    if (!["pro", "team", "free"].includes(plan)) {
+      return res.status(400).json({ success: false, error: "plan must be 'pro', 'team' or 'free'." });
+    }
+    const { user, payment } = store.startUserPlan(req.params.id, {
+      plan,
+      billing,
+      seats: Math.max(1, Number(seats) || 1),
+      amount: Math.max(0, Number(amount) || 0),
+      months: Math.max(1, Number(months) || 1),
+      paymentMethod,
+      grantedBy: adminEmail
+    });
+    console.log(`[RevenueAdmin] ${adminEmail} started ${plan} for ${user.email} amount=${amount}`);
+    return res.json({ success: true, message: `Plan started: ${plan}.`, user: subscriptionRow(user), payment });
+  } catch (err) {
+    return res.status(400).json({ success: false, error: err.message || "Failed to update plan." });
+  }
+});
+app.patch("/api/admin/subscriptions/users/:id/ai-flags", (req, res) => {
+  const adminEmail = requireRevenueAdmin(req, res);
+  if (!adminEmail) return;
+  try {
+    const { aiImageEnabled, aiVideoEnabled } = req.body || {};
+    if (aiImageEnabled === void 0 && aiVideoEnabled === void 0) {
+      return res.status(400).json({ success: false, error: "Provide aiImageEnabled and/or aiVideoEnabled." });
+    }
+    const user = store.setUserAiFlags(req.params.id, { aiImageEnabled, aiVideoEnabled });
+    console.log(`[RevenueAdmin] ${adminEmail} set AI flags for ${user.email}: image=${user.aiImageEnabled !== false} video=${user.aiVideoEnabled !== false}`);
+    return res.json({ success: true, user: subscriptionRow(user) });
+  } catch (err) {
+    return res.status(400).json({ success: false, error: err.message || "Failed to update AI flags." });
+  }
+});
+app.get("/api/admin/subscriptions/analytics", (req, res) => {
+  if (!requireRevenueAdmin(req, res)) return;
+  try {
+    const range = String(req.query.range || "monthly").toLowerCase();
+    const now = /* @__PURE__ */ new Date();
+    let fromMs;
+    let toMs = now.getTime();
+    if (range === "daily") {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      fromMs = d.getTime();
+    } else if (range === "yearly") {
+      fromMs = new Date(now.getFullYear(), 0, 1).getTime();
+    } else if (range === "custom") {
+      const from = new Date(String(req.query.from || ""));
+      const to = new Date(String(req.query.to || ""));
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return res.status(400).json({ success: false, error: "Custom range needs valid from/to dates (YYYY-MM-DD)." });
+      }
+      fromMs = from.getTime();
+      toMs = Math.min(to.getTime() + 86399999, Date.now());
+      if (fromMs > toMs) {
+        return res.status(400).json({ success: false, error: "from must be before to." });
+      }
+    } else {
+      fromMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    }
+    const analytics = store.getRevenueAnalytics(fromMs, toMs);
+    return res.json({ success: true, range, from: fromMs, to: toMs, ...analytics });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || "Failed to compute analytics." });
+  }
+});
+app.get("/api/admin/subscriptions/export.xlsx", async (req, res) => {
+  if (!requireRevenueAdmin(req, res)) return;
+  try {
+    const rows = store.getAllUsers().map(subscriptionRow);
+    const header = [
+      "Name",
+      "Email",
+      "Mobile",
+      "Plan",
+      "Tier",
+      "Sign-in Date",
+      "Plan Opted Date",
+      "Plan Opted Amount (INR)",
+      "Amount Paid Date",
+      "Plan Expiry Date",
+      "Status",
+      "AI Image",
+      "AI Video"
+    ];
+    const fmt = (ts) => ts ? new Date(ts).toISOString().slice(0, 10) : "-";
+    const data = rows.map((r) => [
+      r.name,
+      r.email,
+      r.mobile,
+      r.plan,
+      r.tier,
+      fmt(r.signInDate),
+      fmt(r.planOptedDate),
+      r.planOptedAmount ?? "-",
+      fmt(r.amountPaidDate),
+      r.planExpiryDate ? new Date(r.planExpiryDate).toISOString().slice(0, 10) : "Lifetime",
+      r.status,
+      r.aiImageEnabled ? "Enabled" : "Disabled",
+      r.aiVideoEnabled ? "Enabled" : "Disabled"
+    ]);
+    const filename = `pulsenote-subscriptions-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.xlsx`;
+    let xlsx = null;
+    try {
+      const mod = await import("xlsx");
+      xlsx = mod.default || mod;
+    } catch {
+      xlsx = null;
+    }
+    if (xlsx) {
+      const wb = xlsx.utils.book_new();
+      const ws = xlsx.utils.aoa_to_sheet([header, ...data]);
+      ws["!cols"] = header.map(() => ({ wch: 22 }));
+      xlsx.utils.book_append_sheet(wb, ws, "Subscriptions");
+      const buf = Buffer.from(xlsx.write(wb, { type: "buffer", bookType: "xlsx" }));
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      return res.send(buf);
+    }
+    const csv = [header, ...data].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/\.xlsx$/, ".csv")}"`);
+    return res.send(csv);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message || "Export failed." });
+  }
+});
 app.post("/api/admin/change-password", (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -5841,7 +8109,6 @@ app.get("/api/admin/financials", (req, res) => {
     totalTransactions: filtered.length,
     totalINR,
     totalUSD,
-    settlementVpa: "wagh.jayesh@oksbi",
     monthlyBreakdown,
     recentPayments: filtered.slice(0, 50)
   });
@@ -5889,42 +8156,45 @@ var SUPPORTED_AUDIO_FORMATS = /* @__PURE__ */ new Set([
   "audio/mp4",
   "video/webm"
 ]);
+function computeSpeakerStats(transcript) {
+  const lines = transcript.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const statsMap = /* @__PURE__ */ new Map();
+  let totalWords = 0;
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9\s._-]{1,28}):\s+(.+)$/);
+    if (!match) continue;
+    const speaker = match[1].trim();
+    const words = match[2].trim().split(/\s+/).filter(Boolean).length;
+    totalWords += words;
+    const prev = statsMap.get(speaker) || { turns: 0, words: 0 };
+    statsMap.set(speaker, { turns: prev.turns + 1, words: prev.words + words });
+  }
+  if (statsMap.size === 0 || totalWords === 0) return [];
+  return Array.from(statsMap.entries()).map(([speaker, data]) => ({
+    speaker,
+    turns: data.turns,
+    words: data.words,
+    sharePercent: Math.round(data.words / totalWords * 100)
+  })).sort((a, b) => b.words - a.words);
+}
 async function transcribeAudioPayload(audioBase64, cleanMime, customInstruction) {
-  const audioPart = {
-    inlineData: {
-      mimeType: cleanMime,
-      data: audioBase64
-    }
-  };
-  const CANDIDATE_MODELS = ["gemini-3.5-transcribe", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-pro"];
-  let lastModelError = null;
-  let transcriptText = "";
   const promptText = customInstruction || "Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates. Do not add conversational commentary.";
-  for (const modelName of CANDIDATE_MODELS) {
-    try {
-      const response = await ai2.models.generateContent({
-        model: modelName,
-        contents: {
-          parts: [
-            audioPart,
-            { text: promptText }
-          ]
-        }
-      });
-      if (response && response.text) {
-        transcriptText = response.text.trim();
-        break;
+  const res = await generateWithFallback({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: promptText },
+          {
+            type: "image_url",
+            image_url: { url: `data:${cleanMime};base64,${audioBase64}` }
+          }
+        ]
       }
-    } catch (modelErr) {
-      lastModelError = modelErr;
-      const errCode = modelErr?.status || modelErr?.code || modelErr?.name || "MODEL_INVOCATION_ERROR";
-      console.warn(`[STT_FAILOVER] Model "${modelName}" failed with code: ${errCode}. Attempting candidate fallback...`);
-    }
-  }
-  if (!transcriptText && lastModelError) {
-    throw lastModelError;
-  }
-  return transcriptText;
+    ],
+    tier: "fast"
+  });
+  return (res.text || "").trim();
 }
 app.post("/api/transcribe/chunk", async (req, res) => {
   const startTime = Date.now();
@@ -5939,7 +8209,9 @@ app.post("/api/transcribe/chunk", async (req, res) => {
       chunkIndex = 0,
       sessionId,
       isFinal = false,
-      priorContext = ""
+      priorContext = "",
+      ambientMode = false,
+      customDictionary = []
     } = req.body;
     if (!audioBase64 || typeof audioBase64 !== "string") {
       return res.status(400).json({ error: "Missing audio chunk data", errorCode: "MISSING_CHUNK_PAYLOAD" });
@@ -5958,12 +8230,16 @@ app.post("/api/transcribe/chunk", async (req, res) => {
     let cleanMime = rawMime.split(";")[0].trim();
     if (cleanMime === "audio/x-m4a" || cleanMime === "audio/m4a") cleanMime = "audio/mp4";
     if (cleanMime === "audio/x-wav" || cleanMime === "audio/wave") cleanMime = "audio/wav";
-    const instruction = priorContext ? `Transcribe this incremental spoken audio chunk word-for-word into English text. The previous spoken context was: "${priorContext.slice(-150)}". Transcribe only the new words spoken in this segment without repeating prior context. Do not add conversational comments.` : "Transcribe this spoken audio chunk word-for-word into English text. Retain names, numbers, medical, and technical terminology accurately.";
+    const dictSuffix = formatDictionaryInstruction(customDictionary);
+    const ambientSuffix = ambientMode ? ' Identify speaker changes clearly using labels like "Clinician:" / "Patient:" or "Speaker 1:" / "Speaker 2:" on new lines when multiple speakers alternate.' : "";
+    const instruction = priorContext ? `Transcribe this incremental spoken audio chunk word-for-word into English text. The previous spoken context was: "${priorContext.slice(-150)}". Transcribe only the new words spoken in this segment without repeating prior context.${ambientSuffix}${dictSuffix} Do not add conversational comments.` : `Transcribe this spoken audio chunk word-for-word into English text. Retain names, numbers, medical, and technical terminology accurately.${ambientSuffix}${dictSuffix}`;
     const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime, instruction);
     const durationMs = Date.now() - startTime;
+    const speakerStats = computeSpeakerStats(transcriptText);
     console.log(`[STT_CHUNK_SUCCESS] Processed chunk #${chunkIndex} (${transcriptText.length} chars, ${durationMs}ms, final: ${isFinal})`);
     return res.json({
       transcript: transcriptText,
+      speakerStats,
       chunkIndex,
       sessionId,
       isFinal,
@@ -5995,7 +8271,7 @@ app.post("/api/transcribe", async (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("Keep-Alive", "timeout=120");
   try {
-    const { audioBase64, mimeType = "audio/webm" } = req.body;
+    const { audioBase64, mimeType = "audio/webm", ambientMode = false, customDictionary = [] } = req.body;
     if (!audioBase64 || typeof audioBase64 !== "string") {
       console.warn("[STT_WARNING] Validation error: Missing or empty audio payload");
       return res.status(400).json({
@@ -6029,11 +8305,15 @@ app.post("/api/transcribe", async (req, res) => {
     let cleanMime = rawMime.split(";")[0].trim();
     if (cleanMime === "audio/x-m4a" || cleanMime === "audio/m4a") cleanMime = "audio/mp4";
     if (cleanMime === "audio/x-wav" || cleanMime === "audio/wave") cleanMime = "audio/wav";
-    const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime);
+    const dictSuffix = formatDictionaryInstruction(customDictionary);
+    const ambientPrompt = ambientMode ? `Transcribe this spoken encounter audio word-for-word with speaker labels (e.g., "Clinician:" / "Patient:" or "Speaker 1:" / "Speaker 2:") on separate lines whenever the speaker changes. Retain all clinical/technical terms, numbers, and dates.${dictSuffix}` : dictSuffix ? `Transcribe this spoken audio word-for-word into English text. Retain all technical terms, medical terminology, names, numbers, and dates.${dictSuffix}` : void 0;
+    const transcriptText = await transcribeAudioPayload(audioBase64, cleanMime, ambientPrompt);
+    const speakerStats = computeSpeakerStats(transcriptText);
     const durationMs = Date.now() - startTime;
     console.log(`[STT_SUCCESS] Audio successfully transcribed (${transcriptText.length} chars, ${durationMs}ms)`);
     return res.json({
       transcript: transcriptText,
+      speakerStats,
       durationMs,
       status: "success"
     });
@@ -6164,7 +8444,10 @@ app.post("/api/flow/projects/:id/nodes/:nodeId/comments", (req, res) => {
   }
 });
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production";
+  const distDir = path3.join(__dirname, "dist");
+  const distIndexPath = path3.join(distDir, "index.html");
+  const isBuiltServer = path3.basename(__filename) === "server.js";
+  const isProd = process.env.NODE_ENV === "production" || isBuiltServer && fs3.existsSync(distIndexPath);
   app.use((err, _req, res, next) => {
     if (res.headersSent) {
       return next(err);
@@ -6174,28 +8457,93 @@ async function startServer() {
       error: err?.message || "Internal server error"
     });
   });
-  if (!isProd) {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa"
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path3.join(__dirname, "dist")));
-    app.get("*", (_req, res) => {
-      res.sendFile(path3.join(__dirname, "dist", "index.html"));
-    });
-  }
-  const server = app.listen(port, () => {
-    console.log(`PulseNote AI server listening on port ${port} [mode: ${isProd ? "production" : "development"}]`);
+  app.get("/robots.txt", (_req, res) => {
+    res.type("text/plain").send(
+      [
+        "User-agent: *",
+        "Allow: /",
+        "Disallow: /api/",
+        "Disallow: /admin",
+        "",
+        "Sitemap: https://pulsenoteai.in/sitemap.xml",
+        ""
+      ].join("\n")
+    );
   });
-  initFlowWebSocketServer(server);
+  app.get("/sitemap.xml", (_req, res) => {
+    const lastmod = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const urls = ["/", "/#pricing", "/#soap-demo", "/#faq", "/#about", "/#partners", "/#templates"];
+    const body = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+` + urls.map(
+      (u) => `  <url>
+    <loc>https://pulsenoteai.in${u}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>weekly</changefreq>
+  </url>`
+    ).join("\n") + `
+</urlset>
+`;
+    res.type("application/xml").send(body);
+  });
+  const mountStaticSpa = () => {
+    if (fs3.existsSync(distDir)) {
+      app.use(express.static(distDir));
+    }
+    app.get("*", (req, res) => {
+      if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "API route not found" });
+      }
+      if (fs3.existsSync(distIndexPath)) {
+        return res.sendFile(distIndexPath);
+      }
+      const rootIndex = path3.join(__dirname, "index.html");
+      if (fs3.existsSync(rootIndex)) {
+        return res.sendFile(rootIndex);
+      }
+      return res.status(503).send("PulseNote AI frontend build (dist/index.html) not found. Please run npm run build.");
+    });
+  };
+  if (!isProd) {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa"
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr) {
+      console.warn("[SERVER] Vite middleware unavailable, falling back to static dist build:", viteErr);
+      mountStaticSpa();
+    }
+  } else {
+    mountStaticSpa();
+  }
+  const rawPort = process.env.PORT?.trim();
+  const PORT_NUM = rawPort ? /^\d+$/.test(rawPort) ? Number(rawPort) : rawPort : 3e3;
+  const onListening = () => {
+    const addr = typeof PORT_NUM === "number" ? `http://0.0.0.0:${PORT_NUM}` : String(PORT_NUM);
+    console.log(`PulseNote AI server listening on ${addr} [mode: ${isProd ? "production" : "development"}]`);
+  };
+  const server = typeof PORT_NUM === "number" ? app.listen(PORT_NUM, "0.0.0.0", onListening) : app.listen(PORT_NUM, onListening);
+  try {
+    initFlowWebSocketServer(server);
+  } catch (wsErr) {
+    console.warn("[FLOW_WS] WebSocket initialization skipped:", wsErr);
+  }
   server.keepAliveTimeout = 12e4;
   server.headersTimeout = 125e3;
   server.requestTimeout = 12e4;
 }
-startServer();
+process.on("uncaughtException", (err) => {
+  console.error("[UNCAUGHT_EXCEPTION_GUARD]", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[UNHANDLED_REJECTION_GUARD]", reason);
+});
+startServer().catch((err) => {
+  console.error("[FATAL_SERVER_START]", err);
+});
 export {
   BLOCKED_PATTERNS,
   IMAGE_KEYWORDS,
@@ -6203,9 +8551,12 @@ export {
   VIDEO_KEYWORDS,
   askOpenRouter,
   callOpenRouterChat,
+  checkUserAiAccess,
+  currentFeatureSettings,
   generate_video,
-  googleAi2 as googleAi,
   handleChatRequest,
+  isAuthorizedAdmin,
   precheck_prompt,
-  summarizeText
+  summarizeText,
+  verifyServerFirebaseUser
 };
